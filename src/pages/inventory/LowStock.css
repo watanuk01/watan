@@ -1,0 +1,303 @@
+/* ═══════════════════════════════════════════
+   LOW STOCK MONITORING PAGE
+   ═══════════════════════════════════════════ */
+
+/* ─── Stat Cards ─── */
+.low-stock-stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--space-3);
+    margin-bottom: var(--space-4);
+}
+
+@media (max-width: 768px) {
+    .low-stock-stats {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+.ls-stat {
+    background: var(--color-surface);
+    border: 1px solid;
+    border-radius: var(--radius-lg);
+    padding: 16px 20px;
+    text-align: center;
+}
+
+.ls-stat-val {
+    font-size: 2rem;
+    font-weight: 800;
+    line-height: 1;
+    margin-bottom: 6px;
+}
+
+.ls-stat-label {
+    font-size: 12px;
+    color: var(--color-text-muted);
+    font-weight: 500;
+}
+
+/* ─── Tab Bar ─── */
+.ls-tabs {
+    display: flex;
+    gap: 4px;
+    border-bottom: 2px solid var(--color-border);
+    margin-bottom: var(--space-4);
+}
+
+.ls-tab {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 18px;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    font-size: var(--text-sm);
+    font-weight: 500;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    transition: all 0.15s;
+    font-family: inherit;
+}
+
+.ls-tab:hover {
+    color: var(--color-text);
+    background: var(--color-surface-hover);
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+
+.ls-tab.active {
+    color: var(--color-primary);
+    border-bottom-color: var(--color-primary);
+    font-weight: 600;
+}
+
+.ls-tab-badge {
+    background: #ef4444;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 999px;
+    min-width: 18px;
+    text-align: center;
+}
+
+/* ─── Filter Bar ─── */
+.ls-filter-bar {
+    display: flex;
+    gap: 6px;
+    margin-bottom: var(--space-3);
+    flex-wrap: wrap;
+}
+
+.ls-filter-btn {
+    padding: 6px 14px;
+    background: transparent;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    font-size: 12px;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    transition: all 0.15s;
+    font-family: inherit;
+}
+
+.ls-filter-btn:hover {
+    background: var(--color-surface-hover);
+    color: var(--color-text);
+}
+
+.ls-filter-btn.active {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+    color: #fff;
+    font-weight: 600;
+}
+
+/* ─── Priority Badge ─── */
+.ls-priority-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+/* ─── Threshold Editor ─── */
+.threshold-editor {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.threshold-input {
+    width: 70px;
+    padding: 4px 8px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg);
+    color: var(--color-text);
+    font-size: 13px;
+    text-align: center;
+}
+
+.threshold-input:focus {
+    outline: none;
+    border-color: var(--color-primary);
+}
+
+/* ─── Section ─── */
+.ls-section {
+    margin-top: 0;
+}
+
+/* ─── Restaurant Cards ─── */
+.restaurant-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: var(--space-4);
+}
+
+.restaurant-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 18px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.restaurant-card:hover {
+    border-color: var(--color-primary);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+}
+
+.restaurant-card-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-md);
+    background: linear-gradient(135deg, var(--color-primary), var(--color-primary-dark));
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+/* ─── Replenishment Panel (inside modal) ─── */
+.replenish-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.replenish-existing-order {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    color: var(--color-text);
+}
+
+.replenish-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.replenish-table th {
+    padding: 10px 12px;
+    text-align: left;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--color-text-muted);
+    border-bottom: 1px solid var(--color-border);
+}
+
+.replenish-table td {
+    padding: 12px;
+    border-bottom: 1px solid var(--color-border-light);
+    vertical-align: middle;
+}
+
+.replenish-table tr:last-child td {
+    border-bottom: none;
+}
+
+.replenish-table tr:hover td {
+    background: var(--color-surface-hover);
+}
+
+.replenish-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-top: 14px;
+    border-top: 1px solid var(--color-border);
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+/* ─── Qty Input Group ─── */
+.qty-input-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.qty-btn {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+    color: var(--color-text-muted);
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.12s;
+    flex-shrink: 0;
+}
+
+.qty-btn:hover {
+    background: var(--color-surface-hover);
+    color: var(--color-text);
+}
+
+.qty-input {
+    width: 60px;
+    padding: 4px 6px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg);
+    color: var(--color-text);
+    font-size: 13px;
+    text-align: center;
+    font-family: inherit;
+}
+
+.qty-input:focus {
+    outline: none;
+    border-color: var(--color-primary);
+}

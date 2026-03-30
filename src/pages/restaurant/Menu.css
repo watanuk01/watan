@@ -1,0 +1,474 @@
+/* ═══════════════════════════════════════════════════
+   MENU MANAGEMENT STYLES
+   ═══════════════════════════════════════════════════ */
+
+/* ─── Menu Card Grid ─── */
+.menu-card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: var(--space-4);
+    margin-bottom: var(--space-5);
+}
+
+/* ─── Menu Card ─── */
+.menu-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-4);
+    transition: all 0.2s ease;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+}
+
+.menu-card:hover {
+    border-color: var(--color-primary);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+}
+
+.menu-card.inactive {
+    opacity: 0.55;
+    border-style: dashed;
+}
+
+.menu-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+}
+
+.menu-card-cat {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    background: var(--color-bg);
+    padding: 2px 8px;
+    border-radius: var(--radius-full);
+    white-space: nowrap;
+}
+
+.menu-card-name {
+    font-size: var(--text-md);
+    font-weight: 700;
+    color: var(--color-text-primary);
+    margin: 0 0 var(--space-1);
+    line-height: 1.3;
+}
+
+.menu-card-desc {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    line-height: 1.4;
+    margin-bottom: var(--space-3);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    flex: 1;
+}
+
+/* ─── Allergen Badges ─── */
+.allergen-row {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-bottom: var(--space-3);
+}
+
+.allergen-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    background: rgba(245, 158, 11, 0.1);
+    color: #f59e0b;
+    border: 1px solid rgba(245, 158, 11, 0.2);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.allergen-badge.tag-d { background: rgba(59,130,246,.1); color: #3b82f6; border-color: rgba(59,130,246,.2); }
+.allergen-badge.tag-g { background: rgba(234,179,8,.1);  color: #b45309; border-color: rgba(234,179,8,.2); }
+.allergen-badge.tag-e { background: rgba(249,115,22,.1); color: #ea580c; border-color: rgba(249,115,22,.2); }
+.allergen-badge.tag-n { background: rgba(168,85,247,.1); color: #9333ea; border-color: rgba(168,85,247,.2); }
+.allergen-badge.tag-s { background: rgba(34,197,94,.1);  color: #16a34a; border-color: rgba(34,197,94,.2); }
+.allergen-badge.tag-v { background: rgba(34,197,94,.1);  color: #16a34a; border-color: rgba(34,197,94,.2); }
+
+/* ─── Portion Pills ─── */
+.menu-card-portions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: var(--space-3);
+}
+
+.portion-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: var(--text-xs);
+    padding: 3px 10px;
+    border-radius: var(--radius-full);
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    color: var(--color-text-secondary);
+}
+
+.portion-pill .portion-price {
+    font-weight: 700;
+    color: var(--color-primary);
+}
+
+/* ─── Card Footer ─── */
+.menu-card-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-top: 1px solid var(--color-divider);
+    padding-top: var(--space-3);
+    margin-top: auto;
+}
+
+.menu-card-actions {
+    display: flex;
+    gap: 4px;
+}
+
+.menu-active-badge {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: var(--radius-full);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.menu-active-badge.active {
+    background: rgba(34, 197, 94, 0.1);
+    color: #22c55e;
+    border: 1px solid rgba(34, 197, 94, 0.2);
+}
+
+.menu-active-badge.inactive {
+    background: rgba(148, 163, 184, 0.1);
+    color: #94a3b8;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+/* ─── Recipe Builder (in form modal) ─── */
+.portion-block {
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-4);
+    margin-bottom: var(--space-4);
+}
+
+.portion-block-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-3);
+}
+
+.portion-block-title {
+    font-size: var(--text-sm);
+    font-weight: 700;
+    color: var(--color-text-primary);
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.recipe-row {
+    display: grid;
+    grid-template-columns: 1fr 100px 80px 40px;
+    gap: var(--space-2);
+    align-items: center;
+    padding: var(--space-2) 0;
+    border-bottom: 1px solid var(--color-divider);
+}
+
+.recipe-row:last-child {
+    border-bottom: none;
+}
+
+.recipe-row .recipe-item-name {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--color-text-primary);
+}
+
+.recipe-row .recipe-item-type {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+}
+
+/* ─── Allergen Checkbox Grid (in form) ─── */
+.allergen-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: var(--space-2);
+}
+
+.allergen-check {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    font-size: var(--text-sm);
+}
+
+.allergen-check:hover {
+    border-color: var(--color-primary);
+    background: rgba(var(--color-primary-rgb, 99, 102, 241), 0.04);
+}
+
+.allergen-check.selected {
+    border-color: var(--color-primary);
+    background: rgba(var(--color-primary-rgb, 99, 102, 241), 0.08);
+    font-weight: 600;
+}
+
+/* ─── Ingredient Picker Dropdown ─── */
+.ingredient-picker {
+    position: relative;
+}
+
+.ingredient-picker-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 50;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    max-height: 220px;
+    overflow-y: auto;
+    margin-top: 4px;
+}
+
+.ingredient-picker-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-2) var(--space-3);
+    cursor: pointer;
+    transition: background 0.1s;
+    font-size: var(--text-sm);
+    border-bottom: 1px solid var(--color-divider);
+}
+
+.ingredient-picker-item:hover {
+    background: var(--color-bg);
+}
+
+.ingredient-picker-item:last-child {
+    border-bottom: none;
+}
+
+.ingredient-picker-item .ing-meta {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+}
+
+/* ─── Empty State ─── */
+.menu-empty {
+    text-align: center;
+    padding: var(--space-12);
+}
+
+.menu-empty-icon {
+    font-size: 56px;
+    opacity: 0.3;
+    margin-bottom: var(--space-4);
+}
+
+/* ─── Form Steps ─── */
+.menu-form-steps {
+    display: flex;
+    gap: var(--space-3);
+    margin-bottom: var(--space-5);
+    padding-bottom: var(--space-3);
+    border-bottom: 1px solid var(--color-divider);
+}
+
+.menu-form-step {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+    font-weight: 500;
+}
+
+.menu-form-step.active {
+    color: var(--color-primary);
+    font-weight: 700;
+}
+
+.menu-form-step.completed {
+    color: var(--color-success);
+}
+
+.menu-form-step-num {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    background: var(--color-bg);
+    border: 2px solid var(--color-border);
+}
+
+.menu-form-step.active .menu-form-step-num {
+    background: var(--color-primary);
+    color: #fff;
+    border-color: var(--color-primary);
+}
+
+.menu-form-step.completed .menu-form-step-num {
+    background: var(--color-success);
+    color: #fff;
+    border-color: var(--color-success);
+}
+
+/* ─── Portion Name/Price/Cost Grid ─── */
+.portion-fields-grid {
+    display: grid;
+    grid-template-columns: 2fr 130px 130px;
+    gap: var(--space-3);
+    margin-bottom: var(--space-3);
+}
+
+/* ─── Step 1: Two-column layout ─── */
+.menu-form-2col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-4);
+    margin-bottom: var(--space-4);
+}
+
+/* ═══ Menu Responsive ═══ */
+@media (max-width: 768px) {
+    .menu-card-grid {
+        grid-template-columns: 1fr;
+        gap: var(--space-3);
+    }
+
+    .menu-card {
+        padding: var(--space-3);
+    }
+
+    .menu-card-name {
+        font-size: var(--text-sm);
+    }
+
+    .portion-pill {
+        font-size: 11px;
+        padding: 2px 8px;
+    }
+
+    .portion-block {
+        padding: var(--space-3);
+    }
+
+    .portion-block-header {
+        flex-wrap: wrap;
+        gap: var(--space-2);
+    }
+
+    .menu-form-steps {
+        gap: var(--space-2);
+    }
+
+    .menu-form-step {
+        font-size: var(--text-xs);
+    }
+
+    .allergen-grid {
+        grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    }
+
+    .menu-form-2col {
+        grid-template-columns: 1fr;
+    }
+
+    .portion-fields-grid {
+        grid-template-columns: 1fr;
+    }
+
+    /* Ingredient picker larger on mobile */
+    .ingredient-picker-dropdown {
+        max-height: 200px;
+    }
+
+    .recipe-row {
+        grid-template-columns: 1fr 70px 80px 60px 28px;
+        gap: var(--space-1);
+    }
+
+    .recipe-row .recipe-item-name {
+        font-size: var(--text-xs);
+    }
+
+    .menu-empty {
+        padding: var(--space-6);
+    }
+
+    .menu-empty-icon {
+        font-size: 40px;
+    }
+}
+
+@media (max-width: 480px) {
+    .menu-card-grid {
+        gap: var(--space-2);
+    }
+
+    .menu-card-footer {
+        flex-direction: column;
+        gap: var(--space-2);
+        align-items: stretch;
+    }
+
+    .menu-card-actions {
+        justify-content: flex-end;
+    }
+
+    .allergen-badge {
+        font-size: 9px;
+        padding: 1px 4px;
+    }
+
+    .portion-fields-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .recipe-row {
+        grid-template-columns: 1fr;
+        padding: var(--space-2);
+    }
+
+    .recipe-row > *:first-child {
+        grid-column: 1 / -1;
+    }
+}

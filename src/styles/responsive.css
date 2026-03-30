@@ -1,0 +1,907 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   WATAN — COMPREHENSIVE MOBILE RESPONSIVE STYLES
+   Breakpoints:
+     • Tablet:   ≤ 1024px  (sidebar overlay, layout adjustments)
+     • Mobile L: ≤ 768px   (single-column, stack controls)
+     • Mobile S: ≤ 480px   (compact everything)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ═══════════════════════════════════════════
+   TABLET  (≤ 1024px)
+   ═══════════════════════════════════════════ */
+@media (max-width: 1024px) {
+
+    /* ─── Global Content ─── */
+    .dashboard-content {
+        padding: var(--space-4) var(--space-3);
+    }
+
+    .page-content {
+        padding: var(--space-4);
+    }
+
+    /* ─── TopBar ─── */
+    .topbar-center {
+        display: none;
+    }
+
+    .topbar .user-info {
+        display: none;
+    }
+
+    .topbar-user-btn {
+        padding: var(--space-2);
+    }
+
+    /* ─── Stats Grid (all pages) ─── */
+    .stats-grid,
+    .dashboard-stats,
+    .analytics-stats {
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: var(--space-3);
+    }
+
+    /* ─── Orders Toolbar ─── */
+    .orders-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .toolbar-left,
+    .toolbar-right {
+        flex-direction: column;
+        gap: var(--space-3);
+    }
+
+    .search-box {
+        max-width: none;
+        min-width: auto;
+    }
+
+    .filter-group {
+        flex-wrap: wrap;
+    }
+
+    .view-toggle-group {
+        min-width: auto;
+        width: 100%;
+    }
+
+    /* ─── Status Tabs (scrollable) ─── */
+    .orders-status-tabs {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    /* ─── Pool Grid (deliveries) ─── */
+    .pool-grid {
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    }
+
+    /* ─── Production / Purchase Grids ─── */
+    .production-grid,
+    .purchase-grid,
+    .batch-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    /* ─── Menu Card Grid ─── */
+    .menu-card-grid {
+        grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    }
+
+    /* ─── Modals ─── */
+    .modal-overlay {
+        padding: var(--space-3);
+    }
+
+    .modal {
+        max-height: 95vh;
+    }
+
+    .modal-lg,
+    .modal-xl {
+        max-width: 100%;
+    }
+
+    .modal-header {
+        padding: var(--space-4) var(--space-4);
+    }
+
+    .modal-body {
+        padding: var(--space-4);
+    }
+
+    .modal-footer {
+        padding: var(--space-3) var(--space-4);
+    }
+
+    /* ─── Delivery Analytics Filters ─── */
+    .analytics-filters-row,
+    .delivery-analytics-filters {
+        flex-wrap: wrap;
+        gap: var(--space-2);
+    }
+
+    .analytics-filters-row > *,
+    .delivery-analytics-filters > * {
+        flex: 1 1 auto;
+        min-width: 120px;
+    }
+
+    /* ─── Custom Date Inputs ─── */
+    .custom-date-inputs {
+        flex-wrap: wrap;
+    }
+
+    /* ─── Cart Sidebar ─── */
+    .cart-sidebar {
+        position: static;
+    }
+
+    /* ─── Category Tabs (scroll) ─── */
+    .type-tabs {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        flex-wrap: nowrap;
+        padding-bottom: var(--space-2);
+    }
+
+    .type-tab {
+        flex: 0 0 auto;
+        white-space: nowrap;
+    }
+}
+
+/* ═══════════════════════════════════════════
+   MOBILE LARGE  (≤ 768px)
+   ═══════════════════════════════════════════ */
+@media (max-width: 768px) {
+
+    /* ─── Dashboard Content ─── */
+    .dashboard-content {
+        padding: var(--space-3) var(--space-2);
+    }
+
+    .page-content {
+        padding: var(--space-3);
+    }
+
+    /* ─── Page Header ─── */
+    .page-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-3);
+    }
+
+    .page-header > div:last-child {
+        width: 100%;
+        display: flex;
+        gap: var(--space-2);
+    }
+
+    .page-header .btn {
+        flex: 1;
+        justify-content: center;
+    }
+
+    .page-title {
+        font-size: var(--text-xl);
+    }
+
+    /* ─── Stats Cards ─── */
+    .stats-grid,
+    .dashboard-stats,
+    .analytics-stats {
+        grid-template-columns: 1fr 1fr !important;
+        gap: var(--space-2);
+    }
+
+    .stats-card {
+        padding: var(--space-4);
+    }
+
+    .stats-card-value {
+        font-size: var(--text-2xl);
+    }
+
+    /* ─── TopBar ─── */
+    .topbar {
+        padding: 0 var(--space-3);
+        gap: var(--space-2);
+    }
+
+    .topbar-title h1 {
+        font-size: var(--text-sm);
+    }
+
+    .topbar-icon-btn {
+        width: 36px;
+        height: 36px;
+        font-size: 1.1rem;
+    }
+
+    /* ─── Data Tables ─── */
+    .data-table-wrapper,
+    .orders-table-wrapper {
+        border-radius: var(--radius-md);
+    }
+
+    .data-table {
+        min-width: 600px;
+    }
+
+    .data-table th,
+    .data-table td {
+        padding: var(--space-2) var(--space-3);
+        font-size: var(--text-xs);
+    }
+
+    /* ─── Forms (2-col → 1-col) ─── */
+    .form-row {
+        flex-direction: column;
+    }
+
+    /* ─── Inventory Grid ─── */
+    .inventory-grid,
+    .stock-grid {
+        grid-template-columns: 1fr;
+    }
+
+    /* ─── Pool Cards ─── */
+    .pool-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .pool-card {
+        padding: var(--space-4);
+    }
+
+    /* ─── Production / Purchase ─── */
+    .production-grid,
+    .purchase-grid,
+    .batch-grid {
+        grid-template-columns: 1fr;
+    }
+
+    /* ─── Menu Cards ─── */
+    .menu-card-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .menu-card-portions {
+        flex-wrap: wrap;
+    }
+
+    /* ─── Filters Bar ─── */
+    .filters-bar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: var(--space-2);
+    }
+
+    .search-filter {
+        max-width: none;
+        min-width: auto;
+    }
+
+    .filter-group {
+        width: 100%;
+        flex-wrap: wrap;
+        gap: var(--space-2);
+    }
+
+    .filter-select {
+        min-width: auto;
+        flex: 1;
+    }
+
+    /* ─── Search Bar ─── */
+    .search-bar {
+        min-width: auto;
+    }
+
+    /* ─── Category Chips ─── */
+    .category-chips {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        flex-wrap: nowrap;
+        padding-bottom: var(--space-2);
+    }
+
+    .category-chip {
+        flex: 0 0 auto;
+    }
+
+    /* ─── Orders Status Tabs ─── */
+    .orders-status-tabs {
+        gap: var(--space-1);
+        padding: var(--space-1);
+    }
+
+    .status-tab {
+        padding: var(--space-2) var(--space-3);
+        font-size: var(--text-xs);
+    }
+
+    /* ─── Place Order Layout ─── */
+    .place-order-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .catalog-header {
+        padding: var(--space-3) var(--space-4);
+    }
+
+    .catalog-items {
+        padding: var(--space-3) var(--space-4);
+    }
+
+    .cart-header {
+        padding: var(--space-3) var(--space-4);
+    }
+
+    .cart-items {
+        padding: var(--space-3) var(--space-4);
+    }
+
+    .cart-summary {
+        padding: var(--space-3) var(--space-4);
+    }
+
+    .cart-actions {
+        padding: var(--space-3) var(--space-4);
+    }
+
+    /* ─── Order History Card ─── */
+    .order-card-header {
+        flex-direction: column;
+        gap: var(--space-2);
+        align-items: flex-start;
+    }
+
+    /* ─── Modal Content ─── */
+    .modal-header h2 {
+        font-size: var(--text-base);
+    }
+
+    .modal-footer {
+        flex-direction: column-reverse;
+    }
+
+    .modal-footer .btn {
+        width: 100%;
+        justify-content: center;
+    }
+
+    /* ─── Menu Form — Portion Grid ─── */
+    .portion-block .form-group {
+        min-width: 0;
+    }
+
+    /* ─── Upload Zone ─── */
+    .upload-zone {
+        padding: var(--space-6);
+    }
+
+    /* ─── Recipe Table ─── */
+    .recipe-table {
+        font-size: var(--text-xs);
+    }
+
+    .ingredient-qty-input {
+        width: 50px !important;
+    }
+
+    /* ─── View Toggle ─── */
+    .view-toggle-group {
+        min-width: auto;
+    }
+
+    .view-toggle-btn {
+        min-width: auto;
+        padding: var(--space-2) var(--space-2);
+        font-size: var(--text-xs);
+    }
+
+    /* ─── Delivery Analytics ─── */
+    .analytics-chart-container {
+        height: 250px !important;
+    }
+
+    /* ─── Low Stock Page ─── */
+    .low-stock-grid {
+        grid-template-columns: 1fr;
+    }
+
+    /* ─── Invoices ─── */
+    .invoice-grid {
+        grid-template-columns: 1fr;
+    }
+
+    /* ─── User Management ─── */
+    .user-grid {
+        grid-template-columns: 1fr;
+    }
+
+    /* ─── Waste Management ─── */
+    .waste-grid {
+        grid-template-columns: 1fr;
+    }
+
+    /* ─── Notification Page ─── */
+    .notification-card {
+        padding: var(--space-3);
+    }
+
+    /* ─── Profile Page ─── */
+    .profile-grid {
+        grid-template-columns: 1fr;
+    }
+
+    /* ─── Settings Page ─── */
+    .settings-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ═══════════════════════════════════════════
+   MOBILE SMALL  (≤ 480px)
+   ═══════════════════════════════════════════ */
+@media (max-width: 480px) {
+
+    /* ─── Page Content ─── */
+    .dashboard-content {
+        padding: var(--space-2);
+    }
+
+    .page-content {
+        padding: var(--space-2);
+    }
+
+    /* ─── TopBar ─── */
+    .topbar {
+        padding: 0 var(--space-2);
+        height: 52px;
+    }
+
+    .topbar-menu-btn {
+        width: 36px;
+        height: 36px;
+    }
+
+    .topbar-right {
+        gap: var(--space-1);
+    }
+
+    .topbar-icon-btn {
+        width: 32px;
+        height: 32px;
+        font-size: 1rem;
+    }
+
+    /* ─── Page Header ─── */
+    .page-title {
+        font-size: var(--text-lg);
+    }
+
+    .page-subtitle {
+        font-size: var(--text-xs);
+    }
+
+    /* ─── Stats Cards ─── */
+    .stats-grid,
+    .dashboard-stats,
+    .analytics-stats {
+        grid-template-columns: 1fr 1fr !important;
+        gap: var(--space-2);
+    }
+
+    .stats-card {
+        padding: var(--space-3);
+    }
+
+    .stats-card-icon {
+        width: 36px;
+        height: 36px;
+        font-size: var(--text-base);
+    }
+
+    .stats-card-value {
+        font-size: var(--text-xl);
+    }
+
+    .stats-card-label {
+        font-size: 10px;
+    }
+
+    /* ─── Buttons ─── */
+    .btn-md {
+        padding: var(--space-2) var(--space-4);
+        font-size: var(--text-xs);
+    }
+
+    .btn-lg {
+        padding: var(--space-3) var(--space-5);
+        font-size: var(--text-sm);
+    }
+
+    /* ─── Forms ─── */
+    .form-label {
+        font-size: var(--text-xs);
+    }
+
+    .form-input,
+    .form-select,
+    .form-textarea {
+        padding: var(--space-2) var(--space-3);
+        font-size: var(--text-sm);
+    }
+
+    /* ─── Modals ─── */
+    .modal-overlay {
+        padding: var(--space-2);
+        align-items: flex-end;
+    }
+
+    .modal {
+        max-height: 92vh;
+        border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    }
+
+    .modal-sm,
+    .modal-md {
+        max-width: 100%;
+    }
+
+    .modal-header {
+        padding: var(--space-3) var(--space-3);
+    }
+
+    .modal-header h2 {
+        font-size: var(--text-sm);
+        font-weight: 700;
+    }
+
+    .modal-body {
+        padding: var(--space-3);
+    }
+
+    .modal-footer {
+        padding: var(--space-2) var(--space-3);
+    }
+
+    /* ─── Type Tabs ─── */
+    .type-tabs {
+        gap: var(--space-1);
+    }
+
+    .type-tab {
+        padding: var(--space-2) var(--space-3);
+        font-size: var(--text-xs);
+    }
+
+    .type-tab-label {
+        font-size: var(--text-xs);
+    }
+
+    /* ─── Orders ─── */
+    .orders-toolbar {
+        padding: var(--space-3);
+        gap: var(--space-2);
+    }
+
+    .view-toggle-group {
+        flex-direction: column;
+    }
+
+    .view-toggle-btn {
+        min-width: auto;
+    }
+
+    .search-box {
+        min-width: auto;
+        height: 36px;
+    }
+
+    .date-select {
+        height: 36px;
+        min-width: auto;
+        font-size: var(--text-xs);
+    }
+
+    .styled-btn {
+        height: 36px;
+        padding: 0 var(--space-3);
+        font-size: var(--text-xs);
+    }
+
+    /* ─── Card Grids ─── */
+    .stock-grid,
+    .inventory-grid {
+        grid-template-columns: 1fr;
+        gap: var(--space-2);
+    }
+
+    .stock-card,
+    .inventory-card {
+        padding: var(--space-3);
+    }
+
+    .pool-grid {
+        gap: var(--space-3);
+    }
+
+    .pool-card {
+        padding: var(--space-3);
+        gap: var(--space-3);
+    }
+
+    .pool-card-restaurant {
+        font-size: var(--text-base);
+    }
+
+    /* ─── Catalog & Cart (Order from CK) ─── */
+    .catalog-item {
+        flex-wrap: wrap;
+        gap: var(--space-2);
+        padding: var(--space-2) var(--space-3);
+    }
+
+    .catalog-item-price {
+        margin-right: var(--space-2);
+    }
+
+    .add-qty-control input {
+        width: 48px;
+    }
+
+    .cart-item-qty span {
+        width: 24px;
+    }
+
+    /* ─── Order History ─── */
+    .order-history-card {
+        padding: var(--space-3) var(--space-4);
+    }
+
+    .order-card-total {
+        font-size: var(--text-base);
+    }
+
+    /* ─── Menu Cards ─── */
+    .menu-card-grid {
+        gap: var(--space-2);
+    }
+
+    .menu-card {
+        padding: var(--space-3);
+    }
+
+    .menu-card-name {
+        font-size: var(--text-sm);
+    }
+
+    .menu-card-desc {
+        font-size: var(--text-xs);
+    }
+
+    .allergen-row {
+        gap: var(--space-1);
+    }
+
+    .allergen-badge {
+        font-size: 10px;
+        padding: 1px 5px;
+    }
+
+    .portion-pill {
+        font-size: var(--text-xs);
+        padding: var(--space-1) var(--space-2);
+    }
+
+    /* ─── Menu Form Portion Grid ─── */
+    .portion-block > div[style*="grid-template-columns"] {
+        grid-template-columns: 1fr !important;
+    }
+
+    /* ─── Recipe Rows ─── */
+    .recipe-row {
+        grid-template-columns: 1fr !important;
+        gap: var(--space-2) !important;
+        padding: var(--space-2) !important;
+    }
+
+    /* ─── Pagination ─── */
+    .pagination-container {
+        flex-direction: column;
+        gap: var(--space-2);
+    }
+
+    .pagination-per-page {
+        font-size: var(--text-xs);
+    }
+
+    /* ─── Batch Table ─── */
+    .data-table {
+        min-width: 500px;
+    }
+
+    /* ─── Notification Dropdown ─── */
+    .notif-dropdown {
+        width: calc(100vw - 16px);
+        right: -8px;
+    }
+
+    /* ─── User Dropdown ─── */
+    .user-dropdown {
+        width: 220px;
+    }
+
+    /* ─── Upload Zone ─── */
+    .upload-zone {
+        padding: var(--space-4);
+    }
+
+    .upload-zone-icon {
+        font-size: 32px;
+    }
+
+    /* ─── Delivery Analytics Charts ─── */
+    .analytics-chart-container {
+        height: 200px !important;
+    }
+
+    /* ─── Action Buttons ─── */
+    .btn-action {
+        width: 30px;
+        height: 30px;
+        font-size: 0.9rem;
+    }
+
+    .action-btns {
+        gap: var(--space-1);
+    }
+
+    /* ─── Search Bar ─── */
+    .search-bar {
+        margin-bottom: var(--space-3) !important;
+    }
+
+    .search-bar .search-input {
+        font-size: var(--text-sm);
+    }
+
+    /* ─── Badge ─── */
+    .badge {
+        font-size: 10px;
+        padding: 1px 6px;
+    }
+
+    /* ─── Loading Spinner ─── */
+    .loading-overlay {
+        padding: var(--space-4);
+    }
+
+    /* ─── Login Page ─── */
+    .login-container {
+        padding: var(--space-4);
+    }
+
+    .login-card {
+        padding: var(--space-5);
+    }
+}
+
+/* ═══════════════════════════════════════════
+   INLINE STYLE OVERRIDES VIA DATA ATTRIBUTES
+   (for grids set via inline styles)
+   ═══════════════════════════════════════════ */
+
+/* At 768px, any inline grid with multiple columns should stack */
+@media (max-width: 768px) {
+    /* Stats grids with inline styles (like on dashboard, menu stats) */
+    div[style*="grid-template-columns: repeat(auto-fit"] {
+        grid-template-columns: 1fr 1fr !important;
+        gap: var(--space-2) !important;
+    }
+
+    /* 2-column form grids */
+    div[style*="gridTemplateColumns: '1fr 1fr'"],
+    div[style*="grid-template-columns: 1fr 1fr"] {
+        grid-template-columns: 1fr !important;
+    }
+}
+
+@media (max-width: 480px) {
+    /* 3-column portion grid → single column */
+    div[style*="gridTemplateColumns"] {
+        grid-template-columns: 1fr !important;
+    }
+
+    /* Any flex with gap set inline: reduce gap */
+    div[style*="gap: var(--space-4)"] {
+        gap: var(--space-2) !important;
+    }
+}
+
+/* ═══════════════════════════════════════════
+   TOUCH / INTERACTION IMPROVEMENTS
+   ═══════════════════════════════════════════ */
+@media (hover: none) and (pointer: coarse) {
+    /* Larger touch targets */
+    .btn,
+    .btn-action,
+    .topbar-icon-btn,
+    .topbar-menu-btn,
+    .pagination-btn {
+        min-height: 44px;
+        min-width: 44px;
+    }
+
+    .btn-sm {
+        min-height: 36px;
+        min-width: 36px;
+    }
+
+    /* Remove hover transforms on touch devices */
+    .stock-card:hover,
+    .inventory-card:hover,
+    .menu-card:hover,
+    .pool-card:hover,
+    .stats-card:hover,
+    .order-history-card:hover,
+    .catalog-item:hover {
+        transform: none;
+    }
+
+    /* Disable hover shadows on touch */
+    .stock-card:hover,
+    .inventory-card:hover,
+    .pool-card:hover,
+    .stats-card:hover {
+        box-shadow: none;
+    }
+
+    /* Scrollbar hide for cleaner mobile */
+    .type-tabs::-webkit-scrollbar,
+    .category-chips::-webkit-scrollbar,
+    .orders-status-tabs::-webkit-scrollbar {
+        display: none;
+    }
+
+    .type-tabs,
+    .category-chips,
+    .orders-status-tabs {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+    }
+}
+
+/* ═══════════════════════════════════════════
+   PRINT (hide non-essential UI)
+   ═══════════════════════════════════════════ */
+@media print {
+    .sidebar,
+    .topbar,
+    .sidebar-backdrop,
+    .btn,
+    .btn-action,
+    .btn-refresh,
+    .modal-overlay,
+    .topbar-menu-btn {
+        display: none !important;
+    }
+
+    .dashboard-main {
+        margin-left: 0 !important;
+    }
+
+    .dashboard-content {
+        padding: 0 !important;
+    }
+
+    .page-content {
+        padding: 0 !important;
+    }
+}

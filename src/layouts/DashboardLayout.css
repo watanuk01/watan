@@ -1,0 +1,60 @@
+/* ============================================
+   DASHBOARD LAYOUT
+   ============================================ */
+
+.dashboard-layout {
+    display: flex;
+    min-height: 100vh;
+    background: var(--color-bg-dark);
+}
+
+.dashboard-main {
+    flex: 1;
+    min-width: 0;
+    margin-left: var(--sidebar-width);
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    overflow-x: hidden;
+    transition: margin-left var(--transition-base);
+}
+
+.sidebar-collapsed .dashboard-main {
+    margin-left: var(--sidebar-collapsed-width);
+}
+
+.dashboard-content {
+    flex: 1;
+    padding: var(--space-8);
+    overflow-y: auto;
+    overflow-x: hidden;
+    max-width: var(--content-max-width);
+    width: 100%;
+    box-sizing: border-box;
+    margin: 0 auto;
+}
+
+/* Sidebar Backdrop (mobile) */
+.sidebar-backdrop {
+    display: none;
+}
+
+/* ─── Responsive ─── */
+@media (max-width: 1024px) {
+    .dashboard-main {
+        margin-left: 0;
+    }
+
+    .dashboard-content {
+        padding: var(--space-4);
+    }
+
+    .sidebar-backdrop {
+        display: block;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: calc(var(--z-sticky) + 5);
+        backdrop-filter: blur(2px);
+    }
+}

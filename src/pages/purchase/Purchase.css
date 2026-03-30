@@ -1,0 +1,464 @@
+/* ═══════════════════════════════════════════
+   PURCHASE MODULE STYLES
+   ═══════════════════════════════════════════ */
+
+/* ── Purchase Order Form ── */
+.po-form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-4);
+    margin-bottom: var(--space-6);
+}
+
+.po-form-grid .form-group.full-width {
+    grid-column: 1 / -1;
+}
+
+/* ── Item Selector ── */
+.po-item-selector {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-5);
+    margin-bottom: var(--space-6);
+}
+
+.po-item-selector-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-4);
+}
+
+.po-item-selector-header h3 {
+    font-family: var(--font-heading);
+    font-size: var(--text-lg);
+    color: var(--color-text-primary);
+}
+
+.po-items-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.po-item-row {
+    display: grid;
+    grid-template-columns: 2fr 1fr 100px 100px 80px 40px;
+    gap: var(--space-3);
+    align-items: center;
+    padding: var(--space-3);
+    background: var(--color-bg);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--color-border);
+    transition: all 0.2s;
+}
+
+.po-item-row:hover {
+    border-color: var(--color-primary);
+}
+
+.po-item-row .item-name {
+    font-weight: 600;
+    color: var(--color-text-primary);
+    font-size: var(--text-sm);
+}
+
+.po-item-row .item-meta {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+}
+
+.po-item-row .item-total {
+    font-weight: 700;
+    color: var(--color-primary);
+    font-size: var(--text-sm);
+    text-align: right;
+}
+
+.po-item-row input.qty-input,
+.po-item-row input.price-input {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2);
+    color: var(--color-text-primary);
+    font-size: var(--text-sm);
+    text-align: center;
+    width: 100%;
+}
+
+.po-item-row input.qty-input:focus,
+.po-item-row input.price-input:focus {
+    border-color: var(--color-primary);
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(207, 163, 97, 0.15);
+}
+
+/* Remove row button */
+.po-remove-btn {
+    background: none;
+    border: none;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    font-size: 18px;
+    padding: var(--space-1);
+    border-radius: var(--radius-sm);
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.po-remove-btn:hover {
+    color: var(--color-danger);
+    background: rgba(239, 68, 68, 0.1);
+}
+
+/* ── Order Summary ── */
+.po-summary {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-5);
+    margin-bottom: var(--space-6);
+}
+
+.po-summary-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-2) 0;
+    color: var(--color-text-secondary);
+    font-size: var(--text-sm);
+}
+
+.po-summary-row.total {
+    border-top: 1px solid var(--color-border);
+    margin-top: var(--space-3);
+    padding-top: var(--space-3);
+    font-weight: 700;
+    font-size: var(--text-lg);
+    color: var(--color-primary);
+}
+
+/* ── Add Item Dropdown ── */
+.po-add-item-dropdown {
+    position: relative;
+}
+
+.po-add-item-search {
+    width: 100%;
+    padding: var(--space-3);
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    color: var(--color-text-primary);
+    font-size: var(--text-sm);
+}
+
+.po-add-item-search:focus {
+    border-color: var(--color-primary);
+    outline: none;
+}
+
+.po-add-item-results {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: var(--color-bg-elevated);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    max-height: 250px;
+    overflow-y: auto;
+    z-index: 20;
+    box-shadow: var(--shadow-lg);
+    margin-top: var(--space-1);
+}
+
+.po-add-item-option {
+    padding: var(--space-3);
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: background 0.15s;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.po-add-item-option:last-child {
+    border-bottom: none;
+}
+
+.po-add-item-option:hover {
+    background: var(--color-surface-hover);
+}
+
+.po-add-item-option .item-info {
+    display: flex;
+    flex-direction: column;
+}
+
+.po-add-item-option .item-info .name {
+    font-weight: 600;
+    color: var(--color-text-primary);
+    font-size: var(--text-sm);
+}
+
+.po-add-item-option .item-info .meta {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+}
+
+.po-add-item-option .stock-info {
+    text-align: right;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+}
+
+/* ── Pending Order Cards ── */
+.po-cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+    gap: var(--space-4);
+}
+
+.po-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    transition: all 0.25s;
+}
+
+.po-card:hover {
+    border-color: var(--color-primary);
+    box-shadow: 0 4px 20px rgba(207, 163, 97, 0.08);
+}
+
+.po-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-4);
+    border-bottom: 1px solid var(--color-border);
+}
+
+.po-card-header .po-number {
+    font-family: var(--font-mono, monospace);
+    font-weight: 700;
+    color: var(--color-primary);
+    font-size: var(--text-md);
+}
+
+.po-card-body {
+    padding: var(--space-4);
+}
+
+.po-card-meta {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+}
+
+.po-card-meta-item {
+    display: flex;
+    flex-direction: column;
+}
+
+.po-card-meta-item .label {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.po-card-meta-item .value {
+    font-weight: 600;
+    color: var(--color-text-primary);
+    font-size: var(--text-sm);
+}
+
+.po-card-items-summary {
+    background: var(--color-bg);
+    border-radius: var(--radius-md);
+    padding: var(--space-3);
+    margin-bottom: var(--space-3);
+}
+
+.po-card-items-summary .item-line {
+    display: flex;
+    justify-content: space-between;
+    padding: var(--space-1) 0;
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+}
+
+.po-card-footer {
+    display: flex;
+    gap: var(--space-2);
+    padding: var(--space-4);
+    border-top: 1px solid var(--color-border);
+}
+
+.po-card-footer .btn {
+    flex: 1;
+}
+
+/* ── Receive Modal ── */
+.receive-item-row {
+    display: grid;
+    grid-template-columns: 2fr 90px 90px 130px;
+    gap: var(--space-3);
+    align-items: start;
+    padding: var(--space-4);
+    background: var(--color-bg);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--space-3);
+    border: 1px solid var(--color-border);
+}
+
+.receive-item-row .receive-item-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.receive-item-row .receive-item-name {
+    font-weight: 600;
+    color: var(--color-text-primary);
+    font-size: var(--text-sm);
+}
+
+.receive-item-row .receive-item-meta {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+}
+
+.receive-item-row .receive-field {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.receive-item-row .receive-field label {
+    font-size: 10px;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.receive-item-row .receive-field input {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2);
+    color: var(--color-text-primary);
+    font-size: var(--text-sm);
+    width: 100%;
+}
+
+.receive-item-row .receive-field input:focus {
+    border-color: var(--color-primary);
+    outline: none;
+}
+
+.receive-item-row.raw-meat {
+    border-left: 3px solid #ef4444;
+}
+
+.receive-item-row.grocery {
+    border-left: 3px solid #22c55e;
+}
+
+/* ── History Table Extras ── */
+.po-status-badge {
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: var(--text-xs);
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.po-status-badge.pending {
+    background: rgba(245, 158, 11, 0.12);
+    color: #f59e0b;
+}
+
+.po-status-badge.received {
+    background: rgba(34, 197, 94, 0.12);
+    color: #22c55e;
+}
+
+.po-status-badge.partially_received {
+    background: rgba(59, 130, 246, 0.12);
+    color: #3b82f6;
+}
+
+.po-status-badge.cancelled {
+    background: rgba(239, 68, 68, 0.12);
+    color: #ef4444;
+}
+
+/* ── Detail Modal ── */
+.po-detail-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-4);
+    background: var(--color-bg);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--space-4);
+}
+
+.po-detail-info-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--space-4);
+    margin-bottom: var(--space-5);
+}
+
+.po-detail-info-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.po-detail-info-item .label {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+}
+
+.po-detail-info-item .value {
+    font-weight: 600;
+    color: var(--color-text-primary);
+}
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+    .po-form-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .po-item-row {
+        grid-template-columns: 1fr 1fr;
+        gap: var(--space-2);
+    }
+
+    .po-cards-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .receive-item-row {
+        grid-template-columns: 1fr;
+    }
+
+    .po-detail-info-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+}
