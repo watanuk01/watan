@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import {
     MdInventory2, MdShoppingCart, MdWarning, MdArrowForward,
@@ -53,7 +53,9 @@ const RestaurantDashboard = () => {
     const { currentUser, userProfile } = useAuth();
     const navigate = useNavigate();
     const [loading, setLoading] = useState(true);
-    const restaurantId = currentUser?.uid;
+    const { id } = useParams();
+    const location = useLocation();
+    const restaurantId = id || currentUser?.uid;
 
     /* ─── raw data ─── */
     const [inventoryItems, setInventoryItems] = useState([]);
@@ -491,7 +493,8 @@ const RestaurantDashboard = () => {
         }
     };
 
-    const restaurantName = userProfile?.restaurant_name || userProfile?.name || 'Restaurant';
+    const adminViewRestaurantName = location.state?.restaurantName;
+    const restaurantName = adminViewRestaurantName || userProfile?.restaurant_name || userProfile?.name || 'Restaurant';
 
     /* ═══════════════════════════════════════ RENDER ═══ */
     return (

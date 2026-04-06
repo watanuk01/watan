@@ -147,7 +147,10 @@ const RestaurantDetailPanel = ({ restaurant, onClose, onNavigate }) => {
                 <div className="rest-panel-section">
                     <h4 className="rest-panel-section-title">Quick Actions</h4>
                     <div className="rest-action-grid">
-                        <button className="btn btn-primary btn-sm" onClick={() => onNavigate(`/orders/today`)}>
+                        <button className="btn btn-primary btn-sm" onClick={() => onNavigate(`/restaurants/${restaurant.id}/dashboard`, { state: { restaurantName: restaurant.restaurant_name } })}>
+                            <MdOpenInNew /> View Dashboard
+                        </button>
+                        <button className="btn btn-ghost btn-sm" onClick={() => onNavigate(`/orders/today`)}>
                             <MdShoppingCart /> View Orders
                         </button>
                         <button className="btn btn-ghost btn-sm" onClick={() => onNavigate('/inventory/low-stock')}>
@@ -318,7 +321,7 @@ const RestaurantsPage = () => {
                 <RestaurantDetailPanel
                     restaurant={selected}
                     onClose={() => setSelected(null)}
-                    onNavigate={(path) => { setSelected(null); navigate(path); }} />
+                    onNavigate={(path, options) => { setSelected(null); navigate(path, options); }} />
             )}
         </div>
     );

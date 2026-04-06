@@ -296,6 +296,14 @@ const AppRouter = () => {
                         }
                     />
                     <Route
+                        path="/restaurants/:id/dashboard"
+                        element={
+                            <ProtectedRoute allowedRoles={['admin']}>
+                                <RestaurantDashboard />
+                            </ProtectedRoute>
+                        }
+                    />
+                    <Route
                         path="/notifications/*"
                         element={
                             <NotificationsPage />
