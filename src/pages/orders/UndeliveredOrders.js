@@ -12,6 +12,7 @@ import '../orders/Orders.css';
 const DATE_RANGES = [
     { value: 'all', label: 'All Time' },
     { value: 'today', label: 'Today' },
+    { value: 'yesterday', label: 'Yesterday' },
     { value: '3days', label: 'Last 3 Days' },
     { value: '7days', label: 'Last 7 Days' },
     { value: '30days', label: 'Last 30 Days' },
@@ -43,6 +44,13 @@ const UndeliveredOrders = () => {
             if (dateRange === 'today') {
                 start = new Date();
                 start.setHours(0, 0, 0, 0);
+            } else if (dateRange === 'yesterday') {
+                start = new Date();
+                start.setDate(now.getDate() - 1);
+                start.setHours(0, 0, 0, 0);
+                end = new Date();
+                end.setDate(now.getDate() - 1);
+                end.setHours(23, 59, 59, 999);
             } else if (dateRange === '3days') {
                 start = new Date();
                 start.setDate(now.getDate() - 3);
@@ -65,7 +73,9 @@ const UndeliveredOrders = () => {
 
             const filteredData = data.filter(order => {
                 const orderDate = new Date(order.ready_at || order.created_at);
-                if (dateRange === 'custom' && customStartDate && customEndDate) {
+                if (dateRange === 'yesterday') {
+                    return orderDate >= start && orderDate <= end;
+                } else if (dateRange === 'custom' && customStartDate && customEndDate) {
                     return orderDate >= start && orderDate <= end;
                 } else if (dateRange !== 'all') {
                     return orderDate >= start;

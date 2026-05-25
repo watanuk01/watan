@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Pagination from '../../components/common/Pagination';
 import {
     getItems,
+    getCategories,
     adjustStock,
     adjustStockBatchAware,
     getBatches,
@@ -18,6 +19,7 @@ import {
     MdInventory2,
     MdGridView,
     MdViewList,
+    MdWarning,
 } from 'react-icons/md';
 import toast from 'react-hot-toast';
 import './Inventory.css';
@@ -27,7 +29,10 @@ const CurrentStock = () => {
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
     const [activeType, setActiveType] = useState('all');
+    const [categories, setCategories] = useState([]);
+    const [selectedCategory, setSelectedCategory] = useState('all');
     const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'list'
+    const [lowStockOnly, setLowStockOnly] = useState(false);
     const [adjustModal, setAdjustModal] = useState(null);
     const [adjustQty, setAdjustQty] = useState('');
     const [adjustReason, setAdjustReason] = useState('');
@@ -58,10 +63,43 @@ const CurrentStock = () => {
 
     useEffect(() => { fetchData(); }, [fetchData]);
 
+    // Load categories for the active type
+    const loadCategories = useCallback(async () => {
+        try {
+            if (activeType === 'all') {
+                // Load categories for all types
+                const allCats = await Promise.all(ITEM_TYPES.map(t => getCategories(t.value)));
+                const merged = allCats.flat();
+                // Deduplicate by id
+                const seen = new Set();
+                setCategories(merged.filter(c => { if (seen.has(c.id)) return false; seen.add(c.id); return true; }));
+            } else {
+                const cats = await getCategories(activeType);
+                setCategories(cats);
+            }
+        } catch (err) {
+            console.error('Failed to load categories:', err);
+        }
+    }, [activeType]);
+
+    useEffect(() => {
+        loadCategories();
+        setSelectedCategory('all');
+    }, [loadCategories]);
+
     // Filter by type first, then by search
     const typeFilteredItems = activeType === 'all' ? items : items.filter(i => i.item_type === activeType);
+    const categoryFilteredItems = selectedCategory === 'all'
+        ? typeFilteredItems
+        : typeFilteredItems.filter(i => i.category_id === selectedCategory);
+    const stockFilteredItems = lowStockOnly
+        ? categoryFilteredItems.filter(i => {
+            const threshold = i.low_stock_threshold || i.min_stock || 0;
+            return threshold > 0 && (i.current_stock || 0) <= threshold;
+        })
+        : categoryFilteredItems;
 
-    const filteredItems = typeFilteredItems.filter(item => {
+    const filteredItems = stockFilteredItems.filter(item => {
         if (!searchQuery) return true;
         const q = searchQuery.toLowerCase();
         return item.name?.toLowerCase().includes(q) || item.sku?.toLowerCase().includes(q);
@@ -87,7 +125,7 @@ const CurrentStock = () => {
     });
 
     // Reset page on filter change
-    useEffect(() => { setCurrentPage(1); }, [searchQuery, activeType]);
+    useEffect(() => { setCurrentPage(1); }, [searchQuery, activeType, selectedCategory, lowStockOnly]);
 
     const paginatedItems = filteredItems.slice(
         (currentPage - 1) * itemsPerPage,
@@ -290,20 +328,57 @@ const CurrentStock = () => {
                 ))}
             </div>
 
-            {/* Search */}
-            <div className="search-bar" style={{ marginBottom: 'var(--space-5)' }}>
-                <MdSearch className="search-icon" />
-                <input
-                    className="search-input"
-                    placeholder="Search by name or SKU..."
-                    value={searchQuery}
-                    onChange={e => setSearchQuery(e.target.value)}
-                />
-                {searchQuery && (
-                    <button className="search-clear" onClick={() => setSearchQuery('')}>
-                        <MdClose />
+            {/* Sub-category Chips */}
+            {categories.length > 0 && (
+                <div className="category-chips">
+                    <button
+                        className={`category-chip ${selectedCategory === 'all' ? 'active' : ''}`}
+                        onClick={() => setSelectedCategory('all')}
+                    >
+                        All Categories
                     </button>
-                )}
+                    {categories.map(cat => (
+                        <button
+                            key={cat.id}
+                            className={`category-chip ${selectedCategory === cat.id ? 'active' : ''}`}
+                            onClick={() => setSelectedCategory(cat.id)}
+                        >
+                            {cat.icon} {cat.name}
+                        </button>
+                    ))}
+                </div>
+            )}
+
+            {/* Search + Low Stock Filter */}
+            <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center', marginBottom: 'var(--space-5)', flexWrap: 'wrap' }}>
+                <div className="search-bar" style={{ flex: 1, minWidth: 200, marginBottom: 0 }}>
+                    <MdSearch className="search-icon" />
+                    <input
+                        className="search-input"
+                        placeholder="Search by name or SKU..."
+                        value={searchQuery}
+                        onChange={e => setSearchQuery(e.target.value)}
+                    />
+                    {searchQuery && (
+                        <button className="search-clear" onClick={() => setSearchQuery('')}>
+                            <MdClose />
+                        </button>
+                    )}
+                </div>
+                <button
+                    className={`btn btn-sm ${lowStockOnly ? 'btn-warning' : 'btn-secondary'}`}
+                    onClick={() => setLowStockOnly(prev => !prev)}
+                    style={{
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        ...(lowStockOnly ? {
+                            background: '#f59e0b',
+                            color: '#fff',
+                            borderColor: '#f59e0b',
+                        } : {}),
+                    }}
+                >
+                    <MdWarning /> Low Stock {lowStockCount > 0 && `(${lowStockCount})`}
+                </button>
             </div>
 
             {loading ? (

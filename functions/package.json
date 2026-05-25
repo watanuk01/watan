@@ -4,9 +4,10 @@
     "description": "Cloud Functions for Watan Central Kitchen",
     "main": "index.js",
     "engines": {
-        "node": "18"
+        "node": "22"
     },
     "dependencies": {
+        "axios": "^1.7.0",
         "firebase-admin": "^12.0.0",
         "firebase-functions": "^5.0.0",
         "nodemailer": "^6.9.0",

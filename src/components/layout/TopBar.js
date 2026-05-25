@@ -122,6 +122,7 @@ const TopBar = () => {
             '/restaurant/inventory': 'My Inventory',
             '/restaurant/orders': 'Order History',
             '/restaurant/menu': 'Menu Management',
+            '/restaurant/epos-mapping': 'EPOS Item Mapping',
             '/delivery/dashboard': 'My Deliveries',
             '/delivery/pool': 'Order Pool',
             '/delivery/history': 'Delivery History',

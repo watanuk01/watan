@@ -8,7 +8,7 @@ import { getProductionInvoices } from '../../services/productionService';
 import {
     MdReceipt, MdRefresh, MdFileDownload, MdClose, MdVisibility, MdSearch,
     MdFilterList, MdEdit, MdSave, MdCheckCircle, MdWarning, MdBusinessCenter,
-    MdPictureAsPdf, MdExpandMore,
+    MdPictureAsPdf, MdExpandMore, MdSync,
 } from 'react-icons/md';
 import InvoiceDetail from './InvoiceDetail';
 import ConsolidatedDetailModal from './ConsolidatedDetailModal';
@@ -241,10 +241,10 @@ const InvoicesPage = () => {
                 </div>
                 <div className="card"><div className="data-table-wrapper"><table className="data-table"><thead><tr>
                     <th>INVOICE #</th><th>TYPE</th><th>DATE</th><th>CUSTOMER / ITEM</th><th>ORDER / PROD #</th>
-                    <th style={{ textAlign: 'right' }}>NET</th><th style={{ textAlign: 'right' }}>VAT</th><th style={{ textAlign: 'right' }}>TOTAL</th><th>STATUS</th><th>ACTIONS</th>
+                    <th style={{ textAlign: 'right' }}>NET</th><th style={{ textAlign: 'right' }}>VAT</th><th style={{ textAlign: 'right' }}>TOTAL</th><th>STATUS</th><th>XERO</th><th>ACTIONS</th>
                 </tr></thead><tbody>
-                        {loading ? Array.from({ length: 5 }).map((_, i) => <tr key={i}>{Array.from({ length: 10 }).map((_, j) => <td key={j}><div className="skeleton skeleton-text" /></td>)}</tr>)
-                            : !allInvoices.length ? <tr><td colSpan="10" style={{ textAlign: 'center', padding: 'var(--space-8)', color: 'var(--color-text-muted)' }}>
+                        {loading ? Array.from({ length: 5 }).map((_, i) => <tr key={i}>{Array.from({ length: 11 }).map((_, j) => <td key={j}><div className="skeleton skeleton-text" /></td>)}</tr>)
+                            : !allInvoices.length ? <tr><td colSpan="11" style={{ textAlign: 'center', padding: 'var(--space-8)', color: 'var(--color-text-muted)' }}>
                                 <MdReceipt style={{ fontSize: 36, display: 'block', margin: '0 auto var(--space-2)' }} /> No invoices found
                             </td></tr>
                                 : allInvoices.map(inv => <tr key={inv.id} style={{ cursor: 'pointer' }} onClick={() => handleViewInvoice(inv)}>
@@ -256,6 +256,19 @@ const InvoicesPage = () => {
                                     <td style={{ textAlign: 'right', color: 'var(--color-text-muted)' }}>{formatCurrency(inv.total_vat || inv.vat_amount)}</td>
                                     <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--color-primary)' }}>{formatCurrency(inv.grand_total || inv.total_with_vat)}</td>
                                     <td>{getStatusBadge(inv.status)}</td>
+                                    <td>
+                                        {inv.xero_invoice_id ? (
+                                            <span title={`Xero: ${inv.xero_invoice_number || inv.xero_invoice_id}`} style={{ color: '#13b5ea', fontSize: 16, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                                <MdCheckCircle /> <span style={{ fontSize: 10, fontWeight: 600 }}>Synced</span>
+                                            </span>
+                                        ) : inv.xero_sync_error ? (
+                                            <span title={inv.xero_sync_error} style={{ color: '#ef4444', fontSize: 16, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                                <MdWarning /> <span style={{ fontSize: 10, fontWeight: 600 }}>Error</span>
+                                            </span>
+                                        ) : inv.type === 'order' ? (
+                                            <span style={{ color: 'var(--color-text-muted)', fontSize: 10 }}>—</span>
+                                        ) : null}
+                                    </td>
                                     <td><button className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); handleViewInvoice(inv) }}><MdVisibility /></button></td>
                                 </tr>)}
                     </tbody></table></div></div>
@@ -323,7 +336,17 @@ const InvoicesPage = () => {
             </>)}
 
             {/* Invoice Detail Modal */}
-            {viewInvoice && <InvoiceDetail invoice={viewInvoice} onClose={() => setViewInvoice(null)} supplierDetails={supplierDetails} onUpdated={() => { setViewInvoice(null); if (activeTab === 'all') fetchData(); else fetchConsolidatedData(); }} />}
+            {viewInvoice && <InvoiceDetail invoice={viewInvoice} onClose={() => setViewInvoice(null)} supplierDetails={supplierDetails} onUpdated={(updatedInv) => {
+                if (updatedInv) {
+                    // Update the modal view with fresh data
+                    setViewInvoice(updatedInv);
+                    // Update the invoice in the list so the table reflects changes
+                    setInvoices(prev => prev.map(inv => inv.id === updatedInv.id ? { ...inv, ...updatedInv } : inv));
+                } else {
+                    setViewInvoice(null);
+                    if (activeTab === 'all') fetchData(); else fetchConsolidatedData();
+                }
+            }} />}
 
             {/* Consolidated Detail Modal */}
             {viewGroup && <ConsolidatedDetailModal group={viewGroup} type={consolidatedType} restaurantName={restaurantObj?.name || ''} restaurantEmail={restaurantObj?.email || ''} restaurantAddress={restaurantObj?.address || ''} restaurantPhone={restaurantObj?.phone || ''} supplierDetails={supplierDetails} onClose={() => setViewGroup(null)} onInvoiceUpdated={() => { setViewGroup(null); fetchConsolidatedData(); }} />}

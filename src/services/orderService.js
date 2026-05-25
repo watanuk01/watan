@@ -20,7 +20,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { deductStockFIFO, adjustStock } from './inventoryService';
-import { generateOrderInvoice } from './invoiceService';
+import { generateOrderInvoice, getInvoiceById, updateInvoice } from './invoiceService';
 import { addStockFromDelivery } from './restaurantInventoryService';
 
 // ─── COLLECTION ───
@@ -416,15 +416,74 @@ export const pickupOrder = async (orderId, { verifiedItems, missingItems }) => {
         throw new Error('Order is not in assigned status');
     }
 
+    let updatedItems = order.items || [];
+    let newSubtotal = order.subtotal || 0;
+    let newVatAmount = order.vat_amount || 0;
+    let newTotal = order.total || 0;
+    let newItemCount = order.item_count || 0;
+
+    // Rebuild the order items array so the UI displays the verified quantities correctly
+    if (missingItems && missingItems.length > 0) {
+        updatedItems = updatedItems.map(item => {
+            const verified = (verifiedItems || []).find(vi => vi.item_id === item.item_id);
+            if (verified) {
+                const quantity = verified.quantity;
+                const base_quantity = item.quantity > 0
+                    ? Number(((item.base_quantity || item.quantity) / item.quantity * quantity).toFixed(2))
+                    : quantity;
+                const line_total = quantity * (item.selling_price || 0);
+                const vat_amount = (line_total * (item.vat_rate || 0)) / 100;
+
+                return { ...item, quantity, base_quantity, line_total, vat_amount };
+            }
+            return item;
+        }).filter(item => item.quantity > 0);
+
+        newSubtotal = updatedItems.reduce((sum, item) => sum + (item.line_total || 0), 0);
+        newVatAmount = updatedItems.reduce((sum, item) => sum + (item.vat_amount || 0), 0);
+        newTotal = newSubtotal + newVatAmount;
+        newItemCount = updatedItems.length;
+    }
+
     const orderRef = doc(db, ORDERS, orderId);
     await updateDoc(orderRef, {
         status: 'out_for_delivery',
+        items: updatedItems,
+        item_count: newItemCount,
+        subtotal: Math.round(newSubtotal * 100) / 100,
+        vat_amount: Math.round(newVatAmount * 100) / 100,
+        total: Math.round(newTotal * 100) / 100,
         verified_items: verifiedItems || [],
         missing_items: missingItems || [],
         picked_up_at: serverTimestamp(),
         dispatched_at: serverTimestamp(),
         updated_at: serverTimestamp(),
     });
+
+    // Auto-sync the invoice to reflect the actual received quantities if there are missing items
+    if (order.invoice_id && missingItems && missingItems.length > 0) {
+        try {
+            const invoice = await getInvoiceById(order.invoice_id);
+            if (invoice) {
+                const updatedLineItems = (invoice.line_items || []).map(li => {
+                    const verified = (verifiedItems || []).find(vi => vi.item_id === li.item_id);
+                    if (verified) {
+                        return { ...li, quantity: verified.quantity };
+                    }
+                    return li;
+                }).filter(li => li.quantity > 0);
+
+                await updateInvoice(order.invoice_id, {
+                    line_items: updatedLineItems,
+                    discount_type: invoice.discount_type,
+                    discount_value: invoice.discount_value,
+                    notes: invoice.notes
+                });
+            }
+        } catch (err) {
+            console.error('Failed to sync invoice with pickup discrepancy:', err);
+        }
+    }
 };
 
 /**

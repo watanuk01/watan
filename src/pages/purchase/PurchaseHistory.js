@@ -487,14 +487,14 @@ const PurchaseHistory = () => {
                                                         onClick={(e) => { e.stopPropagation(); setDetailModal(order); }}
                                                         title="View Details"
                                                     >
-                                                        <MdVisibility />
+                                                        <MdVisibility size={22} />
                                                     </button>
                                                     <button
                                                         className="btn btn-ghost btn-sm"
                                                         onClick={(e) => { e.stopPropagation(); generatePOPdf(order); }}
                                                         title="Download PDF"
                                                     >
-                                                        <MdPictureAsPdf />
+                                                        <MdPictureAsPdf size={22} />
                                                     </button>
                                                 </div>
                                             </td>

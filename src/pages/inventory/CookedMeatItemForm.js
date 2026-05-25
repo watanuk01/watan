@@ -186,7 +186,7 @@ const CookedMeatItemForm = ({ item, categories, onSubmit, onClose }) => {
         setRecipe(prev => ({
             ...prev,
             ingredients: prev.ingredients.map((ing, i) =>
-                i === index ? { ...ing, quantity: Number(qty) } : ing
+                i === index ? { ...ing, quantity: qty === '' ? '' : Number(qty) } : ing
             ),
         }));
     };

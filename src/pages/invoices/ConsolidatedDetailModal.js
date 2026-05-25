@@ -218,9 +218,13 @@ const ConsolidatedDetailModal = ({
             invoice={viewInvoice}
             onClose={() => setViewInvoice(null)}
             supplierDetails={supplierDetails}
-            onUpdated={() => {
-                setViewInvoice(null);
-                if (onInvoiceUpdated) onInvoiceUpdated();
+            onUpdated={(updatedInv) => {
+                if (updatedInv) {
+                    setViewInvoice(updatedInv);
+                } else {
+                    setViewInvoice(null);
+                    if (onInvoiceUpdated) onInvoiceUpdated();
+                }
             }}
         />;
     }

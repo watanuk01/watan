@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { getRestaurantOrders, getStatusInfo, subscribeToRestaurantOrders } from '../../services/orderService';
+import { downloadSingleOrderPDF } from '../../services/orderExportService';
 import {
     MdRefresh,
     MdFilterList,
@@ -8,6 +9,7 @@ import {
     MdVisibility,
     MdClose,
     MdReceipt,
+    MdFileDownload,
 } from 'react-icons/md';
 import toast from 'react-hot-toast';
 import './Restaurant.css';
@@ -238,11 +240,13 @@ const OrderHistory = () => {
                                 )}
 
                                 {/* Items Table */}
-                                <div style={{ border: '1px solid var(--color-border)', borderRadius: 10, overflow: 'hidden' }}>
+                                <div style={{ border: '1px solid var(--color-border)', borderRadius: 10, overflowX: 'auto', width: '100%' }}>
                                     <table className="data-table" style={{ margin: 0 }}>
                                         <thead>
                                             <tr>
                                                 <th>Item</th>
+                                                <th>Type</th>
+                                                <th>Category</th>
                                                 <th style={{ textAlign: 'center' }}>Qty</th>
                                                 <th>Unit</th>
                                                 <th style={{ textAlign: 'right' }}>Price</th>
@@ -254,6 +258,8 @@ const OrderHistory = () => {
                                             {detailOrder.items?.map((item, idx) => (
                                                 <tr key={idx}>
                                                     <td><strong>{item.item_name}</strong></td>
+                                                    <td style={{ opacity: 0.7 }}>{item.item_type || '—'}</td>
+                                                    <td style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>{item.category_name || '—'}</td>
                                                     <td style={{ textAlign: 'center', fontWeight: 600 }}>{item.quantity}</td>
                                                     <td>{item.unit}</td>
                                                     <td style={{ textAlign: 'right' }}>£{(item.selling_price || 0).toFixed(2)}</td>
@@ -264,15 +270,15 @@ const OrderHistory = () => {
                                         </tbody>
                                         <tfoot>
                                             <tr>
-                                                <td colSpan="4" style={{ textAlign: 'right', fontWeight: 500, opacity: 0.7 }}>Subtotal</td>
-                                                <td colSpan="2" style={{ textAlign: 'right', color: 'var(--color-text-primary)' }}>£{(detailOrder.subtotal || 0).toFixed(2)}</td>
+                                                <td colSpan="6" style={{ textAlign: 'right', fontWeight: 500, opacity: 0.9, color: 'var(--color-text-primary)' }}>Subtotal</td>
+                                                <td colSpan="2" style={{ textAlign: 'right', color: 'var(--color-text-primary)', fontWeight: 500 }}>£{(detailOrder.subtotal || 0).toFixed(2)}</td>
                                             </tr>
                                             <tr>
-                                                <td colSpan="4" style={{ textAlign: 'right', fontWeight: 500, opacity: 0.7 }}>VAT</td>
-                                                <td colSpan="2" style={{ textAlign: 'right', color: 'var(--color-text-primary)' }}>£{(detailOrder.vat_amount || 0).toFixed(2)}</td>
+                                                <td colSpan="6" style={{ textAlign: 'right', fontWeight: 500, opacity: 0.9, color: 'var(--color-text-primary)' }}>VAT</td>
+                                                <td colSpan="2" style={{ textAlign: 'right', color: 'var(--color-text-primary)', fontWeight: 500 }}>£{(detailOrder.vat_amount || 0).toFixed(2)}</td>
                                             </tr>
                                             <tr>
-                                                <td colSpan="4" style={{ textAlign: 'right', fontWeight: 700, color: 'var(--color-text-primary)' }}>Total</td>
+                                                <td colSpan="6" style={{ textAlign: 'right', fontWeight: 700, color: 'var(--color-text-primary)' }}>Total</td>
                                                 <td colSpan="2" style={{ textAlign: 'right', fontWeight: 700, color: 'var(--color-primary)' }}>£{(detailOrder.total || 0).toFixed(2)}</td>
                                             </tr>
                                         </tfoot>
@@ -282,6 +288,21 @@ const OrderHistory = () => {
 
                             {/* Footer */}
                             <div className="modal-footer" style={{ borderTop: '1px solid var(--color-border)', padding: '16px 24px', display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-3)' }}>
+                                <button
+                                    className="btn btn-secondary btn-md"
+                                    onClick={() => {
+                                        try {
+                                            downloadSingleOrderPDF(detailOrder);
+                                            toast.success('PDF downloaded');
+                                        } catch (err) {
+                                            console.error('PDF error:', err);
+                                            toast.error('Failed to generate PDF');
+                                        }
+                                    }}
+                                    style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                                >
+                                    <MdFileDownload /> Download PDF
+                                </button>
                                 <button className="btn btn-secondary btn-md" onClick={() => setDetailOrder(null)}>
                                     Close
                                 </button>

@@ -49,6 +49,7 @@ import OrderHistory from '../pages/restaurant/OrderHistory';
 import RestaurantInventory from '../pages/restaurant/RestaurantInventory';
 import RestaurantInvoices from '../pages/restaurant/RestaurantInvoices';
 import MenuManagement from '../pages/restaurant/MenuManagement';
+import EposMapping from '../pages/restaurant/EposMapping';
 
 // Delivery
 import DeliveryOrders from '../pages/delivery/DeliveryOrders';
@@ -69,6 +70,9 @@ import ReportsPage from '../pages/reports/ReportsPage';
 
 // Restaurants Management
 import RestaurantsPage from '../pages/restaurants/RestaurantsPage';
+
+// Xero OAuth Callback
+import XeroCallback from '../pages/settings/XeroCallback';
 
 // Placeholder page for future modules
 const PlaceholderPage = ({ title }) => (
@@ -111,6 +115,16 @@ const AppRouter = () => {
                         ) : (
                             <ForgotPasswordPage />
                         )
+                    }
+                />
+
+                {/* ─── Xero OAuth Callback (inside protected area, admin only) ─── */}
+                <Route
+                    path="/callback"
+                    element={
+                        <ProtectedRoute allowedRoles={['admin']}>
+                            <XeroCallback />
+                        </ProtectedRoute>
                     }
                 />
 
@@ -383,6 +397,14 @@ const AppRouter = () => {
                         element={
                             <ProtectedRoute allowedRoles={['restaurant_manager']}>
                                 <MenuManagement />
+                            </ProtectedRoute>
+                        }
+                    />
+                    <Route
+                        path="/restaurant/epos-mapping"
+                        element={
+                            <ProtectedRoute allowedRoles={['restaurant_manager']}>
+                                <EposMapping />
                             </ProtectedRoute>
                         }
                     />

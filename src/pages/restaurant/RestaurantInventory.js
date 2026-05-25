@@ -5,6 +5,7 @@ import {
     getRestaurantInventory,
     adjustRestaurantStock,
     getRestaurantInventoryStats,
+    updateRestaurantItemSettings,
 } from '../../services/restaurantInventoryService';
 import {
     MdSearch,
@@ -18,16 +19,19 @@ import {
     MdTrendingUp,
     MdLocalShipping,
     MdVisibility,
+    MdEdit,
+    MdSave,
+    MdWarning,
 } from 'react-icons/md';
 import toast from 'react-hot-toast';
 import '../inventory/Inventory.css';
 import './Restaurant.css';
 
-// Restaurant item types (replaces CK's cooked_meat with menu_item)
+// Restaurant item types (matching CK item types)
 const REST_ITEM_TYPES = [
-    { value: 'grocery',   label: 'Grocery',   icon: '🛒', color: '#22c55e' },
-    { value: 'raw_meat',  label: 'Raw Meat',  icon: '🥩', color: '#ef4444' },
-    { value: 'menu_item', label: 'Menu Items', icon: '🍛', color: '#f59e0b' },
+    { value: 'grocery',     label: 'Grocery',     icon: '🛒', color: '#22c55e' },
+    { value: 'raw_meat',    label: 'Raw Meat',    icon: '🥩', color: '#ef4444' },
+    { value: 'cooked_meat', label: 'Cooked Meat', icon: '🍖', color: '#f59e0b' },
 ];
 
 const getItemTypeInfo = (type) => REST_ITEM_TYPES.find(t => t.value === type) || { label: type, icon: '📦', color: '#888' };
@@ -38,6 +42,8 @@ const RestaurantInventory = () => {
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
     const [activeType, setActiveType] = useState('all');
+    const [activeCategory, setActiveCategory] = useState('all');
+    const [showLowStock, setShowLowStock] = useState(false);
     const [stats, setStats] = useState(null);
 
     // Sorting
@@ -56,6 +62,11 @@ const RestaurantInventory = () => {
 
     // Batch detail modal
     const [batchModal, setBatchModal] = useState(null);
+
+    // Threshold editing
+    const [editThresholdId, setEditThresholdId] = useState(null);
+    const [editThresholdVal, setEditThresholdVal] = useState('');
+    const [savingThreshold, setSavingThreshold] = useState(false);
 
     const restaurantId = currentUser?.uid;
 
@@ -84,8 +95,26 @@ const RestaurantInventory = () => {
         return activeType === 'all' ? items : items.filter(i => i.item_type === activeType);
     }, [items, activeType]);
 
+    // Extract unique categories from current type-filtered items
+    const categories = useMemo(() => {
+        const cats = new Set();
+        typeFilteredItems.forEach(i => {
+            if (i.category_name) cats.add(i.category_name);
+        });
+        return [...cats].sort();
+    }, [typeFilteredItems]);
+
     const filteredItems = useMemo(() => {
         let result = typeFilteredItems;
+        // Category filter
+        if (activeCategory !== 'all') {
+            result = result.filter(i => i.category_name === activeCategory);
+        }
+        // Low stock filter
+        if (showLowStock) {
+            result = result.filter(i => (i.current_stock || 0) <= (i.low_stock_threshold || 5));
+        }
+        // Search
         if (searchQuery.trim()) {
             const q = searchQuery.toLowerCase();
             result = result.filter(i =>
@@ -114,10 +143,10 @@ const RestaurantInventory = () => {
             return 0;
         });
         return result;
-    }, [typeFilteredItems, searchQuery, sortField, sortDir]);
+    }, [typeFilteredItems, activeCategory, showLowStock, searchQuery, sortField, sortDir]);
 
     // Reset page on filter change
-    useEffect(() => { setCurrentPage(1); }, [searchQuery, activeType]);
+    useEffect(() => { setCurrentPage(1); }, [searchQuery, activeType, activeCategory, showLowStock]);
 
     const paginatedItems = filteredItems.slice(
         (currentPage - 1) * itemsPerPage,
@@ -164,6 +193,31 @@ const RestaurantInventory = () => {
             toast.error(err.message || 'Failed to adjust stock');
         } finally {
             setAdjusting(false);
+        }
+    };
+
+    // ── Save threshold ──
+    const handleSaveThreshold = async (item) => {
+        const newVal = Number(editThresholdVal);
+        if (isNaN(newVal) || newVal < 0) {
+            toast.error('Enter a valid threshold');
+            return;
+        }
+        setSavingThreshold(true);
+        try {
+            await updateRestaurantItemSettings(item.id, { low_stock_threshold: newVal });
+            // Update local state
+            setItems(prev => prev.map(i =>
+                i.id === item.id ? { ...i, low_stock_threshold: newVal } : i
+            ));
+            toast.success(`Threshold updated for ${item.item_name}`);
+            setEditThresholdId(null);
+            setEditThresholdVal('');
+        } catch (err) {
+            toast.error('Failed to update threshold');
+            console.error(err);
+        } finally {
+            setSavingThreshold(false);
         }
     };
 
@@ -291,12 +345,58 @@ const RestaurantInventory = () => {
                 ))}
             </div>
 
+            {/* Category Chips + Low Stock Filter */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flexWrap: 'wrap', marginBottom: 'var(--space-4)' }}>
+                {/* Category chips */}
+                <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap', flex: 1 }}>
+                    <button
+                        className={`type-tab ${activeCategory === 'all' ? 'active' : ''}`}
+                        onClick={() => setActiveCategory('all')}
+                        style={{ '--type-color': 'var(--color-primary)', fontSize: 'var(--text-xs)', padding: '4px 12px' }}
+                    >
+                        All Categories
+                    </button>
+                    {categories.map(cat => (
+                        <button
+                            key={cat}
+                            className={`type-tab ${activeCategory === cat ? 'active' : ''}`}
+                            onClick={() => setActiveCategory(cat)}
+                            style={{ '--type-color': '#3b82f6', fontSize: 'var(--text-xs)', padding: '4px 12px' }}
+                        >
+                            {cat}
+                        </button>
+                    ))}
+                </div>
+
+                {/* Low Stock Toggle */}
+                <button
+                    onClick={() => setShowLowStock(prev => !prev)}
+                    style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        padding: '6px 14px',
+                        borderRadius: 20,
+                        border: showLowStock ? '1px solid #f59e0b' : '1px solid var(--color-border)',
+                        background: showLowStock ? 'rgba(245, 158, 11, 0.15)' : 'transparent',
+                        color: showLowStock ? '#f59e0b' : 'var(--color-text-secondary)',
+                        fontSize: 'var(--text-xs)',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        whiteSpace: 'nowrap',
+                    }}
+                >
+                    <MdWarning /> Low Stock ({items.filter(i => (i.current_stock || 0) <= (i.low_stock_threshold || 5)).length})
+                </button>
+            </div>
+
             {/* Search Bar */}
             <div className="search-bar" style={{ marginBottom: 'var(--space-5)' }}>
                 <MdSearch className="search-icon" />
                 <input
                     className="search-input"
-                    placeholder="Search by name or category..."
+                    placeholder="Search by item name or category..."
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
                 />
@@ -315,13 +415,13 @@ const RestaurantInventory = () => {
                             <tr>
                                 <th>Item</th><th>Type</th><th>Category</th><th>Stock</th><th>Unit</th>
                                 <th>Cost/Unit</th><th>Sell/Unit</th><th>Stock Value</th><th>Margin</th>
-                                <th>Status</th><th>Last Delivery</th><th>Actions</th>
+                                <th>Threshold</th><th>Status</th><th>Last Delivery</th><th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             {Array.from({ length: 5 }).map((_, i) => (
                                 <tr key={i}>
-                                    {Array.from({ length: 12 }).map((_, j) => (
+                                    {Array.from({ length: 13 }).map((_, j) => (
                                         <td key={j}><div className="skeleton skeleton-text" style={{ height: 16, width: '70%' }} /></td>
                                     ))}
                                 </tr>
@@ -356,6 +456,7 @@ const RestaurantInventory = () => {
                                 <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('selling_price')}>Sell/Unit{sortIcon('selling_price')}</th>
                                 <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('stock_value')}>Stock Value{sortIcon('stock_value')}</th>
                                 <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('margin')}>Margin{sortIcon('margin')}</th>
+                                <th style={{ cursor: 'pointer' }} onClick={() => toggleSort('low_stock_threshold')}>Threshold{sortIcon('low_stock_threshold')}</th>
                                 <th>Status</th>
                                 <th>Last Delivery</th>
                                 <th>Actions</th>
@@ -393,13 +494,68 @@ const RestaurantInventory = () => {
                                                 {margin >= 0 ? '+' : ''}£{margin.toFixed(2)}
                                             </span>
                                         </td>
+                                        <td>
+                                            {editThresholdId === item.id ? (
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                                    <input
+                                                        type="number"
+                                                        min={0}
+                                                        step={0.5}
+                                                        value={editThresholdVal}
+                                                        onChange={e => setEditThresholdVal(e.target.value)}
+                                                        className="form-input"
+                                                        style={{ width: 70, height: 28, fontSize: 12, padding: '2px 6px' }}
+                                                        autoFocus
+                                                        onKeyDown={e => {
+                                                            if (e.key === 'Enter') handleSaveThreshold(item);
+                                                            if (e.key === 'Escape') { setEditThresholdId(null); setEditThresholdVal(''); }
+                                                        }}
+                                                    />
+                                                    <span style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>{item.unit}</span>
+                                                    <button
+                                                        className="btn-action"
+                                                        onClick={() => handleSaveThreshold(item)}
+                                                        disabled={savingThreshold}
+                                                        title="Save"
+                                                        style={{ color: 'var(--color-success)', padding: 2 }}
+                                                    >
+                                                        <MdSave size={16} />
+                                                    </button>
+                                                    <button
+                                                        className="btn-action"
+                                                        onClick={() => { setEditThresholdId(null); setEditThresholdVal(''); }}
+                                                        title="Cancel"
+                                                        style={{ color: 'var(--color-text-muted)', padding: 2 }}
+                                                    >
+                                                        <MdClose size={16} />
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                                    <span style={{ fontSize: 'var(--text-sm)' }}>
+                                                        {item.low_stock_threshold ?? 5} {item.unit}
+                                                    </span>
+                                                    <button
+                                                        className="btn-action"
+                                                        onClick={() => {
+                                                            setEditThresholdId(item.id);
+                                                            setEditThresholdVal(item.low_stock_threshold ?? 5);
+                                                        }}
+                                                        title="Edit threshold"
+                                                        style={{ padding: 2, color: 'var(--color-text-muted)' }}
+                                                    >
+                                                        <MdEdit size={14} />
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </td>
                                         <td><span className={`badge badge-${status.class}`}>{status.label}</span></td>
                                         <td style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
                                             {formatDate(item.last_delivery_date)}
                                         </td>
                                         <td>
                                             <div className="action-btns">
-                                                {(item.item_type === 'raw_meat' || item.item_type === 'menu_item') && (
+                                                {(item.item_type === 'raw_meat' || item.item_type === 'cooked_meat') && (
                                                     <button
                                                         className="btn-action"
                                                         onClick={() => setBatchModal(item)}

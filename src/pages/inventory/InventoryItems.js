@@ -356,7 +356,29 @@ const InventoryItems = () => {
                                     <tr key={item.id} style={isEnabled ? {} : { opacity: 0.5 }}>
                                         <td>
                                             <div>
-                                                <strong>{item.name}</strong>
+                                                <strong style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                                    {item.name.length > 40
+                                                        ? <>{item.name.substring(0, 40)}&hellip;<span
+                                                            title={item.name}
+                                                            style={{
+                                                                display: 'inline-flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'center',
+                                                                width: 16,
+                                                                height: 16,
+                                                                borderRadius: '50%',
+                                                                background: 'var(--color-primary)',
+                                                                color: '#fff',
+                                                                fontSize: 10,
+                                                                fontWeight: 700,
+                                                                cursor: 'help',
+                                                                flexShrink: 0,
+                                                                lineHeight: 1,
+                                                            }}
+                                                        >i</span></>
+                                                        : item.name
+                                                    }
+                                                </strong>
                                                 <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
                                                     {item.sku}
                                                 </div>

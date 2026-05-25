@@ -346,6 +346,14 @@
     grid-template-columns: repeat(6, 1fr);
 }
 
+.stats-grid-4 {
+    grid-template-columns: repeat(4, 1fr);
+}
+
+.stats-grid-3 {
+    grid-template-columns: repeat(3, 1fr);
+}
+
 @media (max-width: 1400px) {
     .stats-grid-6 {
         grid-template-columns: repeat(3, 1fr);
@@ -356,10 +364,22 @@
     .stats-grid-6 {
         grid-template-columns: repeat(2, 1fr);
     }
+    .stats-grid-4 {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .stats-grid-3 {
+        grid-template-columns: repeat(2, 1fr);
+    }
 }
 
 @media (max-width: 600px) {
     .stats-grid-6 {
+        grid-template-columns: 1fr;
+    }
+    .stats-grid-4 {
+        grid-template-columns: 1fr;
+    }
+    .stats-grid-3 {
         grid-template-columns: 1fr;
     }
 }
@@ -1049,4 +1069,141 @@
     display: grid;
     grid-template-columns: repeat(2, 1fr);
     gap: 8px;
+}
+
+/* ═══════════════════════════════════════════
+   ITEM DEMAND ANALYSIS
+   ═══════════════════════════════════════════ */
+
+.demand-tabs {
+    display: flex;
+    gap: 4px;
+}
+
+.demand-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 14px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--color-text-muted);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-family: inherit;
+}
+
+.demand-tab:hover {
+    color: var(--color-text-primary);
+    border-color: var(--color-primary);
+}
+
+.demand-tab.active {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+    color: #fff;
+    font-weight: 600;
+}
+
+/* ── Heatmap Table ── */
+.heatmap-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 12px;
+}
+
+.heatmap-table thead th {
+    position: sticky;
+    top: 0;
+    background: var(--color-bg-surface);
+    padding: 10px 8px;
+    text-align: center;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    border-bottom: 2px solid var(--color-border);
+    white-space: nowrap;
+}
+
+.heatmap-item-col {
+    text-align: left !important;
+    min-width: 150px;
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background: var(--color-bg-surface) !important;
+}
+
+.heatmap-rest-col {
+    min-width: 80px;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.heatmap-rest-col.highlighted {
+    color: var(--color-primary) !important;
+    border-bottom-color: var(--color-primary) !important;
+}
+
+.heatmap-total-col {
+    min-width: 60px;
+    font-weight: 700 !important;
+    color: var(--color-text-primary) !important;
+}
+
+.heatmap-table tbody td {
+    padding: 8px;
+    text-align: center;
+    border-bottom: 1px solid var(--color-border-light);
+    transition: background 0.15s;
+}
+
+.heatmap-item-name {
+    text-align: left !important;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--color-bg-surface);
+}
+
+.heatmap-cell {
+    color: var(--color-text-primary);
+    font-weight: 500;
+    border-radius: 3px;
+}
+
+.heatmap-cell.highlighted {
+    outline: 2px solid var(--color-primary);
+    outline-offset: -2px;
+}
+
+.heatmap-total {
+    font-weight: 800 !important;
+    color: var(--color-primary) !important;
+    background: var(--color-primary-muted) !important;
+}
+
+.heatmap-table tbody tr:hover td {
+    background: var(--color-bg-hover);
+}
+
+.heatmap-table tbody tr:hover .heatmap-cell {
+    filter: brightness(1.15);
+}
+
+@media (max-width: 768px) {
+    .demand-tabs {
+        width: 100%;
+    }
+    .demand-tab {
+        flex: 1;
+        justify-content: center;
+    }
 }

@@ -24,6 +24,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { adjustStock, consumeBatch } from './inventoryService';
+import { getRestaurantItem, adjustRestaurantStock } from './restaurantInventoryService';
 import { notifyWasteUpdated, notifyWasteDeleted } from './notificationService';
 
 // ─── COLLECTIONS ───
@@ -95,6 +96,8 @@ export const logWasteEvent = async (data) => {
         batch_id: data.batch_id || null,
         batch_number: data.batch_number || null,
 
+        image_data: data.image_data || null,
+
         submitted_by: data.submitted_by || {},
         notes: data.notes || '',
 
@@ -116,7 +119,14 @@ export const logWasteEvent = async (data) => {
     // Deduct stock from inventory
     if (data.quantity > 0 && data.item_id) {
         try {
-            if (data.batch_id) {
+            if (data.location_type === 'restaurant' && data.location_id) {
+                const restItem = await getRestaurantItem(data.location_id, data.item_id);
+                if (restItem) {
+                    await adjustRestaurantStock(data.location_id, restItem.id, -data.quantity, `Waste: ${data.category}`, data.submitted_by);
+                } else {
+                    console.warn(`Restaurant item not found for waste deduction (ID: ${data.item_id})`);
+                }
+            } else if (data.batch_id) {
                 // Deduct from specific batch
                 await consumeBatch(data.batch_id, data.quantity, data.item_id);
             } else {
@@ -242,6 +252,26 @@ export const updateWasteEvent = async (id, updates, reason, adminUser) => {
 
     await updateDoc(ref, updateFields);
 
+    // Restore or deduct stock difference if quantity changed
+    if (updates.quantity !== undefined && current.quantity !== newQty && current.item_id) {
+        const qtyDifference = current.quantity - newQty; // Positive = wasted less (add to stock), Negative = wasted more (remove from stock)
+        try {
+            if (current.location_type === 'restaurant' && current.location_id) {
+                const restItem = await getRestaurantItem(current.location_id, current.item_id);
+                if (restItem) {
+                    await adjustRestaurantStock(current.location_id, restItem.id, qtyDifference, `Waste edit: ${reason}`, adminUser);
+                }
+            } else if (!current.batch_id && current.location_type === 'central_kitchen') {
+                // General stock update for CK (if it's tied to a batch, we skip batch un-consumption as batch restoration is complicated, 
+                // but at least standard tracking is maintained if not batch tracked)
+                // We add qtyDifference back.
+                await adjustStock(current.item_id, qtyDifference, `Waste edit: ${reason}`, null);
+            }
+        } catch (err) {
+            console.error('Stock adjustment for waste edit failed:', err);
+        }
+    }
+
     // Notify restaurant if admin edited their waste
     const fullEvent = { id, ...current, ...updateFields };
     try {
@@ -276,6 +306,22 @@ export const deleteWasteEvent = async (id, reason, adminUser) => {
         updated_at: serverTimestamp(),
         audit_trail: [...(current.audit_trail || []), auditEntry],
     });
+
+    // Restore stock if waste was active
+    if (current.status === 'active' && current.quantity > 0 && current.item_id) {
+        try {
+            if (current.location_type === 'restaurant' && current.location_id) {
+                const restItem = await getRestaurantItem(current.location_id, current.item_id);
+                if (restItem) {
+                    await adjustRestaurantStock(current.location_id, restItem.id, current.quantity, `Waste delete: ${reason}`, adminUser);
+                }
+            } else if (!current.batch_id && current.location_type === 'central_kitchen') {
+                await adjustStock(current.item_id, current.quantity, `Waste delete: ${reason}`, null);
+            }
+        } catch (err) {
+            console.error('Stock restore for waste delete failed:', err);
+        }
+    }
 
     // Notify restaurant if admin deleted their waste
     const fullEvent = { id, ...current };
@@ -451,17 +497,26 @@ export const detectExpiredBatches = async (adminUser) => {
 // ═══════════════════════════════════════════
 
 export const getItemsForWasteLog = async () => {
+    // Load categories for name resolution
+    const catSnap = await getDocs(collection(db, 'inventory_categories'));
+    const catMap = {};
+    catSnap.docs.forEach(d => { catMap[d.id] = d.data().name || ''; });
+
     const snap = await getDocs(collection(db, ITEMS));
     return snap.docs
-        .map(d => ({
-            id: d.id,
-            name: d.data().name,
-            item_type: d.data().item_type,
-            unit: d.data().unit,
-            current_stock: d.data().current_stock || 0,
-            cost_price: d.data().cost_price || 0,
-            selling_price: d.data().selling_price || 0,
-        }))
+        .map(d => {
+            const data = d.data();
+            return {
+                id: d.id,
+                name: data.name,
+                item_type: data.item_type,
+                unit: data.unit,
+                current_stock: data.current_stock || 0,
+                cost_price: data.cost_price || 0,
+                selling_price: data.selling_price || 0,
+                category_name: data.category_name || catMap[data.category_id] || '',
+            };
+        })
         .sort((a, b) => a.name.localeCompare(b.name));
 };
 

@@ -56,6 +56,7 @@ const StartProduction = () => {
     const [notes, setNotes] = useState('');
     const [submitting, setSubmitting] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
+    const [selectedCategory, setSelectedCategory] = useState('All');
     const draftRestored = useRef(false);
 
     // Company Info for PDF
@@ -295,8 +296,13 @@ const StartProduction = () => {
 
     const allowedQtys = selectedItem?.allowed_production_quantities || [];
 
-    // ── Filtered items for search ──
+    const uniqueCategories = Array.from(
+        new Set(cookedItems.map(item => item.category_name).filter(Boolean))
+    ).sort();
+
+    // ── Filtered items for search & category ──
     const filteredItems = cookedItems.filter(item => {
+        if (selectedCategory !== 'All' && item.category_name !== selectedCategory) return false;
         if (!searchQuery.trim()) return true;
         const q = searchQuery.toLowerCase();
         return (
@@ -359,6 +365,27 @@ const StartProduction = () => {
                             </button>
                         )}
                     </div>
+
+                    {/* Category Filters */}
+                    {uniqueCategories.length > 0 && (
+                        <div className="category-chips" style={{ marginBottom: 'var(--space-4)' }}>
+                            <button
+                                className={`category-chip ${selectedCategory === 'All' ? 'active' : ''}`}
+                                onClick={() => setSelectedCategory('All')}
+                            >
+                                All
+                            </button>
+                            {uniqueCategories.map(cat => (
+                                <button
+                                    key={cat}
+                                    className={`category-chip ${selectedCategory === cat ? 'active' : ''}`}
+                                    onClick={() => setSelectedCategory(cat)}
+                                >
+                                    {cat}
+                                </button>
+                            ))}
+                        </div>
+                    )}
 
                     {loading ? (
                         <div className="prod-item-select-grid">

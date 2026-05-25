@@ -20,6 +20,7 @@ import {
 } from 'react-icons/md';
 import toast from 'react-hot-toast';
 import '../orders/Orders.css';
+import DeliveryDetailModal from './DeliveryDetailModal';
 
 const AdminDeliveryManagement = () => {
     const [activeTab, setActiveTab] = useState('live');
@@ -30,6 +31,7 @@ const AdminDeliveryManagement = () => {
     const [assignModalOrder, setAssignModalOrder] = useState(null);
     const [selectedPartner, setSelectedPartner] = useState('');
     const [filterPartner, setFilterPartner] = useState('');
+    const [detailOrder, setDetailOrder] = useState(null);
 
     const loadData = useCallback(async () => {
         setLoading(true);
@@ -177,8 +179,12 @@ const AdminDeliveryManagement = () => {
                     <span className="tab-count">{unassignedOrders.length}</span>
                 </button>
                 <button className={`status-tab ${activeTab === 'partners' ? 'active' : ''}`} onClick={() => setActiveTab('partners')}>
-                    <MdSpeed /> Partner Performance
+                    <MdSpeed /> Partners
                     <span className="tab-count">{deliveryPartners.length}</span>
+                </button>
+                <button className={`status-tab ${activeTab === 'delivered' ? 'active' : ''}`} onClick={() => setActiveTab('delivered')}>
+                    <MdCheckCircle /> Delivered
+                    <span className="tab-count">{deliveredOrders.length}</span>
                 </button>
             </div>
 
@@ -216,7 +222,7 @@ const AdminDeliveryManagement = () => {
                                 </thead>
                                 <tbody>
                                     {filteredLiveOrders.map(order => (
-                                        <tr key={order.id}>
+                                        <tr key={order.id} onClick={() => setDetailOrder(order)} style={{ cursor: 'pointer' }}>
                                             <td style={{ fontWeight: 600, color: 'var(--color-primary)' }}>{order.order_number}</td>
                                             <td>{order.restaurant_name}</td>
                                             <td>{order.items?.length || 0}</td>
@@ -256,7 +262,7 @@ const AdminDeliveryManagement = () => {
                             </thead>
                             <tbody>
                                 {unassignedOrders.map(order => (
-                                    <tr key={order.id}>
+                                    <tr key={order.id} onClick={() => setDetailOrder(order)} style={{ cursor: 'pointer' }}>
                                         <td style={{ fontWeight: 600, color: 'var(--color-primary)' }}>{order.order_number}</td>
                                         <td>{order.restaurant_name}</td>
                                         <td>{order.items?.length || 0}</td>
@@ -272,6 +278,39 @@ const AdminDeliveryManagement = () => {
                                             >
                                                 <MdAssignmentInd /> Assign
                                             </button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )
+            ) : activeTab === 'delivered' ? (
+                /* ─── Delivered Orders ─── */
+                deliveredOrders.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: 60, color: 'var(--color-text-muted)' }}>
+                        <MdCheckCircle style={{ fontSize: 60, opacity: 0.3, marginBottom: 'var(--space-4)' }} />
+                        <h3>No delivered orders yet</h3>
+                    </div>
+                ) : (
+                    <div className="data-table-wrapper">
+                        <table className="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Order</th><th>Restaurant</th><th>Items</th><th>Partner</th>
+                                    <th>Delivery Time</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {deliveredOrders.map(order => (
+                                    <tr key={order.id} onClick={() => setDetailOrder(order)} style={{ cursor: 'pointer' }}>
+                                        <td style={{ fontWeight: 600, color: 'var(--color-primary)' }}>{order.order_number}</td>
+                                        <td>{order.restaurant_name}</td>
+                                        <td>{order.items?.length || 0}</td>
+                                        <td>{order.delivery_partner_name || '—'}</td>
+                                        <td style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
+                                            <MdCheckCircle style={{ color: '#22c55e', verticalAlign: 'middle', marginRight: 4 }} />
+                                            {formatDateTime(order.delivered_at)}
                                         </td>
                                     </tr>
                                 ))}
@@ -384,6 +423,14 @@ const AdminDeliveryManagement = () => {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* ─── Delivery History Detail Modal ─── */}
+            {detailOrder && (
+                <DeliveryDetailModal
+                    detailOrder={detailOrder}
+                    onClose={() => setDetailOrder(null)}
+                />
             )}
         </div>
     );

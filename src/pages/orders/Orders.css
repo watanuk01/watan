@@ -544,3 +544,20 @@
     color: var(--color-text-tertiary);
     cursor: not-allowed;
 }
+
+/* ─── Admin Order Badge ─── */
+.admin-order-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    margin-left: 6px;
+    padding: 2px 8px;
+    border-radius: 20px;
+    font-size: 10px;
+    font-weight: 600;
+    background: rgba(139, 92, 246, 0.15);
+    color: #a78bfa;
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    white-space: nowrap;
+    vertical-align: middle;
+}

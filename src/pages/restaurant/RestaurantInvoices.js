@@ -287,7 +287,17 @@ const RestaurantInvoices = () => {
                     invoice={viewInvoice}
                     onClose={() => setViewInvoice(null)}
                     supplierDetails={supplierDetails}
-                    onUpdated={fetchData}
+                    onUpdated={(updatedInv) => {
+                        if (updatedInv) {
+                            // Update modal view with fresh data
+                            setViewInvoice(updatedInv);
+                            // Update the invoice in the list so the table reflects changes
+                            setInvoices(prev => prev.map(inv => inv.id === updatedInv.id ? { ...inv, ...updatedInv } : inv));
+                        } else {
+                            setViewInvoice(null);
+                            fetchData();
+                        }
+                    }}
                 />
             )}
         </div>

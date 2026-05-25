@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { MdClose, MdDelete, MdImage } from 'react-icons/md';
+import { MdClose, MdDelete, MdImage, MdSearch } from 'react-icons/md';
 import { WASTE_CATEGORIES, getItemsForWasteLog, getBatchesForItem, logWasteEvent } from '../../services/wasteService';
 import toast from 'react-hot-toast';
 
@@ -28,6 +28,11 @@ const LogWasteModal = ({ onClose, onSubmitted, userProfile, locationOverride }) 
     const [imageData, setImageData] = useState(null);
     const [imagePreview, setImagePreview] = useState(null);
     const fileInputRef = useRef(null);
+    const [itemSearch, setItemSearch] = useState('');
+    const [selectedCategory, setSelectedCategory] = useState('All');
+    const [selectedInvCategory, setSelectedInvCategory] = useState('All');
+    const [showItemDropdown, setShowItemDropdown] = useState(false);
+    const itemDropdownRef = useRef(null);
 
     const isRestaurant = userProfile?.role === 'restaurant_manager' || userProfile?.role === 'restaurant_manager_non_managed';
     const locationType = locationOverride?.type || (isRestaurant ? 'restaurant' : 'central_kitchen');
@@ -43,6 +48,17 @@ const LogWasteModal = ({ onClose, onSubmitted, userProfile, locationOverride }) 
             console.error('Failed to load items:', err);
             setLoading(false);
         });
+    }, []);
+
+    // Handle clicks outside the dropdown to close it
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (itemDropdownRef.current && !itemDropdownRef.current.contains(event.target)) {
+                setShowItemDropdown(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
     // Load batches when item changes
@@ -144,17 +160,180 @@ const LogWasteModal = ({ onClose, onSubmitted, userProfile, locationOverride }) 
                         <div style={{ textAlign: 'center', padding: 40, color: 'var(--color-text-muted)' }}>Loading items...</div>
                     ) : (
                         <>
-                            {/* Item */}
-                            <div className="waste-form-group">
+                            {/* Item Search / Selection */}
+                            <div className="waste-form-group" ref={itemDropdownRef} style={{ position: 'relative' }}>
                                 <label>Item *</label>
-                                <select value={form.item_id} onChange={e => handleChange('item_id', e.target.value)} required>
-                                    <option value="">Select item...</option>
-                                    {items.map(item => (
-                                        <option key={item.id} value={item.id}>
-                                            {item.name} ({item.item_type.replace('_', ' ')}) — {item.current_stock} {item.unit} in stock
-                                        </option>
+                                
+                                {/* Item Type Filters */}
+                                <div style={{ display: 'flex', gap: 8, marginBottom: 8, overflowX: 'auto', paddingBottom: 4 }}>
+                                    {['All', 'grocery', 'raw_meat', 'cooked_meat'].map(cat => (
+                                        <button
+                                            type="button"
+                                            key={cat}
+                                            onClick={() => setSelectedCategory(cat)}
+                                            style={{
+                                                padding: '4px 12px',
+                                                borderRadius: '16px',
+                                                border: '1px solid',
+                                                borderColor: selectedCategory === cat ? 'var(--color-primary)' : 'var(--color-border)',
+                                                background: selectedCategory === cat ? 'var(--color-primary)' : 'var(--color-surface)',
+                                                color: selectedCategory === cat ? 'var(--color-bg)' : 'var(--color-text-secondary)',
+                                                fontSize: '12px',
+                                                fontWeight: selectedCategory === cat ? 600 : 500,
+                                                cursor: 'pointer',
+                                                whiteSpace: 'nowrap',
+                                                transition: 'all 0.2s'
+                                            }}
+                                        >
+                                            {cat === 'All' ? 'All Types' : cat.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                                        </button>
                                     ))}
-                                </select>
+                                </div>
+
+                                {/* Inventory Category Filters */}
+                                {(() => {
+                                    const catNames = [...new Set(
+                                        items
+                                            .filter(i => selectedCategory === 'All' || i.item_type === selectedCategory)
+                                            .map(i => i.category_name)
+                                            .filter(Boolean)
+                                    )].sort();
+                                    if (catNames.length === 0) return null;
+                                    return (
+                                        <div style={{ display: 'flex', gap: 6, marginBottom: 8, overflowX: 'auto', paddingBottom: 4, flexWrap: 'wrap' }}>
+                                            <button
+                                                type="button"
+                                                onClick={() => setSelectedInvCategory('All')}
+                                                style={{
+                                                    padding: '3px 10px',
+                                                    borderRadius: '12px',
+                                                    border: '1px solid',
+                                                    borderColor: selectedInvCategory === 'All' ? '#8b5cf6' : 'var(--color-border)',
+                                                    background: selectedInvCategory === 'All' ? '#8b5cf6' : 'var(--color-surface)',
+                                                    color: selectedInvCategory === 'All' ? '#fff' : 'var(--color-text-secondary)',
+                                                    fontSize: '11px',
+                                                    fontWeight: selectedInvCategory === 'All' ? 600 : 500,
+                                                    cursor: 'pointer',
+                                                    whiteSpace: 'nowrap',
+                                                    transition: 'all 0.2s'
+                                                }}
+                                            >
+                                                All Categories
+                                            </button>
+                                            {catNames.map(cn => (
+                                                <button
+                                                    type="button"
+                                                    key={cn}
+                                                    onClick={() => setSelectedInvCategory(cn)}
+                                                    style={{
+                                                        padding: '3px 10px',
+                                                        borderRadius: '12px',
+                                                        border: '1px solid',
+                                                        borderColor: selectedInvCategory === cn ? '#8b5cf6' : 'var(--color-border)',
+                                                        background: selectedInvCategory === cn ? '#8b5cf6' : 'var(--color-surface)',
+                                                        color: selectedInvCategory === cn ? '#fff' : 'var(--color-text-secondary)',
+                                                        fontSize: '11px',
+                                                        fontWeight: selectedInvCategory === cn ? 600 : 500,
+                                                        cursor: 'pointer',
+                                                        whiteSpace: 'nowrap',
+                                                        transition: 'all 0.2s'
+                                                    }}
+                                                >
+                                                    {cn}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    );
+                                })()}
+
+                                <div style={{ position: 'relative' }}>
+                                    <MdSearch style={{ position: 'absolute', left: 12, top: 12, color: 'var(--color-text-muted)', fontSize: 18 }} />
+                                    <input
+                                        type="text"
+                                        placeholder="Search and select item..."
+                                        value={itemSearch}
+                                        onChange={e => {
+                                            setItemSearch(e.target.value);
+                                            setShowItemDropdown(true);
+                                            if (form.item_id) handleChange('item_id', '');
+                                        }}
+                                        onFocus={() => setShowItemDropdown(true)}
+                                        style={{ 
+                                            width: '100%', 
+                                            padding: '10px 12px 10px 36px', 
+                                            borderRadius: '8px', 
+                                            border: '1px solid var(--color-border)', 
+                                            fontSize: '14px', 
+                                            boxSizing: 'border-box',
+                                            background: 'var(--color-bg)',
+                                            color: 'var(--color-text-primary)'
+                                        }}
+                                        required={!form.item_id}
+                                    />
+                                    {showItemDropdown && (
+                                        <div style={{
+                                            position: 'absolute', top: '100%', left: 0, right: 0,
+                                            backgroundColor: '#ffffff', border: '1px solid var(--color-border)', 
+                                            borderRadius: '8px', marginTop: '4px', maxHeight: '240px', 
+                                            overflowY: 'auto', zIndex: 9999, boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
+                                            opacity: 1
+                                        }}>
+                                            {(() => {
+                                                const filtered = items.filter(item => {
+                                                    if (selectedCategory !== 'All' && item.item_type !== selectedCategory) return false;
+                                                    if (selectedInvCategory !== 'All' && (item.category_name || '') !== selectedInvCategory) return false;
+                                                    if (!itemSearch) return true;
+                                                    const q = itemSearch.toLowerCase();
+                                                    return item.name.toLowerCase().includes(q) || item.item_type.replace('_', ' ').toLowerCase().includes(q);
+                                                });
+
+                                                if (filtered.length === 0) {
+                                                    return (
+                                                        <div style={{ padding: '12px', color: '#64748b', fontSize: '13px', textAlign: 'center' }}>
+                                                            No items found matching "{itemSearch}"
+                                                        </div>
+                                                    );
+                                                }
+
+                                                return filtered.map(item => (
+                                                    <div
+                                                        key={item.id}
+                                                        onClick={() => {
+                                                            handleChange('item_id', item.id);
+                                                            setItemSearch(item.name);
+                                                            setShowItemDropdown(false);
+                                                        }}
+                                                        style={{
+                                                            padding: '10px 12px', cursor: 'pointer', borderBottom: '1px solid #e2e8f0',
+                                                            backgroundColor: form.item_id === item.id ? '#f1f5f9' : '#ffffff',
+                                                            display: 'flex', flexDirection: 'column', gap: 4,
+                                                            transition: 'background-color 0.15s'
+                                                        }}
+                                                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
+                                                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = form.item_id === item.id ? '#f1f5f9' : '#ffffff'}
+                                                    >
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                            <span style={{ fontWeight: 600, fontSize: '14px', color: '#0f172a' }}>{item.name}</span>
+                                                            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                                                                {item.category_name && (
+                                                                    <span style={{ fontSize: '10px', color: '#7c3aed', background: '#f5f3ff', padding: '2px 6px', borderRadius: '4px' }}>
+                                                                        {item.category_name}
+                                                                    </span>
+                                                                )}
+                                                                <span style={{ fontSize: '11px', color: '#475569', background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px', textTransform: 'capitalize' }}>
+                                                                    {item.item_type.replace('_', ' ')}
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                        <div style={{ fontSize: '12px', color: '#64748b' }}>
+                                                            Current Stock: <strong style={{ color: '#0284c7' }}>{item.current_stock} {item.unit}</strong>
+                                                        </div>
+                                                    </div>
+                                                ));
+                                            })()}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
 
                             {/* Quantity */}

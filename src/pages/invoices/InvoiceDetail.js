@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect } from 'react';
 import {
     MdClose, MdFileDownload, MdCheckCircle, MdWarning,
-    MdEdit, MdSave, MdCancel, MdEmail,
+    MdEdit, MdSave, MdCancel, MdEmail, MdSync,
 } from 'react-icons/md';
 import { updateInvoice } from '../../services/invoiceService';
 import toast from 'react-hot-toast';
@@ -14,6 +14,7 @@ const InvoiceDetail = ({ invoice, onClose, supplierDetails, onUpdated }) => {
     const [editDiscount, setEditDiscount] = useState({ type: 'none', value: 0 });
     const [saving, setSaving] = useState(false);
     const [sendingEmail, setSendingEmail] = useState(false);
+    const [syncingXero, setSyncingXero] = useState(false);
 
     useEffect(() => {
         if (invoice) {
@@ -139,6 +140,7 @@ const InvoiceDetail = ({ invoice, onClose, supplierDetails, onUpdated }) => {
     const handleSave = async () => {
         setSaving(true);
         try {
+            const editTotals = getEditTotals();
             await updateInvoice(invoice.id, {
                 line_items: editItems,
                 discount_type: editDiscount.type,
@@ -146,7 +148,19 @@ const InvoiceDetail = ({ invoice, onClose, supplierDetails, onUpdated }) => {
             });
             toast.success('Invoice updated successfully');
             setEditing(false);
-            if (onUpdated) onUpdated();
+            // Pass the updated invoice data so the parent can update its state immediately
+            if (onUpdated) {
+                onUpdated({
+                    ...invoice,
+                    line_items: editItems,
+                    discount_type: editDiscount.type,
+                    discount_value: editDiscount.value,
+                    discount_amount: editTotals.discountAmount,
+                    subtotal: editTotals.subtotal,
+                    total_vat: editTotals.totalVat,
+                    grand_total: editTotals.grandTotal,
+                });
+            }
         } catch (err) {
             console.error(err);
             toast.error('Failed to save invoice');
@@ -190,6 +204,40 @@ const InvoiceDetail = ({ invoice, onClose, supplierDetails, onUpdated }) => {
         }
     };
 
+    // ─── SYNC TO XERO ───
+    const handleSyncToXero = async () => {
+        if (invoice.xero_invoice_id) {
+            toast('This invoice is already synced to Xero', { icon: 'ℹ️' });
+            return;
+        }
+        setSyncingXero(true);
+        try {
+            const { getFunctions, httpsCallable } = await import('firebase/functions');
+            const functions = getFunctions();
+            const xeroSyncInvoice = httpsCallable(functions, 'xeroSyncInvoice');
+            const result = await xeroSyncInvoice({ invoiceId: invoice.id });
+
+            if (result.data?.success) {
+                toast.success(result.data.message || 'Synced to Xero!');
+                // Update local invoice state
+                if (onUpdated) {
+                    onUpdated({
+                        ...invoice,
+                        xero_invoice_id: result.data.xeroInvoiceId,
+                        xero_invoice_number: result.data.xeroInvoiceNumber,
+                        xero_status: 'synced',
+                        xero_synced_at: new Date(),
+                    });
+                }
+            }
+        } catch (err) {
+            console.error('Xero sync failed:', err);
+            toast.error(err?.message || 'Failed to sync to Xero. Check the restaurant mapping in Settings → Integrations.');
+        } finally {
+            setSyncingXero(false);
+        }
+    };
+
     // ─── DISPLAY DATA ───
     const isProduction = invoice.type === 'production';
     const supplier = invoice.supplier || supplierDetails || { name: 'Watan Central Kitchen' };
@@ -223,7 +271,18 @@ const InvoiceDetail = ({ invoice, onClose, supplierDetails, onUpdated }) => {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                         <h2 style={{ margin: 0, fontSize: '1.25rem' }}>Invoice <span className="text-monospace">{invoice.invoice_number}</span></h2>
                         {invoice.status === 'issued' && <span className="badge badge-info"><MdCheckCircle /> Issued</span>}
-                        {invoice.xero_status === 'synced' && <span className="badge badge-success">✓ Synced to Xero</span>}
+                        {invoice.xero_invoice_id && (
+                            <span className="badge badge-success" style={{ background: 'rgba(19, 181, 234, 0.12)', color: '#0d9dd9', border: '1px solid rgba(19, 181, 234, 0.3)' }}
+                                title={`Xero Invoice: ${invoice.xero_invoice_number || invoice.xero_invoice_id}`}>
+                                ✓ Synced to Xero
+                            </span>
+                        )}
+                        {invoice.xero_sync_error && !invoice.xero_invoice_id && (
+                            <span className="badge badge-danger" style={{ background: 'rgba(239, 68, 68, 0.12)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.3)' }}
+                                title={invoice.xero_sync_error}>
+                                ✗ Xero Sync Failed
+                            </span>
+                        )}
                         {editing && <span className="badge badge-warning" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#d97706', border: '1px solid rgba(245, 158, 11, 0.3)' }}>✏️ Editing</span>}
                     </div>
                     <button className="btn btn-icon" onClick={onClose}
@@ -497,6 +556,21 @@ const InvoiceDetail = ({ invoice, onClose, supplierDetails, onUpdated }) => {
                                     style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px' }}>
                                     <MdEmail size={16} /> {sendingEmail ? 'Sending...' : 'Send Email'}
                                 </button>
+                                {!isProduction && (
+                                    <button
+                                        className="btn btn-ghost btn-md"
+                                        onClick={handleSyncToXero}
+                                        disabled={syncingXero || !!invoice.xero_invoice_id}
+                                        style={{
+                                            display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px',
+                                            color: invoice.xero_invoice_id ? '#22c55e' : '#13b5ea',
+                                        }}
+                                        title={invoice.xero_invoice_id ? `Synced: ${invoice.xero_invoice_number || invoice.xero_invoice_id}` : 'Sync this invoice to Xero'}
+                                    >
+                                        <MdSync size={16} className={syncingXero ? 'xero-spin' : ''} />
+                                        {syncingXero ? 'Syncing...' : invoice.xero_invoice_id ? 'Synced ✓' : 'Sync to Xero'}
+                                    </button>
+                                )}
                                 <button className="btn btn-primary btn-md" onClick={handleDownloadPDF}
                                     style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 20px', fontSize: 15 }}>
                                     <MdFileDownload size={18} /> Download PDF

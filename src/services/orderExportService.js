@@ -406,5 +406,158 @@ export const downloadDispatchExcel = (gridData) => {
         XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
     });
 
-    XLSX.writeFile(workbook, `dispatch_orders_${fileDate()}.xlsx`);
+XLSX.writeFile(workbook, `dispatch_orders_${fileDate()}.xlsx`);
+};
+
+// ═══════════════════════════════════════════
+// 5. SINGLE ORDER PDF — Individual order detail
+// ═══════════════════════════════════════════
+
+/**
+ * Generate a PDF for a single order.
+ * @param {Object} order — Full order object with items, totals, etc.
+ */
+export const downloadSingleOrderPDF = (order) => {
+    const doc = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4',
+    });
+
+    const pageWidth = doc.internal.pageSize.getWidth();
+
+    // ── Header ──
+    doc.setFontSize(20);
+    doc.setFont('helvetica', 'bold');
+    doc.text('WATAN', 15, 18);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Central Kitchen', 15, 24);
+
+    // Order number right-aligned
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Order ${order.order_number || ''}`, pageWidth - 15, 18, { align: 'right' });
+
+    // Divider
+    doc.setDrawColor(200, 200, 200);
+    doc.setLineWidth(0.5);
+    doc.line(15, 28, pageWidth - 15, 28);
+
+    // ── Order Info ──
+    let yPos = 36;
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+
+    const infoRows = [
+        ['Restaurant:', order.restaurant_name || '—'],
+        ['Order Date:', order.created_at ? new Date(order.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'],
+        ['Status:', (order.status || '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())],
+    ];
+
+    if (order.invoice_number) {
+        infoRows.push(['Invoice #:', order.invoice_number]);
+    }
+
+    infoRows.forEach(([label, value]) => {
+        doc.setFont('helvetica', 'bold');
+        doc.text(label, 15, yPos);
+        doc.setFont('helvetica', 'normal');
+        doc.text(value, 55, yPos);
+        yPos += 6;
+    });
+
+    yPos += 4;
+
+    // ── Items Table ──
+    const items = order.items || [];
+    const tableHeaders = ['#', 'Item', 'Qty', 'Unit', 'Price', 'VAT %', 'Total'];
+    const tableRows = items.map((item, idx) => [
+        (idx + 1).toString(),
+        item.item_name || '',
+        (item.quantity || 0).toString(),
+        item.unit || '',
+        `£${(item.selling_price || 0).toFixed(2)}`,
+        `${item.vat_rate || 0}%`,
+        `£${(item.line_total || 0).toFixed(2)}`,
+    ]);
+
+    autoTable(doc, {
+        head: [tableHeaders],
+        body: tableRows,
+        startY: yPos,
+        theme: 'grid',
+        styles: {
+            fontSize: 10,
+            cellPadding: 3,
+            font: 'helvetica',
+            lineColor: [0, 0, 0],
+            lineWidth: 0.2,
+        },
+        headStyles: {
+            fillColor: [44, 62, 80],
+            textColor: [255, 255, 255],
+            fontStyle: 'bold',
+            fontSize: 10,
+            lineColor: [0, 0, 0],
+            lineWidth: 0.3,
+        },
+        columnStyles: {
+            0: { cellWidth: 10, halign: 'center' },
+            1: { cellWidth: 60 },
+            2: { cellWidth: 15, halign: 'center' },
+            3: { cellWidth: 20 },
+            4: { cellWidth: 25, halign: 'right' },
+            5: { cellWidth: 18, halign: 'center' },
+            6: { cellWidth: 25, halign: 'right' },
+        },
+        alternateRowStyles: {
+            fillColor: [245, 245, 245],
+        },
+    });
+
+    // ── Totals ──
+    const finalY = doc.lastAutoTable.finalY + 6;
+
+    const totalsData = [
+        ['Subtotal', `£${(order.subtotal || 0).toFixed(2)}`],
+        ['VAT', `£${(order.vat_amount || 0).toFixed(2)}`],
+        ['Total', `£${(order.total || 0).toFixed(2)}`],
+    ];
+
+    totalsData.forEach(([label, value], idx) => {
+        const y = finalY + idx * 7;
+        const isBold = idx === totalsData.length - 1;
+        doc.setFont('helvetica', isBold ? 'bold' : 'normal');
+        doc.setFontSize(isBold ? 12 : 10);
+        doc.text(label, pageWidth - 65, y, { align: 'right' });
+        doc.text(value, pageWidth - 15, y, { align: 'right' });
+        if (isBold) {
+            doc.setDrawColor(0, 0, 0);
+            doc.setLineWidth(0.5);
+            doc.line(pageWidth - 75, y - 4, pageWidth - 15, y - 4);
+        }
+    });
+
+    // ── Notes ──
+    if (order.notes) {
+        const notesY = finalY + totalsData.length * 7 + 10;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10);
+        doc.text('Notes:', 15, notesY);
+        doc.setFont('helvetica', 'normal');
+        const splitNotes = doc.splitTextToSize(order.notes, pageWidth - 30);
+        doc.text(splitNotes, 15, notesY + 6);
+    }
+
+    // ── Footer ──
+    const footerY = doc.internal.pageSize.getHeight() - 12;
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(150, 150, 150);
+    doc.text(`Generated: ${formatDate()}`, 15, footerY);
+    doc.text('Watan Central Kitchen', pageWidth - 15, footerY, { align: 'right' });
+
+    const orderNum = (order.order_number || 'order').replace(/[^a-zA-Z0-9]/g, '_');
+    doc.save(`order_${orderNum}_${fileDate()}.pdf`);
 };

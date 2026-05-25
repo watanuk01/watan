@@ -3,7 +3,7 @@ import {
     getOrders, bulkMarkReady, cancelOrder, ORDER_STATUSES, subscribeToOrders
 } from '../../services/orderService';
 import {
-    downloadPDF, downloadExcel, downloadDispatchPDF, downloadDispatchExcel
+    downloadPDF, downloadExcel, downloadDispatchPDF, downloadDispatchExcel, downloadSingleOrderPDF
 } from '../../services/orderExportService';
 import { getItems } from '../../services/inventoryService';
 import {
@@ -16,6 +16,7 @@ import './Orders.css';
 
 const DATE_RANGES = [
     { value: 'today', label: 'Today' },
+    { value: 'yesterday', label: 'Yesterday' },
     { value: '3days', label: 'Last 3 Days' },
     { value: '7days', label: 'Last 7 Days' },
     { value: '30days', label: 'Last 30 Days' },
@@ -58,6 +59,9 @@ const TodaysOrders = () => {
 
         if (dateRange === 'today') {
             start.setHours(0, 0, 0, 0);
+        } else if (dateRange === 'yesterday') {
+            start.setDate(now.getDate() - 1); start.setHours(0, 0, 0, 0);
+            end.setDate(now.getDate() - 1); end.setHours(23, 59, 59, 999);
         } else if (dateRange === '3days') {
             start.setDate(now.getDate() - 3); start.setHours(0, 0, 0, 0);
         } else if (dateRange === '7days') {
@@ -71,7 +75,9 @@ const TodaysOrders = () => {
 
         const filteredData = data.filter(order => {
             const orderDate = new Date(order.created_at);
-            if (dateRange === 'custom' && customStartDate && customEndDate) {
+            if (dateRange === 'yesterday') {
+                return orderDate >= start && orderDate <= end;
+            } else if (dateRange === 'custom' && customStartDate && customEndDate) {
                 return orderDate >= start && orderDate <= end;
             } else if (dateRange !== 'all') {
                 return orderDate >= start;
@@ -686,6 +692,9 @@ const TodaysOrders = () => {
                                             </td>
                                             <td>
                                                 <strong>{order.order_number}</strong>
+                                                {order.admin_created && (
+                                                    <span className="admin-order-badge">👤 Admin</span>
+                                                )}
                                             </td>
                                             <td>{order.restaurant_name || '—'}</td>
                                             <td>{formatDate(order.created_at)}</td>
@@ -749,7 +758,12 @@ const TodaysOrders = () => {
                                 {/* Header */}
                                 <div className="modal-header" style={{ borderBottom: '1px solid var(--color-border)', padding: '20px 24px' }}>
                                     <div>
-                                        <h2 style={{ margin: 0, fontSize: '1.25rem' }}>Order {detailOrder.order_number}</h2>
+                                        <h2 style={{ margin: 0, fontSize: '1.25rem' }}>
+                                            Order {detailOrder.order_number}
+                                            {detailOrder.admin_created && (
+                                                <span className="admin-order-badge">👤 Admin</span>
+                                            )}
+                                        </h2>
                                         <span style={{ fontSize: '0.85em', color: 'var(--color-text-secondary)' }}>{detailOrder.restaurant_name}</span>
                                     </div>
                                     <button className="btn btn-icon" onClick={() => setDetailOrder(null)} style={{ background: 'var(--color-surface-hover)', borderRadius: '50%', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer' }}>
@@ -792,6 +806,7 @@ const TodaysOrders = () => {
                                                 <tr>
                                                     <th>Item</th>
                                                     <th>Type</th>
+                                                    <th>Category</th>
                                                     <th style={{ textAlign: 'center' }}>Qty</th>
                                                     <th>Unit</th>
                                                     <th style={{ textAlign: 'right' }}>Price</th>
@@ -804,6 +819,7 @@ const TodaysOrders = () => {
                                                     <tr key={idx}>
                                                         <td><strong>{item.item_name}</strong></td>
                                                         <td style={{ opacity: 0.7 }}>{item.item_type || '—'}</td>
+                                                        <td style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>{item.category_name || '—'}</td>
                                                         <td style={{ textAlign: 'center', fontWeight: 600 }}>{item.quantity}</td>
                                                         <td>{item.unit}</td>
                                                         <td style={{ textAlign: 'right' }}>£{(item.selling_price || 0).toFixed(2)}</td>
@@ -814,15 +830,15 @@ const TodaysOrders = () => {
                                             </tbody>
                                             <tfoot>
                                                 <tr style={{ borderTop: '1px solid var(--color-border)' }}>
-                                                    <td colSpan="6" style={{ textAlign: 'right', opacity: 0.7 }}>Subtotal</td>
+                                                    <td colSpan="7" style={{ textAlign: 'right', opacity: 0.7 }}>Subtotal</td>
                                                     <td style={{ textAlign: 'right' }}>£{(detailOrder.subtotal || 0).toFixed(2)}</td>
                                                 </tr>
                                                 <tr>
-                                                    <td colSpan="6" style={{ textAlign: 'right', opacity: 0.7 }}>VAT</td>
+                                                    <td colSpan="7" style={{ textAlign: 'right', opacity: 0.7 }}>VAT</td>
                                                     <td style={{ textAlign: 'right' }}>£{(detailOrder.vat_amount || 0).toFixed(2)}</td>
                                                 </tr>
                                                 <tr style={{ borderTop: '2px solid var(--color-border)' }}>
-                                                    <td colSpan="6" style={{ textAlign: 'right', fontWeight: 700, fontSize: '1.05em' }}>Total</td>
+                                                    <td colSpan="7" style={{ textAlign: 'right', fontWeight: 700, fontSize: '1.05em' }}>Total</td>
                                                     <td style={{ textAlign: 'right', fontWeight: 700, fontSize: '1.05em', color: 'var(--color-primary)' }}>£{(detailOrder.total || 0).toFixed(2)}</td>
                                                 </tr>
                                             </tfoot>
@@ -832,6 +848,21 @@ const TodaysOrders = () => {
 
                                 {/* Footer */}
                                 <div className="modal-footer" style={{ borderTop: '1px solid var(--color-border)', padding: '16px 24px', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                                    <button
+                                        className="btn btn-secondary"
+                                        onClick={() => {
+                                            try {
+                                                downloadSingleOrderPDF(detailOrder);
+                                                toast.success('PDF downloaded');
+                                            } catch (err) {
+                                                console.error('PDF error:', err);
+                                                toast.error('Failed to generate PDF');
+                                            }
+                                        }}
+                                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px' }}
+                                    >
+                                        <MdFileDownload /> Download PDF
+                                    </button>
                                     <button className="btn btn-secondary" onClick={() => setDetailOrder(null)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px' }}>
                                         Close
                                     </button>

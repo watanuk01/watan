@@ -293,15 +293,15 @@ const PendingOrders = () => {
                                             {item.item_type === 'raw_meat' ? '🥩' : '🛒'} {item.item_name}
                                         </span>
                                         <span className="receive-item-meta">
-                                            Ordered: {item.ordered_quantity} {item.unit} · £{item.received_price?.toFixed(2)}/{item.unit}
+                                            Ordered: {item.ordered_quantity} {item.unit} · £{Number(item.received_price || 0).toFixed(2)}/{item.unit}
                                         </span>
                                     </div>
                                     <div className="receive-field">
                                         <label>Received Qty</label>
                                         <input
                                             type="number"
-                                            value={item.received_quantity}
-                                            onChange={(e) => updateReceiveData(item.item_id, 'received_quantity', e.target.value)}
+                                            value={item.received_quantity ?? ''}
+                                            onChange={(e) => updateReceiveData(item.item_id, 'received_quantity', e.target.value === '' ? '' : Number(e.target.value))}
                                             min="0"
                                             step="0.1"
                                         />
@@ -310,8 +310,8 @@ const PendingOrders = () => {
                                         <label>Unit Price (£)</label>
                                         <input
                                             type="number"
-                                            value={item.received_price}
-                                            onChange={(e) => updateReceiveData(item.item_id, 'received_price', e.target.value)}
+                                            value={item.received_price ?? ''}
+                                            onChange={(e) => updateReceiveData(item.item_id, 'received_price', e.target.value === '' ? '' : Number(e.target.value))}
                                             min="0"
                                             step="0.01"
                                         />

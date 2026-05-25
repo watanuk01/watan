@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { getRestaurantInventory } from '../../services/restaurantInventoryService';
+import { getItems as getCKItems } from '../../services/inventoryService';
 import {
     MENU_CATEGORIES,
     ALLERGEN_CODES,
@@ -97,11 +98,31 @@ const MenuItemForm = ({ isOpen, onClose, onSaved, editItem, restaurantId }) => {
         const load = async () => {
             setLoadingInventory(true);
             try {
-                const [inv, menus] = await Promise.all([
+                const [inv, menus, ckItems] = await Promise.all([
                     getRestaurantInventory(restaurantId),
                     getMenuItems(restaurantId),
+                    getCKItems(),
                 ]);
-                setInventoryItems(inv);
+
+                // Build CK item lookup by doc ID for unit_conversion enrichment
+                const ckMap = {};
+                ckItems.forEach(ck => { ckMap[ck.id] = ck; });
+
+                // Enrich restaurant inventory items with CK unit_conversion & base_unit
+                const enrichedInv = inv.map(item => {
+                    const ckItem = ckMap[item.item_id];
+                    if (ckItem) {
+                        return {
+                            ...item,
+                            // Prefer CK unit_conversion (source of truth) over restaurant copy
+                            unit_conversion: ckItem.unit_conversion || item.unit_conversion || { has_conversion: false, levels: [], base_factor: 1 },
+                            base_unit: ckItem.base_unit || item.base_unit || item.unit,
+                        };
+                    }
+                    return item;
+                });
+
+                setInventoryItems(enrichedInv);
                 // Exclude current item from composable list
                 setExistingMenuItems(menus.filter(m => m.id !== editItem?.id));
             } catch {

@@ -23,6 +23,7 @@ import {
     MdExpandMore,
     MdExpandLess,
     MdPool,
+    MdSync,
 } from 'react-icons/md';
 import './Sidebar.css';
 
@@ -121,6 +122,7 @@ const Sidebar = () => {
                     { type: 'item', label: 'Invoices', icon: MdReceipt, path: '/restaurant/invoices' },
                     { type: 'item', label: 'Waste Management', icon: MdDelete, path: '/waste' },
                     { type: 'item', label: 'Menu Management', icon: MdMenuBook, path: '/restaurant/menu' },
+                    { type: 'item', label: 'EPOS Mapping', icon: MdSync, path: '/restaurant/epos-mapping' },
                     { type: 'divider' },
                     { type: 'item', label: 'Notifications', icon: MdNotifications, path: '/notifications' },
                 ];

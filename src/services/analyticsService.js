@@ -57,8 +57,9 @@ export const getPresetDates = (presetId) => {
 // ════════════════════════════════════════════════════════
 let _orderCache = null;
 let _wasteCache = null;
+let _invoiceCache = null;
 
-export const clearCache = () => { _orderCache = null; _wasteCache = null; };
+export const clearCache = () => { _orderCache = null; _wasteCache = null; _invoiceCache = null; };
 
 const getOrders = async () => {
     if (_orderCache) return _orderCache;
@@ -89,12 +90,28 @@ const applyFilters = (rows, { dateFrom, dateTo, restaurantId, restaurantName } =
 // CK DASHBOARD METRICS
 // ════════════════════════════════════════════════════════
 
+const getInvoices = async () => {
+    if (_invoiceCache) return _invoiceCache;
+    const snap = await getDocs(collection(db, 'invoices'));
+    _invoiceCache = snap.docs.map(d => {
+        const data = d.data();
+        return {
+            id: d.id,
+            ...data,
+            invoice_date: toDate(data.invoice_date),
+            created_at: toDate(data.created_at),
+        };
+    });
+    return _invoiceCache;
+};
+
 export const fetchDashboardMetrics = async (filters = {}) => {
-    const [items, orders, waste, batches] = await Promise.all([
+    const [items, orders, waste, batches, invoices] = await Promise.all([
         getDocs(query(collection(db, 'inventory_items'), where('status', '==', 'active'))),
         getOrders(),
         getWaste(),
         getDocs(collection(db, 'inventory_batches')),
+        getInvoices(),
     ]);
 
     const todayStart = startOfDay();
@@ -150,6 +167,65 @@ export const fetchDashboardMetrics = async (filters = {}) => {
         .sort((a, b) => (b.created_at || 0) - (a.created_at || 0))
         .slice(0, 5);
 
+    // ─── Revenue from Invoices (Restaurant Billing) ───
+    const filteredInvoices = invoices.filter(inv => {
+        const invDate = inv.invoice_date || inv.created_at;
+        if (filters.dateFrom && invDate && invDate < filters.dateFrom) return false;
+        if (filters.dateTo && invDate && invDate > filters.dateTo) return false;
+
+        if (filters.restaurantId || filters.restaurantName) {
+            const invRestId = inv.customer?.restaurant_id || '';
+            const invRestName = inv.customer?.restaurant_name || inv.customer?.name || '';
+
+            let matches = false;
+            if (filters.restaurantId && invRestId) {
+                matches = invRestId === filters.restaurantId;
+            }
+            if (!matches && filters.restaurantName && invRestName) {
+                matches = invRestName === filters.restaurantName;
+            }
+            if (!matches) return false;
+        }
+
+        if (inv.status === 'void') return false;
+        return true;
+    });
+
+    let totalRevenue = 0, paidRevenue = 0, pendingRevenue = 0;
+    filteredInvoices.forEach(inv => {
+        const amount = inv.grand_total || 0;
+        totalRevenue += amount;
+        if (inv.status === 'paid') {
+            paidRevenue += amount;
+        } else {
+            pendingRevenue += amount;
+        }
+    });
+
+    // ─── Production Cost (CK-level, not restaurant-specific) ───
+    // Sum total_ingredient_cost from completed productions in the date range
+    const productionDocs = await getDocs(collection(db, 'productions'));
+    const allProductions = productionDocs.docs.map(d => {
+        const data = d.data();
+        return {
+            id: d.id,
+            ...data,
+            created_at: toDate(data.created_at),
+            completed_at: toDate(data.completed_at),
+        };
+    });
+
+    let productionCost = 0;
+    let productionCount = 0;
+    allProductions.forEach(p => {
+        if (p.status !== 'completed') return;
+        const pDate = p.completed_at || p.created_at;
+        if (filters.dateFrom && pDate && pDate < filters.dateFrom) return;
+        if (filters.dateTo && pDate && pDate > filters.dateTo) return;
+        productionCost += p.total_ingredient_cost || 0;
+        productionCount++;
+    });
+
     return {
         inventoryValue,
         lowStockCount,
@@ -165,6 +241,12 @@ export const fetchDashboardMetrics = async (filters = {}) => {
         wasteInRange,
         nearExpiryBatches,
         recentOrders,
+        totalRevenue: Math.round(totalRevenue * 100) / 100,
+        paidRevenue: Math.round(paidRevenue * 100) / 100,
+        pendingRevenue: Math.round(pendingRevenue * 100) / 100,
+        invoiceCount: filteredInvoices.length,
+        productionCost: Math.round(productionCost * 100) / 100,
+        productionCount,
     };
 };
 
@@ -232,6 +314,114 @@ export const fetchTopOrderedItems = async (limit = 10, filters = {}) => {
         .sort((a, b) => b.quantity - a.quantity)
         .slice(0, limit)
         .map(i => ({ ...i, quantity: Math.round(i.quantity * 10) / 10, value: Math.round(i.value * 100) / 100 }));
+};
+
+/**
+ * Item Daily Trend — top N items' daily quantities over the date range.
+ * Returns: [{ date: '01 May', 'Chicken Tikka': 12, 'Lamb Biryani': 8, ... }, ...]
+ * Plus: { itemNames: ['Chicken Tikka', 'Lamb Biryani', ...] }
+ */
+export const fetchItemDailyTrend = async (limit = 5, filters = {}) => {
+    const { dateFrom = daysAgo(30), dateTo = endOfDay() } = filters;
+    const allOrders = await getOrders();
+    const filtered = applyFilters(allOrders, filters);
+
+    // Step 1: Find top N items by total quantity
+    const totals = {};
+    filtered.forEach(o => {
+        (o.items || []).forEach(item => {
+            const name = item.item_name;
+            if (!name) return;
+            totals[name] = (totals[name] || 0) + (item.quantity || 0);
+        });
+    });
+    const topItemNames = Object.entries(totals)
+        .sort(([, a], [, b]) => b - a)
+        .slice(0, limit)
+        .map(([name]) => name);
+
+    if (topItemNames.length === 0) return { data: [], itemNames: [] };
+
+    // Step 2: Build day → item quantity map
+    const dayMap = {};
+    const cursor = new Date(dateFrom);
+    while (cursor <= dateTo) {
+        const key = cursor.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+        dayMap[key] = { date: key };
+        topItemNames.forEach(name => { dayMap[key][name] = 0; });
+        cursor.setDate(cursor.getDate() + 1);
+    }
+
+    filtered.forEach(o => {
+        const ca = o.created_at;
+        if (!ca) return;
+        const key = ca.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+        if (!dayMap[key]) return;
+        (o.items || []).forEach(item => {
+            if (topItemNames.includes(item.item_name)) {
+                dayMap[key][item.item_name] += item.quantity || 0;
+            }
+        });
+    });
+
+    return {
+        data: Object.values(dayMap),
+        itemNames: topItemNames,
+    };
+};
+
+/**
+ * Item × Restaurant Matrix — cross-tab of items by restaurants.
+ * Returns: { items: [{ name, total, restaurants: { restName: qty } }], restaurantNames: [...] }
+ * Always shows ALL restaurants (ignores restaurant filter) but returns the filtered one for highlighting.
+ */
+export const fetchItemRestaurantMatrix = async (limit = 15, filters = {}) => {
+    const allOrders = await getOrders();
+    // Only apply date filters (show all restaurants always)
+    const { restaurantId, restaurantName, ...dateFilters } = filters;
+    const filtered = applyFilters(allOrders, dateFilters);
+
+    // Build item → restaurant → quantity map
+    const itemMap = {};
+    const restaurantSet = new Set();
+
+    filtered.forEach(o => {
+        const restName = o.restaurant_name || 'Unknown';
+        restaurantSet.add(restName);
+
+        (o.items || []).forEach(item => {
+            const name = item.item_name;
+            if (!name) return;
+            if (!itemMap[name]) itemMap[name] = { name, total: 0, restaurants: {} };
+            itemMap[name].total += item.quantity || 0;
+            itemMap[name].restaurants[restName] = (itemMap[name].restaurants[restName] || 0) + (item.quantity || 0);
+        });
+    });
+
+    const restaurantNames = [...restaurantSet].sort();
+    const items = Object.values(itemMap)
+        .sort((a, b) => b.total - a.total)
+        .slice(0, limit)
+        .map(item => ({
+            ...item,
+            total: Math.round(item.total * 10) / 10,
+            restaurants: Object.fromEntries(
+                Object.entries(item.restaurants).map(([k, v]) => [k, Math.round(v * 10) / 10])
+            ),
+        }));
+
+    // Find max quantity for heatmap color scaling
+    let maxQty = 0;
+    items.forEach(item => {
+        Object.values(item.restaurants).forEach(v => { if (v > maxQty) maxQty = v; });
+    });
+
+    return {
+        items,
+        restaurantNames,
+        maxQty,
+        highlightRestaurant: restaurantName || null,
+    };
 };
 
 /** Top restaurants by total order value — respects date filters only */

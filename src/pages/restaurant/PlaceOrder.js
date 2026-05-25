@@ -9,6 +9,7 @@ import {
     MdRemove,
     MdClose,
     MdSend,
+    MdWarning,
 } from 'react-icons/md';
 import toast from 'react-hot-toast';
 import './Restaurant.css';
@@ -21,6 +22,8 @@ const PlaceOrder = () => {
     const [items, setItems] = useState([]);
     const [loading, setLoading] = useState(true);
     const [activeType, setActiveType] = useState('grocery');
+    const [activeCategory, setActiveCategory] = useState('all');
+    const [showLowStock, setShowLowStock] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [cart, setCart] = useState(() => {
         try {
@@ -66,15 +69,31 @@ const PlaceOrder = () => {
         loadItems();
     }, [loadItems]);
 
-    // Filter items by search
+    // Extract unique categories from loaded items
+    const categories = useMemo(() => {
+        const cats = new Set();
+        items.forEach(i => { if (i.category_name) cats.add(i.category_name); });
+        return [...cats].sort();
+    }, [items]);
+
+    // Filter items by category, low stock, and search
     const filteredItems = useMemo(() => {
-        if (!searchQuery.trim()) return items;
-        const q = searchQuery.toLowerCase();
-        return items.filter(i =>
-            i.name?.toLowerCase().includes(q) ||
-            i.category_name?.toLowerCase().includes(q)
-        );
-    }, [items, searchQuery]);
+        let result = items;
+        if (activeCategory !== 'all') {
+            result = result.filter(i => i.category_name === activeCategory);
+        }
+        if (showLowStock) {
+            result = result.filter(i => (i.current_stock || 0) <= (i.low_stock_threshold || 5));
+        }
+        if (searchQuery.trim()) {
+            const q = searchQuery.toLowerCase();
+            result = result.filter(i =>
+                i.name?.toLowerCase().includes(q) ||
+                i.category_name?.toLowerCase().includes(q)
+            );
+        }
+        return result;
+    }, [items, activeCategory, showLowStock, searchQuery]);
 
     // Get stock status info
     const getStockStatus = (item) => {
@@ -218,7 +237,7 @@ const PlaceOrder = () => {
                                 <button
                                     key={type.value}
                                     className={`type-tab ${activeType === type.value ? 'active' : ''}`}
-                                    onClick={() => { setActiveType(type.value); setSearchQuery(''); }}
+                                    onClick={() => { setActiveType(type.value); setSearchQuery(''); setActiveCategory('all'); setShowLowStock(false); }}
                                     style={activeType === type.value ? { borderColor: type.color, color: type.color } : {}}
                                 >
                                     <span>{type.icon}</span> {type.label}
@@ -233,6 +252,48 @@ const PlaceOrder = () => {
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
                             />
+                        </div>
+
+                        {/* Category Chips + Low Stock */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap', marginTop: 'var(--space-3)' }}>
+                            <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap', flex: 1 }}>
+                                <button
+                                    className={`type-tab ${activeCategory === 'all' ? 'active' : ''}`}
+                                    onClick={() => setActiveCategory('all')}
+                                    style={{ fontSize: 11, padding: '3px 10px', '--type-color': 'var(--color-primary)' }}
+                                >
+                                    All
+                                </button>
+                                {categories.map(cat => (
+                                    <button
+                                        key={cat}
+                                        className={`type-tab ${activeCategory === cat ? 'active' : ''}`}
+                                        onClick={() => setActiveCategory(cat)}
+                                        style={{ fontSize: 11, padding: '3px 10px', '--type-color': '#3b82f6' }}
+                                    >
+                                        {cat}
+                                    </button>
+                                ))}
+                            </div>
+                            <button
+                                onClick={() => setShowLowStock(prev => !prev)}
+                                style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                    padding: '4px 10px',
+                                    borderRadius: 16,
+                                    border: showLowStock ? '1px solid #f59e0b' : '1px solid var(--color-border)',
+                                    background: showLowStock ? 'rgba(245, 158, 11, 0.15)' : 'transparent',
+                                    color: showLowStock ? '#f59e0b' : 'var(--color-text-secondary)',
+                                    fontSize: 11,
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                    whiteSpace: 'nowrap',
+                                }}
+                            >
+                                <MdWarning size={13} /> Low Stock
+                            </button>
                         </div>
                     </div>
 

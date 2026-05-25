@@ -299,6 +299,9 @@ const OrdersGrid = () => {
                                         </td>
                                         <td>
                                             <strong>{order.order_number}</strong>
+                                            {order.admin_created && (
+                                                <span className="admin-order-badge">👤 Admin</span>
+                                            )}
                                         </td>
                                         <td>{order.restaurant_name || '—'}</td>
                                         <td>{formatDate(order.created_at)}</td>
@@ -353,7 +356,12 @@ const OrdersGrid = () => {
                 <div className="modal-overlay" onClick={() => setDetailOrder(null)}>
                     <div className="modal modal-lg" onClick={(e) => e.stopPropagation()}>
                         <div className="modal-header">
-                            <h2>Order {detailOrder.order_number}</h2>
+                            <h2>
+                                Order {detailOrder.order_number}
+                                {detailOrder.admin_created && (
+                                    <span className="admin-order-badge">👤 Admin</span>
+                                )}
+                            </h2>
                             <button className="btn btn-icon" onClick={() => setDetailOrder(null)}>
                                 <MdClose />
                             </button>
@@ -405,6 +413,7 @@ const OrdersGrid = () => {
                                         <tr>
                                             <th>Item</th>
                                             <th>Type</th>
+                                            <th>Category</th>
                                             <th>Qty</th>
                                             <th>Unit</th>
                                             <th>Price</th>
@@ -416,26 +425,27 @@ const OrdersGrid = () => {
                                         {detailOrder.items?.map((item, idx) => (
                                             <tr key={idx}>
                                                 <td><strong>{item.item_name}</strong></td>
-                                                <td>{item.item_type}</td>
+                                                <td>{item.item_type || '—'}</td>
+                                                <td style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>{item.category_name || '—'}</td>
                                                 <td>{item.quantity}</td>
                                                 <td>{item.unit}</td>
                                                 <td>£{(item.selling_price || 0).toFixed(2)}</td>
-                                                <td>{item.vat_rate}%</td>
+                                                <td>{item.vat_rate || 0}%</td>
                                                 <td>£{(item.line_total || 0).toFixed(2)}</td>
                                             </tr>
                                         ))}
                                     </tbody>
                                     <tfoot>
                                         <tr>
-                                            <td colSpan="6" style={{ textAlign: 'right' }}>Subtotal</td>
+                                            <td colSpan="7" style={{ textAlign: 'right' }}>Subtotal</td>
                                             <td>£{(detailOrder.subtotal || 0).toFixed(2)}</td>
                                         </tr>
                                         <tr>
-                                            <td colSpan="6" style={{ textAlign: 'right' }}>VAT</td>
+                                            <td colSpan="7" style={{ textAlign: 'right' }}>VAT</td>
                                             <td>£{(detailOrder.vat_amount || 0).toFixed(2)}</td>
                                         </tr>
                                         <tr>
-                                            <td colSpan="6" style={{ textAlign: 'right', fontSize: 'var(--text-base)' }}>Total</td>
+                                            <td colSpan="7" style={{ textAlign: 'right', fontSize: 'var(--text-base)' }}>Total</td>
                                             <td style={{ fontSize: 'var(--text-base)' }}>£{(detailOrder.total || 0).toFixed(2)}</td>
                                         </tr>
                                     </tfoot>

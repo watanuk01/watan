@@ -20,9 +20,12 @@ import {
     MdWarning,
     MdHistory,
     MdArrowUpward,
+    MdVisibility,
 } from 'react-icons/md';
 import toast from 'react-hot-toast';
 import '../orders/Orders.css';
+
+import DeliveryDetailModal from './DeliveryDetailModal';
 
 const DeliveryOrders = () => {
     const { currentUser, userProfile } = useAuth();
@@ -43,6 +46,14 @@ const DeliveryOrders = () => {
     const [deliveryNotes, setDeliveryNotes] = useState('');
     const [completing, setCompleting] = useState(false);
     const [pickingUp, setPickingUp] = useState(false);
+
+    // Detail modal for history
+    const [detailOrder, setDetailOrder] = useState(null);
+
+    // Accordion: track which cards show all items
+    const [expandedCards, setExpandedCards] = useState({});
+    const toggleCardExpand = (orderId) => setExpandedCards(prev => ({ ...prev, [orderId]: !prev[orderId] }));
+    const ITEMS_PREVIEW = 4;
 
     // Signature — use useRef to avoid re-initialization on re-render
     const sigCanvasRef = useRef(null);
@@ -369,11 +380,54 @@ const DeliveryOrders = () => {
                                     <span>£{(order.total || order.total_amount || 0).toFixed(2)}</span>
                                     <span><MdAccessTime /> {formatDateTime(order.assigned_at || order.dispatched_at)}</span>
                                 </div>
-                                {order.items && (
-                                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-tertiary)', marginBottom: 'var(--space-3)', lineHeight: 1.5 }}>
-                                        {order.items.map(i => `${i.item_name} (${i.quantity} ${i.unit})`).join(', ')}
-                                    </div>
-                                )}
+                                {order.items && order.items.length > 0 && (() => {
+                                    const isExpanded = expandedCards[order.id];
+                                    const visibleItems = isExpanded ? order.items : order.items.slice(0, ITEMS_PREVIEW);
+                                    const hasMore = order.items.length > ITEMS_PREVIEW;
+                                    return (
+                                        <div style={{
+                                            fontSize: 'var(--text-xs)',
+                                            marginBottom: 'var(--space-3)',
+                                            background: 'var(--color-bg)',
+                                            borderRadius: 6,
+                                            border: '1px solid var(--color-border)',
+                                            overflow: 'hidden',
+                                        }}>
+                                            {visibleItems.map((i, idx) => (
+                                                <div key={idx} style={{
+                                                    display: 'flex',
+                                                    justifyContent: 'space-between',
+                                                    alignItems: 'center',
+                                                    padding: '5px 10px',
+                                                    borderBottom: (idx < visibleItems.length - 1 || hasMore) ? '1px solid var(--color-border)' : 'none',
+                                                }}>
+                                                    <span style={{ color: 'var(--color-text-secondary)' }}>{i.item_name}</span>
+                                                    <span style={{ fontWeight: 600, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono, monospace)', whiteSpace: 'nowrap' }}>
+                                                        {i.quantity} {i.unit}
+                                                    </span>
+                                                </div>
+                                            ))}
+                                            {hasMore && (
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); toggleCardExpand(order.id); }}
+                                                    style={{
+                                                        width: '100%',
+                                                        padding: '5px 10px',
+                                                        background: 'transparent',
+                                                        border: 'none',
+                                                        color: 'var(--color-primary)',
+                                                        fontSize: 'var(--text-xs)',
+                                                        fontWeight: 600,
+                                                        cursor: 'pointer',
+                                                        textAlign: 'center',
+                                                    }}
+                                                >
+                                                    {isExpanded ? '▲ Show less' : `▼ Show ${order.items.length - ITEMS_PREVIEW} more`}
+                                                </button>
+                                            )}
+                                        </div>
+                                    );
+                                })()}
                                 {order.missing_items?.length > 0 && (
                                     <div style={{ fontSize: 'var(--text-xs)', color: '#ef4444', marginBottom: 'var(--space-3)', display: 'flex', alignItems: 'center', gap: 4 }}>
                                         <MdWarning /> {order.missing_items.length} item discrepancy reported
@@ -409,6 +463,54 @@ const DeliveryOrders = () => {
                                     <span><MdShoppingCart /> {order.items?.length || 0} items</span>
                                     <span>£{(order.total || order.total_amount || 0).toFixed(2)}</span>
                                 </div>
+                                {order.items && order.items.length > 0 && (() => {
+                                    const isExpanded = expandedCards[`pool_${order.id}`];
+                                    const visibleItems = isExpanded ? order.items : order.items.slice(0, ITEMS_PREVIEW);
+                                    const hasMore = order.items.length > ITEMS_PREVIEW;
+                                    return (
+                                        <div style={{
+                                            fontSize: 'var(--text-xs)',
+                                            marginBottom: 'var(--space-3)',
+                                            background: 'var(--color-bg)',
+                                            borderRadius: 6,
+                                            border: '1px solid var(--color-border)',
+                                            overflow: 'hidden',
+                                        }}>
+                                            {visibleItems.map((i, idx) => (
+                                                <div key={idx} style={{
+                                                    display: 'flex',
+                                                    justifyContent: 'space-between',
+                                                    alignItems: 'center',
+                                                    padding: '5px 10px',
+                                                    borderBottom: (idx < visibleItems.length - 1 || hasMore) ? '1px solid var(--color-border)' : 'none',
+                                                }}>
+                                                    <span style={{ color: 'var(--color-text-secondary)' }}>{i.item_name}</span>
+                                                    <span style={{ fontWeight: 600, color: 'var(--color-text-primary)', fontFamily: 'var(--font-mono, monospace)', whiteSpace: 'nowrap' }}>
+                                                        {i.quantity} {i.unit}
+                                                    </span>
+                                                </div>
+                                            ))}
+                                            {hasMore && (
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); toggleCardExpand(`pool_${order.id}`); }}
+                                                    style={{
+                                                        width: '100%',
+                                                        padding: '5px 10px',
+                                                        background: 'transparent',
+                                                        border: 'none',
+                                                        color: 'var(--color-primary)',
+                                                        fontSize: 'var(--text-xs)',
+                                                        fontWeight: 600,
+                                                        cursor: 'pointer',
+                                                        textAlign: 'center',
+                                                    }}
+                                                >
+                                                    {isExpanded ? '▲ Show less' : `▼ Show ${order.items.length - ITEMS_PREVIEW} more`}
+                                                </button>
+                                            )}
+                                        </div>
+                                    );
+                                })()}
                                 <button className="btn-assign" onClick={() => handleAssign(order.id)} disabled={assigningId === order.id}>
                                     {assigningId === order.id ? 'Assigning...' : (<><MdLocalShipping style={{ marginRight: 6 }} /> Assign to Me</>)}
                                 </button>
@@ -430,12 +532,12 @@ const DeliveryOrders = () => {
                             <thead>
                                 <tr>
                                     <th>Order</th><th>Restaurant</th><th>Items</th>
-                                    <th>Total</th><th>Status</th><th>Delivered</th>
+                                    <th>Total</th><th>Status</th><th>Delivered</th><th>Received By</th><th></th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {historyOrders.map(order => (
-                                    <tr key={order.id}>
+                                    <tr key={order.id} style={{ cursor: 'pointer' }} onClick={() => setDetailOrder(order)}>
                                         <td style={{ fontWeight: 600, color: 'var(--color-primary)' }}>{order.order_number}</td>
                                         <td>{order.restaurant_name}</td>
                                         <td>{order.items?.length || 0}</td>
@@ -450,6 +552,19 @@ const DeliveryOrders = () => {
                                         </td>
                                         <td style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
                                             {formatDateTime(order.delivered_at)}
+                                        </td>
+                                        <td style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+                                            {order.delivery_manager_name || '—'}
+                                        </td>
+                                        <td>
+                                            <button
+                                                className="btn-action"
+                                                title="View Details"
+                                                onClick={(e) => { e.stopPropagation(); setDetailOrder(order); }}
+                                                style={{ color: 'var(--color-primary)' }}
+                                            >
+                                                <MdVisibility />
+                                            </button>
                                         </td>
                                     </tr>
                                 ))}
@@ -655,6 +770,14 @@ const DeliveryOrders = () => {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* ─── Delivery History Detail Modal ─── */}
+            {detailOrder && (
+                <DeliveryDetailModal
+                    detailOrder={detailOrder}
+                    onClose={() => setDetailOrder(null)}
+                />
             )}
         </div>
     );

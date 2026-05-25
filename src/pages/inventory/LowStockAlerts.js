@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
     getLowStockItems,
     getItems,
@@ -6,6 +7,9 @@ import {
     ITEM_TYPES,
     resolveToBaseUnit,
 } from '../../services/inventoryService';
+import {
+    getRestaurantLowStockItems,
+} from '../../services/restaurantInventoryService';
 import {
     placeReplenishmentOrder,
     getTodaysPendingOrder,
@@ -76,10 +80,16 @@ const ThresholdEditor = ({ item, onSaved }) => {
 };
 
 // ─── Replenishment Panel (per restaurant) ───
+// Accepts items from either CK inventory or restaurant inventory.
+// Restaurant inventory items use item_name/item_id, CK items use name/id.
 const ReplenishmentPanel = ({ restaurant, ckItems, onOrderPlaced, adminUser }) => {
     const [quantities, setQuantities] = useState({});
     const [placing, setPlacing] = useState(false);
     const [todayOrder, setTodayOrder] = useState(null);
+
+    // Normalize field names: restaurant inventory uses item_name/item_id, CK uses name/id
+    const getItemId = (item) => item.item_id || item.id;
+    const getItemName = (item) => item.item_name || item.name;
 
     useEffect(() => {
         // Check if this restaurant already has a pending order today
@@ -89,19 +99,19 @@ const ReplenishmentPanel = ({ restaurant, ckItems, onOrderPlaced, adminUser }) =
 
         // Pre-fill suggested quantities for items below threshold for this restaurant
         const init = {};
-        ckItems.forEach(item => { init[item.id] = getSuggestedQty(item); });
+        ckItems.forEach(item => { init[getItemId(item)] = getSuggestedQty(item); });
         setQuantities(init);
     }, [restaurant.id, ckItems]);
 
     const handlePlace = async () => {
         const selectedItems = ckItems
             .map(item => ({
-                item_id: item.id,
-                item_name: item.name,
+                item_id: getItemId(item),
+                item_name: getItemName(item),
                 item_type: item.item_type,
                 category_name: item.category_name,
                 unit: item.unit,
-                quantity: Number(quantities[item.id] || 0),
+                quantity: Number(quantities[getItemId(item)] || 0),
                 cost_price: item.cost_price || 0,
                 selling_price: item.selling_price || 0,
                 vat_rate: item.vat_rate || 20,
@@ -140,7 +150,7 @@ const ReplenishmentPanel = ({ restaurant, ckItems, onOrderPlaced, adminUser }) =
             toast.success(
                 result.merged
                     ? `✅ Items merged into existing order ${result.orderNumber}`
-                    : `✅ New order ${result.orderNumber} created for ${restaurant.name}`
+                    : `✅ New order ${result.orderNumber} created for ${restaurant.name || restaurant.restaurant_name}`
             );
             onOrderPlaced();
         } catch (err) {
@@ -174,48 +184,50 @@ const ReplenishmentPanel = ({ restaurant, ckItems, onOrderPlaced, adminUser }) =
                 </thead>
                 <tbody>
                     {ckItems.map(item => {
+                        const itemId = getItemId(item);
+                        const itemName = getItemName(item);
                         const threshold = item.low_stock_threshold || item.min_stock || 0;
-                        const deficitVal = Math.max(0, threshold - item.current_stock);
-                        const deficit = Math.round(deficitVal * 100) / 100;
+                        const stock = item.current_stock || 0;
+                        const deficitVal = Math.max(0, threshold - stock);
                         const urgency = getUrgency(item);
                         return (
-                            <tr key={item.id}>
+                            <tr key={itemId}>
                                 <td>
-                                    <div style={{ fontWeight: 600, fontSize: 13 }}>{item.name}</div>
+                                    <div style={{ fontWeight: 600, fontSize: 13 }}>{itemName}</div>
                                     <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
                                         {getTypeInfo(item.item_type)?.icon} {item.category_name}
                                     </div>
                                 </td>
                                 <td>
                                     <span style={{ fontWeight: 700, color: urgency.color }}>
-                                        {item.current_stock} {item.unit}
+                                        {stock.toFixed(2)} {item.unit}
                                     </span>
                                     {item.unit_conversion?.has_conversion && (
-                                        <div className="base-unit-equiv">= {resolveToBaseUnit(item.current_stock, item).baseQuantity} {item.base_unit}</div>
+                                        <div className="base-unit-equiv">= {resolveToBaseUnit(stock, item).baseQuantity} {item.base_unit}</div>
                                     )}
                                 </td>
-                                <td style={{ color: 'var(--color-text-muted)' }}>{threshold} {item.unit}</td>
+                                <td style={{ color: 'var(--color-text-muted)' }}>{threshold.toFixed(2)} {item.unit}</td>
                                 <td>
                                     <span style={{ color: '#ef4444', fontWeight: 600 }}>
-                                        {deficit > 0 ? `↓ ${Math.round(deficit * 100) / 100} ${item.unit}` : '—'}
+                                        {deficitVal > 0 ? `↓ ${deficitVal.toFixed(2)} ${item.unit}` : '—'}
                                     </span>
-                                    {deficit > 0 && item.unit_conversion?.has_conversion && (
-                                        <div className="base-unit-equiv">= {resolveToBaseUnit(deficit, item).baseQuantity} {item.base_unit}</div>
+                                    {deficitVal > 0 && item.unit_conversion?.has_conversion && (
+                                        <div className="base-unit-equiv">= {resolveToBaseUnit(deficitVal, item).baseQuantity} {item.base_unit}</div>
                                     )}
                                 </td>
                                 <td>
                                     <div className="qty-input-group">
-                                        <button className="qty-btn" onClick={() => setQuantities(p => ({ ...p, [item.id]: Math.max(0, (Number(p[item.id]) || 0) - 1) }))}>
+                                        <button className="qty-btn" onClick={() => setQuantities(p => ({ ...p, [itemId]: Math.max(0, (Number(p[itemId]) || 0) - 1) }))}>
                                             <MdRemove />
                                         </button>
                                         <input
                                             type="number" min={0} step={0.5}
-                                            value={quantities[item.id] || 0}
-                                            onChange={e => setQuantities(p => ({ ...p, [item.id]: e.target.value }))}
+                                            value={quantities[itemId] ?? 0}
+                                            onChange={e => setQuantities(p => ({ ...p, [itemId]: e.target.value }))}
                                             className="qty-input"
                                         />
                                         <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{item.unit}</span>
-                                        <button className="qty-btn" onClick={() => setQuantities(p => ({ ...p, [item.id]: (Number(p[item.id]) || 0) + 1 }))}>
+                                        <button className="qty-btn" onClick={() => setQuantities(p => ({ ...p, [itemId]: (Number(p[itemId]) || 0) + 1 }))}>
                                             <MdAdd />
                                         </button>
                                     </div>
@@ -227,7 +239,7 @@ const ReplenishmentPanel = ({ restaurant, ckItems, onOrderPlaced, adminUser }) =
             </table>
             <div className="replenish-footer">
                 <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
-                    {ckItems.filter(i => (quantities[i.id] || 0) > 0).length} of {ckItems.length} items selected
+                    {ckItems.filter(i => (quantities[getItemId(i)] || 0) > 0).length} of {ckItems.length} items selected
                 </span>
                 <button
                     className="btn btn-primary btn-md"
@@ -247,6 +259,7 @@ const ReplenishmentPanel = ({ restaurant, ckItems, onOrderPlaced, adminUser }) =
 
 const LowStockAlerts = () => {
     const { userProfile } = useAuth();
+    const navigate = useNavigate();
     const [ckLowStock, setCkLowStock] = useState([]);
     const [allCkItems, setAllCkItems] = useState([]);
     const [restaurants, setRestaurants] = useState([]);
@@ -255,8 +268,11 @@ const LowStockAlerts = () => {
     const [filterType, setFilterType] = useState('all');
     const [editThreshold, setEditThreshold] = useState(null);   // item.id being edited
     const [selRestaurant, setSelRestaurant] = useState('');      // for restaurant panel
-    const [selItems, setSelItems] = useState([]);      // CK items for panel
+    const [selItems, setSelItems] = useState([]);      // restaurant low stock items for panel
     const [showPanel, setShowPanel] = useState(false);
+    const [restLowStockCounts, setRestLowStockCounts] = useState({});   // { restaurantId: count }
+    const [loadingRestItems, setLoadingRestItems] = useState(false);     // loading indicator for restaurant item fetch
+    const [noInventoryForRest, setNoInventoryForRest] = useState(false); // flag when restaurant has no inventory
 
     const fetchData = useCallback(async () => {
         setLoading(true);
@@ -279,6 +295,18 @@ const LowStockAlerts = () => {
             ));
             setAllCkItems(all);
             setRestaurants(rests);
+
+            // Load per-restaurant low stock counts
+            const counts = {};
+            await Promise.all(rests.map(async (r) => {
+                try {
+                    const lowItems = await getRestaurantLowStockItems(r.id);
+                    counts[r.id] = lowItems.length;
+                } catch {
+                    counts[r.id] = 0;
+                }
+            }));
+            setRestLowStockCounts(counts);
         } catch (err) {
             toast.error('Failed to load low stock data');
             console.error(err);
@@ -304,11 +332,30 @@ const LowStockAlerts = () => {
         setEditThreshold(null);
     };
 
-    const handleOpenReplenish = (restaurant) => {
+    const handleOpenReplenish = async (restaurant) => {
         setSelRestaurant(restaurant);
-        // All items below threshold suitable for ordering
-        setSelItems(ckLowStock.filter(i => i.item_type !== 'cooked_meat'));
+        setSelItems([]);
+        setNoInventoryForRest(false);
+        setLoadingRestItems(true);
         setShowPanel(true);
+        try {
+            const restLowStock = await getRestaurantLowStockItems(restaurant.id);
+            if (restLowStock.length === 0) {
+                // Restaurant has no inventory data at all — check if they have ANY inventory
+                const { getRestaurantInventory } = await import('../../services/restaurantInventoryService');
+                const allInv = await getRestaurantInventory(restaurant.id);
+                if (allInv.length === 0) {
+                    setNoInventoryForRest(true);
+                }
+            }
+            setSelItems(restLowStock);
+        } catch (err) {
+            console.error('Failed to load restaurant inventory:', err);
+            toast.error('Failed to load restaurant inventory');
+            setSelItems([]);
+        } finally {
+            setLoadingRestItems(false);
+        }
     };
 
     return (
@@ -434,7 +481,7 @@ const LowStockAlerts = () => {
                                                             </td>
                                                             <td>
                                                                 <span style={{ fontWeight: 700, color: urgency.color }}>
-                                                                    {item.current_stock} {item.unit}
+                                                                    {Math.round((item.current_stock || 0) * 100) / 100} {item.unit}
                                                                 </span>
                                                                 {item.unit_conversion?.has_conversion && (
                                                                     <div className="base-unit-equiv">= {resolveToBaseUnit(item.current_stock, item).baseQuantity} {item.base_unit}</div>
@@ -472,12 +519,25 @@ const LowStockAlerts = () => {
                                                             </td>
                                                             <td>
                                                                 <button
-                                                                    className="btn btn-secondary btn-sm"
+                                                                    className="btn btn-primary btn-sm"
                                                                     style={{ display: 'flex', alignItems: 'center', gap: 4 }}
                                                                     onClick={() => {
-                                                                        setActiveTab('restaurant');
+                                                                        navigate('/purchase/create', {
+                                                                            state: {
+                                                                                prefillItems: [{
+                                                                                    item_id: item.id,
+                                                                                    item_name: item.name,
+                                                                                    item_type: item.item_type,
+                                                                                    category_name: item.category_name,
+                                                                                    unit: item.unit,
+                                                                                    quantity: getSuggestedQty(item),
+                                                                                    unit_price: item.cost_price || 0,
+                                                                                    current_stock: item.current_stock || 0,
+                                                                                }],
+                                                                            },
+                                                                        });
                                                                     }}>
-                                                                    <MdShoppingCart /> Replenish
+                                                                    <MdShoppingCart /> Purchase Order
                                                                 </button>
                                                             </td>
                                                         </tr>
@@ -510,27 +570,26 @@ const LowStockAlerts = () => {
 
                                     {/* Restaurant Grid */}
                                     <div className="restaurant-grid">
-                                        {restaurants.map(r => (
-                                            <div key={r.id} className="restaurant-card" onClick={() => {
-                                                setSelRestaurant(r);
-                                                setSelItems(ckLowStock.filter(i => i.item_type !== 'cooked_meat'));
-                                                setShowPanel(true);
-                                            }}>
-                                                <div className="restaurant-card-avatar">
-                                                    {(r.name || r.restaurant_name || 'R').charAt(0).toUpperCase()}
+                                        {restaurants.map(r => {
+                                            const lowCount = restLowStockCounts[r.id] ?? '…';
+                                            return (
+                                                <div key={r.id} className="restaurant-card" onClick={() => handleOpenReplenish(r)}>
+                                                    <div className="restaurant-card-avatar">
+                                                        {(r.name || r.restaurant_name || 'R').charAt(0).toUpperCase()}
+                                                    </div>
+                                                    <div>
+                                                        <div style={{ fontWeight: 700, fontSize: 14 }}>{r.name || r.restaurant_name}</div>
+                                                        <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{r.email}</div>
+                                                    </div>
+                                                    <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                        <span style={{ fontSize: 11, color: lowCount > 0 ? '#f59e0b' : 'var(--color-text-muted)' }}>
+                                                            {lowCount} items low
+                                                        </span>
+                                                        <MdShoppingCart style={{ color: 'var(--color-primary)' }} />
+                                                    </div>
                                                 </div>
-                                                <div>
-                                                    <div style={{ fontWeight: 700, fontSize: 14 }}>{r.name || r.restaurant_name}</div>
-                                                    <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{r.email}</div>
-                                                </div>
-                                                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-                                                    <span style={{ fontSize: 11, color: '#f59e0b' }}>
-                                                        {ckLowStock.filter(i => i.item_type !== 'cooked_meat').length} items low
-                                                    </span>
-                                                    <MdShoppingCart style={{ color: 'var(--color-primary)' }} />
-                                                </div>
-                                            </div>
-                                        ))}
+                                            );
+                                        })}
                                     </div>
 
                                     {/* Replenishment Panel Modal */}
@@ -547,7 +606,19 @@ const LowStockAlerts = () => {
                                                     </button>
                                                 </div>
                                                 <div className="modal-body">
-                                                    {selItems.length === 0 ? (
+                                                    {loadingRestItems ? (
+                                                        <div style={{ textAlign: 'center', padding: 40, color: 'var(--color-text-muted)' }}>
+                                                            Loading restaurant inventory...
+                                                        </div>
+                                                    ) : noInventoryForRest ? (
+                                                        <div className="empty-state">
+                                                            <div className="empty-state-icon" style={{ fontSize: '3rem' }}>📦</div>
+                                                            <div className="empty-state-title">No Inventory Data</div>
+                                                            <div className="empty-state-description">
+                                                                This restaurant hasn't received any deliveries yet, so there is no inventory to display.
+                                                            </div>
+                                                        </div>
+                                                    ) : selItems.length === 0 ? (
                                                         <div className="empty-state">
                                                             <div className="empty-state-icon">✅</div>
                                                             <div className="empty-state-title">No Low Stock Items</div>

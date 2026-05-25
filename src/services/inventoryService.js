@@ -219,10 +219,96 @@ export const addCategory = async (data) => {
 };
 
 export const updateCategory = async (id, data) => {
-    await updateDoc(doc(db, CATEGORIES, id), {
+    const catRef = doc(db, CATEGORIES, id);
+
+    // Read the old category to detect name change
+    const oldSnap = await getDoc(catRef);
+    const oldData = oldSnap.exists() ? oldSnap.data() : {};
+    const nameChanged = data.name && data.name !== oldData.name;
+
+    // Update the category itself
+    await updateDoc(catRef, {
         ...data,
         updated_at: serverTimestamp(),
     });
+
+    // If name changed, cascade to all items with this category_id
+    if (nameChanged) {
+        const itemsSnap = await getDocs(
+            query(collection(db, ITEMS), where('category_id', '==', id))
+        );
+        if (!itemsSnap.empty) {
+            const batch = writeBatch(db);
+            itemsSnap.docs.forEach(d => {
+                batch.update(doc(db, ITEMS, d.id), {
+                    category_name: data.name,
+                    updated_at: serverTimestamp(),
+                });
+            });
+            await batch.commit();
+            console.log(`✅ Updated category_name on ${itemsSnap.size} items to "${data.name}"`);
+        }
+    }
+};
+
+/**
+ * One-time sync: ensures every item's category_name matches its category's current name.
+ * Returns { updated: number, skipped: number, orphaned: number }
+ */
+export const syncCategoryNamesOnItems = async () => {
+    // 1. Build category ID → name lookup
+    const catSnap = await getDocs(collection(db, CATEGORIES));
+    const catMap = {};
+    catSnap.docs.forEach(d => { catMap[d.id] = d.data().name; });
+
+    // 2. Read all items
+    const itemSnap = await getDocs(collection(db, ITEMS));
+    let updated = 0, skipped = 0, orphaned = 0;
+
+    // Firestore batches support max 500 ops
+    const batchOps = [];
+    let currentBatch = writeBatch(db);
+    let opsInBatch = 0;
+
+    for (const d of itemSnap.docs) {
+        const item = d.data();
+        const catId = item.category_id;
+        if (!catId) { skipped++; continue; }
+
+        const correctName = catMap[catId];
+        if (!correctName) {
+            // Category no longer exists
+            orphaned++;
+            continue;
+        }
+
+        if (item.category_name !== correctName) {
+            currentBatch.update(doc(db, ITEMS, d.id), {
+                category_name: correctName,
+                updated_at: serverTimestamp(),
+            });
+            opsInBatch++;
+            updated++;
+
+            if (opsInBatch >= 499) {
+                batchOps.push(currentBatch);
+                currentBatch = writeBatch(db);
+                opsInBatch = 0;
+            }
+        } else {
+            skipped++;
+        }
+    }
+
+    if (opsInBatch > 0) batchOps.push(currentBatch);
+
+    // Commit all batches
+    for (const b of batchOps) {
+        await b.commit();
+    }
+
+    console.log(`✅ Category name sync complete: ${updated} updated, ${skipped} already correct, ${orphaned} orphaned`);
+    return { updated, skipped, orphaned };
 };
 
 export const deleteCategory = async (id) => {

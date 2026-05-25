@@ -15,6 +15,7 @@ import { getRestaurantInventory, getRestaurantInventoryStats } from '../../servi
 import { getOrders } from '../../services/orderService';
 import { getInvoices } from '../../services/invoiceService';
 import { getMenuItems, MENU_CATEGORIES, getCategoryInfo, calcPortionCost } from '../../services/menuService';
+import { getEposEvents } from '../../services/eposService';
 import toast from 'react-hot-toast';
 import { seedRestaurantDashboard } from '../../scripts/seedRestaurantDashboard';
 import './Dashboard.css';
@@ -61,6 +62,7 @@ const RestaurantDashboard = () => {
     const [inventoryItems, setInventoryItems] = useState([]);
     const [invStats, setInvStats] = useState(null);
     const [orders, setOrders] = useState([]);
+    const [eposEvents, setEposEvents] = useState([]);
     const [invoices, setInvoices] = useState([]);
     const [menuItems, setMenuItems] = useState([]);
     const [seeding, setSeeding] = useState(false);
@@ -78,13 +80,21 @@ const RestaurantDashboard = () => {
         let from;
         switch (dateRange) {
             case 'today': from = new Date(now.getFullYear(), now.getMonth(), now.getDate()); break;
+            case 'yesterday': from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1); break;
             case '3days': from = new Date(now); from.setDate(from.getDate() - 3); break;
             case 'week': from = new Date(now); from.setDate(from.getDate() - 7); break;
             case 'month': from = new Date(now); from.setMonth(from.getMonth() - 1); break;
             case 'custom': from = customFrom ? new Date(customFrom) : new Date(0); break;
             default: from = new Date(0);
         }
-        const to = dateRange === 'custom' && customTo ? new Date(customTo + 'T23:59:59') : now;
+        let to;
+        if (dateRange === 'yesterday') {
+            to = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 23, 59, 59, 999);
+        } else if (dateRange === 'custom' && customTo) {
+            to = new Date(customTo + 'T23:59:59');
+        } else {
+            to = now;
+        }
         return { from, to };
     }, [dateRange, customFrom, customTo]);
 
@@ -101,18 +111,20 @@ const RestaurantDashboard = () => {
         if (!restaurantId) return;
         setLoading(true);
         try {
-            const [stats, inv, ord, inv2, menu] = await Promise.all([
+            const [stats, inv, ord, inv2, menu, eposEvts] = await Promise.all([
                 getRestaurantInventoryStats(restaurantId),
                 getRestaurantInventory(restaurantId).catch(() => []),
                 getOrders({ restaurant_id: restaurantId }).catch(() => []),
                 getInvoices({ restaurant_id: restaurantId }).catch(() => []),
                 getMenuItems(restaurantId).catch(() => []),
+                getEposEvents(restaurantId).catch(() => []),
             ]);
             setInvStats(stats);
             setInventoryItems(inv || []);
             setOrders(ord || []);
             setInvoices(inv2 || []);
             setMenuItems(menu || []);
+            setEposEvents(eposEvts || []);
         } catch (err) {
             console.error('Dashboard load error:', err);
             toast.error('Failed to load dashboard data');
@@ -149,10 +161,10 @@ const RestaurantDashboard = () => {
         const byPeriod = {};
         all.forEach(o => {
             const d = parseDate(o.created_at);
-            const key = isDayView 
-                ? `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+            const key = isDayView
+                ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
                 : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-            const label = isDayView 
+            const label = isDayView
                 ? d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
                 : d.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' });
 
@@ -390,10 +402,10 @@ const RestaurantDashboard = () => {
         const byPeriod = {};
         all.forEach(inv => {
             const d = parseDate(inv.invoice_date || inv.created_at);
-            const key = isDayView 
-                ? `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+            const key = isDayView
+                ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
                 : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-            const label = isDayView 
+            const label = isDayView
                 ? d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
                 : d.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' });
 
@@ -411,61 +423,133 @@ const RestaurantDashboard = () => {
         };
     }, [invoices, filterByDate, getDateRangeFilter]);
 
-    // ─── EPOS SALES (SAMPLE DATA — will be replaced by live webhook data) ───
-    const eposSample = useMemo(() => {
-        const days = [];
-        const now = new Date();
-        for (let i = 13; i >= 0; i--) {
-            const d = new Date(now); d.setDate(d.getDate() - i);
-            const dayLabel = d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
-            const rev = Math.round(800 + Math.random() * 1200);
-            const ord = Math.round(30 + Math.random() * 40);
-            days.push({ day: dayLabel, revenue: rev, orders: ord });
-        }
-        const topSellers = [
-            { name: 'Chicken Biryani', revenue: 2840, qty: 142 },
-            { name: 'Afghani Mix Platter', revenue: 2380, qty: 35 },
-            { name: 'Lamb Karahi', revenue: 1960, qty: 98 },
-            { name: 'Chapli Kebabs', revenue: 1750, qty: 70 },
-            { name: 'Seekh Kebab', revenue: 1540, qty: 110 },
-            { name: 'Malai Chicken Boti', revenue: 1320, qty: 88 },
-            { name: 'Lamb Chops', revenue: 1180, qty: 59 },
-            { name: 'Chicken Tikka', revenue: 1050, qty: 105 },
-            { name: 'Afghani Naan', revenue: 840, qty: 280 },
-            { name: 'Saffron Rice', revenue: 680, qty: 170 },
-        ];
-        const byCategory = [
-            { name: 'Grill & Kebabs', value: 4850 },
-            { name: 'Platters', value: 3200 },
-            { name: 'Karahi & Curries', value: 2800 },
-            { name: 'Rice', value: 1960 },
-            { name: 'Breads & Sides', value: 1200 },
-            { name: 'Starters', value: 980 },
-            { name: 'Desserts', value: 450 },
-            { name: 'Beverages', value: 380 },
-        ];
-        const hourlySales = [
-            { hour: '11am', sales: 120 }, { hour: '12pm', sales: 380 },
-            { hour: '1pm', sales: 520 }, { hour: '2pm', sales: 340 },
-            { hour: '3pm', sales: 180 }, { hour: '4pm', sales: 90 },
-            { hour: '5pm', sales: 220 }, { hour: '6pm', sales: 480 },
-            { hour: '7pm', sales: 680 }, { hour: '8pm', sales: 750 },
-            { hour: '9pm', sales: 620 }, { hour: '10pm', sales: 340 },
-            { hour: '11pm', sales: 120 },
-        ];
-        const totalRevenue = days.reduce((s, d) => s + d.revenue, 0);
-        const totalOrders = days.reduce((s, d) => s + d.orders, 0);
+    // ─── EPOS SALES ANALYTICS (LIVE DATA from epos_events) ───
+    const eposData = useMemo(() => {
+        // Apply the same date range filter used by Orders & Invoices sections
+        const allProcessed = eposEvents.filter(e => e.processing_status === 'processed' || e.processing_status === 'has_unmapped');
+        const processed = filterByDate(allProcessed, 'received_at').length > 0
+            ? filterByDate(allProcessed, 'received_at')
+            : filterByDate(allProcessed, 'order_date');
+        if (processed.length === 0) return null; // No data yet
+
+        const totalOrders = processed.length;
+
+        // Build a price lookup from our menu items: { menuItemName → sellingPrice }
+        const priceLookup = {};
+        menuItems.forEach(mi => {
+            (mi.portions || []).forEach(p => {
+                const price = Number(p.selling_price ?? p.price) || 0;
+                // Key by menu item name + portion name for specific lookups
+                priceLookup[`${mi.name}__${p.name}`] = price;
+                // Fallback: just menu item name (use first portion found)
+                if (!priceLookup[mi.name]) priceLookup[mi.name] = price;
+            });
+            // If no portions, use cost_price or 0
+            if (!priceLookup[mi.name]) {
+                priceLookup[mi.name] = Number(mi.selling_price ?? mi.price) || 0;
+            }
+        });
+
+        let totalItemsSold = 0;
+        let totalRevenue = 0;
+        const itemMap = {}; // mappedName → { qty, revenue }
+        const dailyMap = {}; // YYYY-MM-DD → { revenue, orders }
+        const hourlyMap = {}; // hourLabel → revenue total
+
+        processed.forEach(ev => {
+            const evDate = ev.received_at || (ev.order_date ? new Date(ev.order_date) : new Date());
+            const dateKey = evDate instanceof Date
+                ? `${evDate.getFullYear()}-${String(evDate.getMonth() + 1).padStart(2, '0')}-${String(evDate.getDate()).padStart(2, '0')}`
+                : '';
+            const dayLabel = evDate instanceof Date
+                ? evDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
+                : '';
+            const hour = evDate instanceof Date ? evDate.getHours() : 12;
+            const hourLabel = hour === 0 ? '12am' : hour < 12 ? `${hour}am` : hour === 12 ? '12pm' : `${hour - 12}pm`;
+
+            let orderRevenue = 0;
+
+            // Use processing_result.results for mapped items (authoritative source)
+            const results = ev.processing_result?.results || [];
+            const hasResults = results.length > 0;
+
+            if (hasResults) {
+                results.forEach(r => {
+                    const qty = r.quantity_sold || 1;
+                    if (r.status === 'processed') {
+                        totalItemsSold += qty;
+                        const mappedName = r.menu_item || 'Unknown';
+                        const portionName = r.portion || '';
+                        // Look up our selling price
+                        const unitPrice = priceLookup[`${mappedName}__${portionName}`]
+                            || priceLookup[mappedName]
+                            || 0;
+                        const itemRevenue = unitPrice * qty;
+
+                        if (!itemMap[mappedName]) itemMap[mappedName] = { name: mappedName, revenue: 0, qty: 0 };
+                        itemMap[mappedName].qty += qty;
+                        itemMap[mappedName].revenue += itemRevenue;
+                        orderRevenue += itemRevenue;
+                    }
+                    // Skip unmapped items — don't show EPOS names
+                });
+            } else {
+                // Fallback for events without processing_result (shouldn't happen often)
+                (ev.line_items || []).forEach(li => {
+                    const qty = li.quantity || 1;
+                    totalItemsSold += qty;
+                    const name = li.epos_item_name || 'Unknown';
+                    if (!itemMap[name]) itemMap[name] = { name, revenue: 0, qty: 0 };
+                    itemMap[name].qty += qty;
+                });
+            }
+
+            totalRevenue += orderRevenue;
+
+            // Daily
+            if (dateKey) {
+                if (!dailyMap[dateKey]) dailyMap[dateKey] = { day: dayLabel, revenue: 0, orders: 0 };
+                dailyMap[dateKey].revenue += orderRevenue;
+                dailyMap[dateKey].orders += 1;
+            }
+
+            // Hourly
+            hourlyMap[hourLabel] = (hourlyMap[hourLabel] || 0) + orderRevenue;
+        });
+
+        // Top sellers (by qty)
+        const topSellers = Object.values(itemMap)
+            .sort((a, b) => b.qty - a.qty)
+            .slice(0, 10);
+
+        // Daily revenue sorted by date
+        const dailyRevenue = Object.entries(dailyMap)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([, v]) => v);
+
+        // Hourly sales sorted by hour
+        const hourOrder = ['12am', '1am', '2am', '3am', '4am', '5am', '6am', '7am', '8am', '9am', '10am', '11am',
+            '12pm', '1pm', '2pm', '3pm', '4pm', '5pm', '6pm', '7pm', '8pm', '9pm', '10pm', '11pm'];
+        const hourlySales = hourOrder
+            .filter(h => hourlyMap[h])
+            .map(h => ({ hour: h, sales: Math.round(hourlyMap[h]) }));
+
+        // By item for pie chart
+        const byCategory = topSellers.length > 0
+            ? topSellers.slice(0, 8).map(i => ({ name: i.name, value: i.revenue || i.qty }))
+            : [];
+
         return {
-            dailyRevenue: days,
+            dailyRevenue,
             topSellers,
             byCategory,
             hourlySales,
             totalRevenue,
             totalOrders,
             avgTicket: totalOrders ? totalRevenue / totalOrders : 0,
-            itemsSold: topSellers.reduce((s, t) => s + t.qty, 0),
+            itemsSold: totalItemsSold,
         };
-    }, []);
+    }, [eposEvents, menuItems, filterByDate]);
     /* ═══════════════════════════════════════ HELPERS ═══ */
     const formatTime = (date) => {
         if (!date) return '';
@@ -510,7 +594,7 @@ const RestaurantDashboard = () => {
                         {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
                     </div>
                     <button className="btn-refresh" onClick={fetchAll} title="Refresh"><MdRefresh /></button>
-                    <button
+                    {/* <button
                         className="btn btn-sm btn-secondary"
                         disabled={seeding}
                         onClick={async () => {
@@ -529,7 +613,7 @@ const RestaurantDashboard = () => {
                         }}
                     >
                         {seeding ? 'Seeding...' : '🌱 Seed Data'}
-                    </button>
+                    </button> */}
                 </div>
             </div>
 
@@ -562,6 +646,7 @@ const RestaurantDashboard = () => {
                     <div className="dash-filter-presets">
                         {[
                             { key: 'today', label: 'Today' },
+                            { key: 'yesterday', label: 'Yesterday' },
                             { key: '3days', label: 'Last 3 Days' },
                             { key: 'week', label: '1 Week' },
                             { key: 'month', label: '1 Month' },
@@ -1098,7 +1183,10 @@ const RestaurantDashboard = () => {
                                     <XAxis dataKey="period" tick={{ fontSize: 11, fill: '#9ca3af' }} />
                                     <YAxis yAxisId="left" tick={{ fontSize: 11, fill: '#9ca3af' }} tickFormatter={v => `£${v}`} />
                                     <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, fill: '#9ca3af' }} />
-                                    <Tooltip contentStyle={tooltipStyle} />
+                                    <Tooltip contentStyle={tooltipStyle} formatter={(value, name) => {
+                                        if (name === 'Spend (£)') return [`£${Number(value).toFixed(2)}`, name];
+                                        return [value, name];
+                                    }} />
                                     <Area yAxisId="left" type="monotone" dataKey="spend" stroke="#f59e0b" fill="url(#spendGrad)" strokeWidth={2} name="Spend (£)" />
                                     <Line yAxisId="right" type="monotone" dataKey="count" stroke="#3b82f6" strokeWidth={2} dot={{ fill: '#3b82f6', r: 3 }} name="Invoice Count" />
                                     <Legend wrapperStyle={{ fontSize: 12 }} />
@@ -1110,108 +1198,138 @@ const RestaurantDashboard = () => {
             </div>
 
             {/* ═══════════════════════════════════════
-                EPOS SALES ANALYTICS (Simulated / Awaiting Webhook)
+                EPOS SALES ANALYTICS (LIVE DATA)
                ═══════════════════════════════════════ */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
                 <div>
-                    <h3 className="section-title" style={{ margin: 0 }}>📈 Sales Analytics (EPOS)</h3>
+                    <h3 className="section-title" style={{ marginBottom: '10px' }}>📈 Sales Analytics (EPOS)</h3>
                     <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: -8 }}>
-                        Revenue, top sellers, and sales trends — <span style={{ color: '#f59e0b', fontWeight: 600 }}>Sample data shown • Will use live EPOS webhook data after integration</span>
+                        Revenue, top sellers, and sales trends from live EPOS data
                     </p>
                 </div>
 
-                <div className="kpi-row">
-                    <div className="kpi-card">
-                        <div className="kpi-value" style={{ color: '#22c55e' }}>£{eposSample.totalRevenue.toLocaleString()}</div>
-                        <div className="kpi-label">Total Revenue (sample)</div>
+                {!eposData ? (
+                    <div className="card" style={{
+                        padding: 'var(--space-8)', textAlign: 'center',
+                        color: 'var(--color-text-muted)',
+                    }}>
+                        <MdRestaurantMenu style={{ fontSize: 40, display: 'block', margin: '0 auto var(--space-3)', opacity: 0.4 }} />
+                        <h4 style={{ color: 'var(--color-text-secondary)', marginBottom: 4 }}>No EPOS Sales Data Yet</h4>
+                        <p style={{ fontSize: 'var(--text-sm)', maxWidth: 420, margin: '0 auto' }}>
+                            Sales analytics will appear here once your EPOS system starts sending data via the webhook integration.
+                        </p>
                     </div>
-                    <div className="kpi-card">
-                        <div className="kpi-value">{eposSample.totalOrders}</div>
-                        <div className="kpi-label">Total Sales Orders</div>
-                    </div>
-                    <div className="kpi-card">
-                        <div className="kpi-value">£{eposSample.avgTicket.toFixed(2)}</div>
-                        <div className="kpi-label">Avg Ticket Size</div>
-                    </div>
-                    <div className="kpi-card">
-                        <div className="kpi-value">{eposSample.itemsSold}</div>
-                        <div className="kpi-label">Items Sold</div>
-                    </div>
-                </div>
-
-                <div className="dash-chart-row">
-                    <div className="card dash-chart-card">
-                        <div className="card-header"><h3>Daily Revenue Trend (Last 14 Days)</h3></div>
-                        <div className="dash-chart-body">
-                            <ResponsiveContainer width="100%" height={280}>
-                                <AreaChart data={eposSample.dailyRevenue} margin={{ left: 10, right: 20 }}>
-                                    <defs>
-                                        <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3} />
-                                            <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
-                                        </linearGradient>
-                                    </defs>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.06)" />
-                                    <XAxis dataKey="day" tick={{ fontSize: 11, fill: '#9ca3af' }} />
-                                    <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} tickFormatter={v => `£${v}`} />
-                                    <Tooltip contentStyle={tooltipStyle} formatter={v => `£${v}`} />
-                                    <Area type="monotone" dataKey="revenue" stroke="#22c55e" fill="url(#revGrad)" strokeWidth={2} name="Revenue" />
-                                    <Line type="monotone" dataKey="orders" stroke="#c9a96e" strokeWidth={2} dot={false} name="Orders" />
-                                    <Legend wrapperStyle={{ fontSize: 12 }} />
-                                </AreaChart>
-                            </ResponsiveContainer>
+                ) : (
+                    <>
+                        <div className="kpi-row">
+                            <div className="kpi-card">
+                                <div className="kpi-value" style={{ color: '#22c55e' }}>£{eposData.totalRevenue.toLocaleString()}</div>
+                                <div className="kpi-label">Total Revenue</div>
+                            </div>
+                            <div className="kpi-card">
+                                <div className="kpi-value">{eposData.totalOrders}</div>
+                                <div className="kpi-label">Total Sales Orders</div>
+                            </div>
+                            <div className="kpi-card">
+                                <div className="kpi-value">£{eposData.avgTicket.toFixed(2)}</div>
+                                <div className="kpi-label">Avg Ticket Size</div>
+                            </div>
+                            <div className="kpi-card">
+                                <div className="kpi-value">{eposData.itemsSold}</div>
+                                <div className="kpi-label">Items Sold</div>
+                            </div>
                         </div>
-                    </div>
 
-                    <div className="card dash-chart-card">
-                        <div className="card-header"><h3>Sales by Category</h3></div>
-                        <div className="dash-chart-body">
-                            <ResponsiveContainer width="100%" height={280}>
-                                <PieChart>
-                                    <Pie data={eposSample.byCategory} cx="50%" cy="50%" labelLine={false}
-                                        label={renderPieLabel} outerRadius={100} dataKey="value" strokeWidth={0}>
-                                        {eposSample.byCategory.map((_, i) => (
-                                            <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
-                                        ))}
-                                    </Pie>
-                                    <Tooltip contentStyle={tooltipStyle} formatter={v => `£${v}`} />
-                                    <Legend wrapperStyle={{ fontSize: 12 }} />
-                                </PieChart>
-                            </ResponsiveContainer>
-                        </div>
-                    </div>
-                </div>
+                        {eposData.dailyRevenue.length > 0 && (
+                            <div className="dash-chart-row">
+                                <div className="card dash-chart-card">
+                                    <div className="card-header"><h3>Daily Revenue Trend</h3></div>
+                                    <div className="dash-chart-body">
+                                        <ResponsiveContainer width="100%" height={280}>
+                                            <AreaChart data={eposData.dailyRevenue} margin={{ left: 10, right: 20 }}>
+                                                <defs>
+                                                    <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
+                                                        <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3} />
+                                                        <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+                                                    </linearGradient>
+                                                </defs>
+                                                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.06)" />
+                                                <XAxis dataKey="day" tick={{ fontSize: 11, fill: '#9ca3af' }} />
+                                                <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} tickFormatter={v => `£${v}`} />
+                                                <Tooltip
+                                                    contentStyle={tooltipStyle}
+                                                    formatter={(value, name) => {
+                                                        if (name === 'EPOS Revenue') return [`£${Number(value).toFixed(2)}`, name];
+                                                        if (name === 'EPOS Orders') return [value, name]; // count — no £
+                                                        return [value, name];
+                                                    }}
+                                                />
+                                                <Area type="monotone" dataKey="revenue" stroke="#22c55e" fill="url(#revGrad)" strokeWidth={2} name="EPOS Revenue" />
+                                                <Line type="monotone" dataKey="orders" stroke="#c9a96e" strokeWidth={2} dot={false} name="EPOS Orders" />
+                                                <Legend wrapperStyle={{ fontSize: 12 }} />
+                                            </AreaChart>
+                                        </ResponsiveContainer>
+                                    </div>
+                                </div>
 
-                <div className="card dash-chart-card">
-                    <div className="card-header"><h3>Top 10 Best Sellers (by Revenue)</h3></div>
-                    <div className="dash-chart-body">
-                        <ResponsiveContainer width="100%" height={320}>
-                            <BarChart data={eposSample.topSellers} layout="vertical" margin={{ left: 20, right: 20 }}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.06)" />
-                                <XAxis type="number" tick={{ fontSize: 11, fill: '#9ca3af' }} tickFormatter={v => `£${v}`} />
-                                <YAxis dataKey="name" type="category" tick={{ fontSize: 10, fill: '#9ca3af' }} width={120} />
-                                <Tooltip contentStyle={tooltipStyle} formatter={(v, name) => name === 'revenue' ? `£${v}` : `${v} sold`} />
-                                <Bar dataKey="revenue" fill="#c9a96e" radius={[0, 4, 4, 0]} name="Revenue" />
-                            </BarChart>
-                        </ResponsiveContainer>
-                    </div>
-                </div>
+                                {eposData.byCategory.length > 0 && (
+                                    <div className="card dash-chart-card">
+                                        <div className="card-header"><h3>Sales by Item</h3></div>
+                                        <div className="dash-chart-body">
+                                            <ResponsiveContainer width="100%" height={280}>
+                                                <PieChart>
+                                                    <Pie data={eposData.byCategory} cx="50%" cy="50%" labelLine={false}
+                                                        label={renderPieLabel} outerRadius={100} dataKey="value" strokeWidth={0}>
+                                                        {eposData.byCategory.map((_, i) => (
+                                                            <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+                                                        ))}
+                                                    </Pie>
+                                                    <Tooltip contentStyle={tooltipStyle} formatter={v => `£${v}`} />
+                                                    <Legend wrapperStyle={{ fontSize: 12 }} />
+                                                </PieChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
 
-                <div className="card dash-chart-card">
-                    <div className="card-header"><h3>Hourly Sales Pattern</h3></div>
-                    <div className="dash-chart-body">
-                        <p style={{ fontSize: 11, color: 'var(--color-text-muted)', margin: '0 0 8px 8px' }}>Average sales per hour — identify peak and slow periods</p>
-                        <ResponsiveContainer width="100%" height={250}>
-                            <BarChart data={eposSample.hourlySales} margin={{ left: 10, right: 20 }}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.06)" />
-                                <XAxis dataKey="hour" tick={{ fontSize: 10, fill: '#9ca3af' }} />
-                                <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} tickFormatter={v => `£${v}`} />
-                                <Tooltip contentStyle={tooltipStyle} formatter={v => `£${v}`} />
-                                <Bar dataKey="sales" fill="#8b5cf6" radius={[4, 4, 0, 0]} name="Avg Sales" />
-                            </BarChart>
-                        </ResponsiveContainer>
-                    </div>
-                </div>
+                        {eposData.topSellers.length > 0 && (
+                            <div className="card dash-chart-card">
+                                <div className="card-header"><h3>Top Sellers (by Quantity)</h3></div>
+                                <div className="dash-chart-body">
+                                    <ResponsiveContainer width="100%" height={Math.max(200, eposData.topSellers.length * 36)}>
+                                        <BarChart data={eposData.topSellers} layout="vertical" margin={{ left: 20, right: 20 }}>
+                                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.06)" />
+                                            <XAxis type="number" tick={{ fontSize: 11, fill: '#9ca3af' }} />
+                                            <YAxis dataKey="name" type="category" tick={{ fontSize: 10, fill: '#9ca3af' }} width={140} />
+                                            <Tooltip contentStyle={tooltipStyle} formatter={(v, name) => name === 'qty' ? `${v} sold` : `£${v}`} />
+                                            <Bar dataKey="qty" fill="#c9a96e" radius={[0, 4, 4, 0]} name="Quantity Sold" />
+                                        </BarChart>
+                                    </ResponsiveContainer>
+                                </div>
+                            </div>
+                        )}
+
+                        {eposData.hourlySales.length > 0 && (
+                            <div className="card dash-chart-card">
+                                <div className="card-header"><h3>Hourly Sales Pattern</h3></div>
+                                <div className="dash-chart-body">
+                                    <p style={{ fontSize: 11, color: 'var(--color-text-muted)', margin: '0 0 8px 8px' }}>Revenue by hour — identify peak and slow periods</p>
+                                    <ResponsiveContainer width="100%" height={250}>
+                                        <BarChart data={eposData.hourlySales} margin={{ left: 10, right: 20 }}>
+                                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.06)" />
+                                            <XAxis dataKey="hour" tick={{ fontSize: 10, fill: '#9ca3af' }} />
+                                            <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} tickFormatter={v => `£${v}`} />
+                                            <Tooltip contentStyle={tooltipStyle} formatter={v => `£${v}`} />
+                                            <Bar dataKey="sales" fill="#8b5cf6" radius={[4, 4, 0, 0]} name="Revenue" />
+                                        </BarChart>
+                                    </ResponsiveContainer>
+                                </div>
+                            </div>
+                        )}
+                    </>
+                )}
             </div>
         </div>
     );

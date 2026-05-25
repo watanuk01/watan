@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { getItems, getUniqueVendors as getItemVendors } from '../../services/inventoryService';
 import { createPurchaseOrder, getUniqueVendors, getStatusInfo } from '../../services/purchaseService';
 import {
@@ -30,6 +30,7 @@ const loadDraft = () => {
 
 const CreatePurchaseOrder = () => {
     const navigate = useNavigate();
+    const location = useLocation();
     const draft = useRef(loadDraft());
     const [items, setItems] = useState([]);          // all inventory items (grocery + raw_meat)
     const [selectedItems, setSelectedItems] = useState(draft.current?.selectedItems || []);
@@ -82,6 +83,20 @@ const CreatePurchaseOrder = () => {
         };
         fetchData();
     }, []);
+
+    // ── Pre-fill items from navigation state (e.g., from Low Stock Alerts) ──
+    useEffect(() => {
+        const prefill = location.state?.prefillItems;
+        if (prefill && Array.isArray(prefill) && prefill.length > 0) {
+            setSelectedItems(prev => {
+                const existing = new Set(prev.map(i => i.item_id));
+                const newItems = prefill.filter(i => !existing.has(i.item_id));
+                return [...prev, ...newItems];
+            });
+            // Clear navigation state so refreshing doesn't re-add
+            window.history.replaceState({}, document.title);
+        }
+    }, [location.state]);
 
     // Close dropdown on outside click
     useEffect(() => {
@@ -511,7 +526,7 @@ const CreatePurchaseOrder = () => {
                                             type="number"
                                             className="qty-input"
                                             value={item.quantity}
-                                            onChange={(e) => updateItem(item.item_id, 'quantity', Number(e.target.value))}
+                                            onChange={(e) => updateItem(item.item_id, 'quantity', e.target.value === '' ? '' : Number(e.target.value))}
                                             min="0.1"
                                             step="0.1"
                                         />
@@ -519,7 +534,7 @@ const CreatePurchaseOrder = () => {
                                             type="number"
                                             className="price-input"
                                             value={item.unit_price}
-                                            onChange={(e) => updateItem(item.item_id, 'unit_price', Number(e.target.value))}
+                                            onChange={(e) => updateItem(item.item_id, 'unit_price', e.target.value === '' ? '' : Number(e.target.value))}
                                             min="0"
                                             step="0.01"
                                         />

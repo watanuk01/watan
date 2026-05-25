@@ -159,6 +159,24 @@ const WasteDetailModal = ({ event, onClose, onUpdated, isAdmin, userProfile }) =
                         )}
                     </div>
 
+                    {/* Image Evidence */}
+                    {event.image_data && !editing && (
+                        <div className="waste-detail-item" style={{ marginBottom: 16 }}>
+                            <div className="detail-label" style={{ marginBottom: 8 }}>Photo Evidence</div>
+                            <img
+                                src={event.image_data}
+                                alt="Waste evidence"
+                                style={{
+                                    maxWidth: '100%',
+                                    maxHeight: 250,
+                                    borderRadius: 12,
+                                    border: '1px solid var(--color-border)',
+                                    display: 'block'
+                                }}
+                            />
+                        </div>
+                    )}
+
                     {/* Edit reason */}
                     {editing && (
                         <div className="waste-form-group" style={{ background: 'var(--color-surface-hover)', padding: 12, borderRadius: 8, marginBottom: 16 }}>
