@@ -31,6 +31,10 @@ import {
     startOfDay,
 } from '../../services/analyticsService';
 import { getStatusInfo } from '../../services/orderService';
+import { getEposEvents } from '../../services/eposService';
+import { getMenuItems } from '../../services/menuService';
+import { getRestaurantInventory } from '../../services/restaurantInventoryService';
+import EposSalesTable from '../../components/epos/EposSalesTable';
 import toast from 'react-hot-toast';
 import { runFullSeed } from '../../services/seedService';
 import { syncCategoryNamesOnItems } from '../../services/inventoryService';
@@ -205,7 +209,6 @@ const AdminDashboard = () => {
     const [trendExpanded, setTrendExpanded] = useState(false);
     const trendLimit = trendExpanded ? 15 : 5;
 
-    // Seed state
     const [showSeedModal, setShowSeedModal] = useState(false);
     const [seedFile, setSeedFile] = useState(null);
     const [seedRunning, setSeedRunning] = useState(false);
@@ -215,7 +218,50 @@ const AdminDashboard = () => {
     const seedFileRef = useRef(null);
     const seedLogRef = useRef(null);
 
-    // Load restaurant list once
+    // EPOS Admin Analytics state
+    // Raw combined data across ALL restaurants
+    const [eposAllEvents, setEposAllEvents] = useState([]);
+    const [eposAllMenuItems, setEposAllMenuItems] = useState([]);
+    const [eposAllInventory, setEposAllInventory] = useState([]);
+    const [eposAdminLoading, setEposAdminLoading] = useState(false);
+    const [eposAdminLoaded, setEposAdminLoaded] = useState(false);
+    // Filter — empty string = All Restaurants
+    const [eposRestaurantFilter, setEposRestaurantFilter] = useState('');
+
+    // Load EPOS data for ALL restaurants in parallel
+    const loadEposAllData = useCallback(async (restaurantList) => {
+        if (!restaurantList?.length) return;
+        setEposAdminLoading(true);
+        try {
+            // Fetch all restaurants in parallel
+            const results = await Promise.all(
+                restaurantList.map(async (r) => {
+                    const [evts, menu, inv] = await Promise.all([
+                        getEposEvents(r.id).catch(() => []),
+                        getMenuItems(r.id).catch(() => []),
+                        getRestaurantInventory(r.id).catch(() => []),
+                    ]);
+                    // Tag each event with restaurant_name for display
+                    const taggedEvts = (evts || []).map(e => ({
+                        ...e,
+                        restaurant_name: e.restaurant_name || r.restaurant_name,
+                        _restaurant_id: r.id,
+                    }));
+                    return { evts: taggedEvts, menu: menu || [], inv: inv || [] };
+                })
+            );
+            setEposAllEvents(results.flatMap(r => r.evts));
+            setEposAllMenuItems(results.flatMap(r => r.menu));
+            setEposAllInventory(results.flatMap(r => r.inv));
+            setEposAdminLoaded(true);
+        } catch (err) {
+            toast.error('Failed to load EPOS data: ' + err.message);
+        } finally {
+            setEposAdminLoading(false);
+        }
+    }, []); // eslint-disable-line
+
+    // Load restaurant list once (EPOS data loads on-demand via Refresh button)
     useEffect(() => {
         fetchRestaurantDirectory().then(setRestaurants).catch(() => { });
     }, []);
@@ -412,7 +458,7 @@ const AdminDashboard = () => {
                     </div>
                     <div className="dash-chart-body">
                         {chartsLoading ? <div className="chart-loading">Loading chart…</div> : dailyVolume.length === 0 ? <div className="chart-empty">No orders in this period</div> : (
-                            <ResponsiveContainer width="100%" height={220}>
+                            <ResponsiveContainer width="100%" height={320}>
                                 <LineChart data={dailyVolume} margin={{ top: 4, right: 20, left: 0, bottom: 0 }}>
                                     <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR} />
                                     <XAxis dataKey="date" tick={{ fill: TEXT_COLOR, fontSize: 10 }} interval={Math.max(0, Math.floor(dailyVolume.length / 10))} />
@@ -431,14 +477,29 @@ const AdminDashboard = () => {
                     <div className="dash-chart-body">
                         {chartsLoading ? <div className="chart-loading">Loading chart…</div> :
                             invByCategory.length === 0 ? <div className="chart-empty">No data</div> : (
-                                <ResponsiveContainer width="100%" height={220}>
+                                <ResponsiveContainer width="100%" height={320}>
                                     <PieChart>
-                                        <Pie data={invByCategory} dataKey="value" nameKey="name" cx="50%" cy="50%"
-                                            outerRadius={80} labelLine={false} label={renderPieLabel}>
+                                        <Pie data={invByCategory} dataKey="value" nameKey="name" cx="50%" cy="45%"
+                                            outerRadius={100} innerRadius={40}
+                                            labelLine={{ stroke: 'rgba(255,255,255,0.2)', strokeWidth: 1 }}
+                                            label={({ cx, cy, midAngle, outerRadius: or, percent, name }) => {
+                                                if (percent < 0.03) return null;
+                                                const R = Math.PI / 180;
+                                                const r = or + 16;
+                                                const x = cx + r * Math.cos(-midAngle * R);
+                                                const y = cy + r * Math.sin(-midAngle * R);
+                                                return (
+                                                    <text x={x} y={y} fill="#ccc" textAnchor={x > cx ? 'start' : 'end'}
+                                                        dominantBaseline="central" fontSize={10} fontWeight={600}>
+                                                        {`${(percent * 100).toFixed(0)}%`}
+                                                    </text>
+                                                );
+                                            }}>
                                             {invByCategory.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
                                         </Pie>
                                         <Tooltip contentStyle={tooltipStyle} formatter={v => [formatCurrency(v), 'Value']} />
-                                        <Legend iconSize={10} wrapperStyle={{ fontSize: 11, color: TEXT_COLOR }} />
+                                        <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: TEXT_COLOR, paddingTop: 8 }}
+                                            formatter={(val) => val.length > 20 ? val.slice(0, 18) + '…' : val} />
                                     </PieChart>
                                 </ResponsiveContainer>
                             )}
@@ -677,6 +738,88 @@ const AdminDashboard = () => {
                         </div>
                     )}
                 </div>
+            </div>
+
+            {/* ═══ EPOS Restaurant Analytics ═══ */}
+            <div style={{ marginBottom: 'var(--space-6)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+                    <div>
+                        <h3 className="section-title" style={{ marginBottom: 2 }}>📈 EPOS Restaurant Analytics</h3>
+                        <p style={{ fontSize: 12, color: 'var(--color-text-muted)', margin: 0 }}>
+                            Menu sales, inventory consumption &amp; markup — all restaurants
+                            {eposAllEvents.length > 0 && ` • ${eposAllEvents.length} EPOS events loaded`}
+                        </p>
+                    </div>
+                    <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                        {/* Restaurant filter — client-side only, no re-fetch */}
+                        <select
+                            value={eposRestaurantFilter}
+                            onChange={e => setEposRestaurantFilter(e.target.value)}
+                            style={{ padding: '8px 14px', borderRadius: 8, fontSize: 13, minWidth: 220, background: 'var(--color-surface, rgba(255,255,255,0.06))', border: '1px solid var(--color-border, rgba(255,255,255,0.12))', color: 'var(--color-text)', outline: 'none' }}
+                        >
+                            <option value="">All Restaurants</option>
+                            {restaurants.map(r => <option key={r.id} value={r.id}>{r.restaurant_name}</option>)}
+                        </select>
+                        <button
+                            onClick={() => loadEposAllData(restaurants)}
+                            disabled={eposAdminLoading}
+                            style={{ padding: '8px 14px', borderRadius: 8, fontSize: 13, cursor: 'pointer', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: 'var(--color-text)' }}
+                            title="Refresh EPOS data"
+                        >
+                            {eposAdminLoading ? '⏳' : '🔄'} Refresh
+                        </button>
+                    </div>
+                </div>
+
+                {eposAdminLoading ? (
+                    <div className="card" style={{ padding: 'var(--space-8)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                        <div style={{ fontSize: 13 }}>Loading EPOS data for all restaurants…</div>
+                    </div>
+                ) : !eposAdminLoaded ? (
+                    <div className="card" style={{ padding: 'var(--space-8)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                        <div style={{ fontSize: 36, marginBottom: 10 }}>📊</div>
+                        <div style={{ fontWeight: 600, marginBottom: 8 }}>Click to load EPOS analytics</div>
+                        <div style={{ fontSize: 13, marginBottom: 16 }}>Fetches menu sales &amp; inventory data across all restaurants</div>
+                        <button
+                            onClick={() => loadEposAllData(restaurants)}
+                            disabled={!restaurants.length}
+                            style={{ padding: '10px 24px', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 600, background: 'var(--color-accent, #c9a96e)', color: '#fff', border: 'none' }}
+                        >
+                            📈 Load EPOS Data
+                        </button>
+                    </div>
+                ) : eposAllEvents.filter(e =>
+                    (e.processing_status === 'processed' || e.processing_status === 'has_unmapped') &&
+                    (!eposRestaurantFilter || e._restaurant_id === eposRestaurantFilter)
+                ).length === 0 ? (
+                    <div className="card" style={{ padding: 'var(--space-8)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                        <div style={{ fontSize: 36, marginBottom: 10 }}>📭</div>
+                        <div style={{ fontWeight: 600, marginBottom: 4 }}>No EPOS data{eposRestaurantFilter ? ' for this restaurant' : ''}</div>
+                        <div style={{ fontSize: 13 }}>Data appears once EPOS webhook events are processed</div>
+                    </div>
+                ) : (() => {
+                    // Filter events by restaurant + date range
+                    const filteredEvts = eposAllEvents.filter(e =>
+                        (e.processing_status === 'processed' || e.processing_status === 'has_unmapped') &&
+                        (!eposRestaurantFilter || e._restaurant_id === eposRestaurantFilter) &&
+                        (!filters.dateFrom || (e.received_at && new Date(e.received_at) >= filters.dateFrom)) &&
+                        (!filters.dateTo || (e.received_at && new Date(e.received_at) <= filters.dateTo))
+                    );
+                    // Filter menu items and inventory by restaurant if needed
+                    const filteredMenu = eposRestaurantFilter
+                        ? eposAllMenuItems.filter(m => m.restaurant_id === eposRestaurantFilter)
+                        : eposAllMenuItems;
+                    const filteredInv = eposRestaurantFilter
+                        ? eposAllInventory.filter(i => i.restaurant_id === eposRestaurantFilter)
+                        : eposAllInventory;
+                    return (
+                        <EposSalesTable
+                            eposEvents={filteredEvts}
+                            menuItems={filteredMenu}
+                            inventoryItems={filteredInv}
+                        />
+                    );
+                })()}
             </div>
 
             {/* ═══ Seed Data Modal ═══ */}

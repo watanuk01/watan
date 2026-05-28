@@ -635,6 +635,19 @@ const EposIntegrationSection = () => {
     const [showKey, setShowKey] = useState({});
     const [selectedRestaurant, setSelectedRestaurant] = useState('');
 
+    // Enhanced filters
+    const [statusFilter, setStatusFilter] = useState('');
+    const [searchQuery, setSearchQuery] = useState('');
+    const [dateFrom, setDateFrom] = useState('');
+    const [dateTo, setDateTo] = useState('');
+
+    // Pagination
+    const [evtPage, setEvtPage] = useState(1);
+    const [evtPageSize, setEvtPageSize] = useState(25);
+
+    // Detail modal
+    const [detailEvent, setDetailEvent] = useState(null);
+
     const webhookUrl = getWebhookUrl();
 
     // Load restaurants
@@ -667,12 +680,12 @@ const EposIntegrationSection = () => {
         if (restaurants.length > 0) load();
     }, [restaurants]);
 
-    // Load events for selected restaurant
+    // Load ALL events (no slice)
     useEffect(() => {
         const loadEvents = async () => {
             try {
                 const evts = await getEposEvents(selectedRestaurant || null, {});
-                setEvents(evts.slice(0, 20)); // last 20
+                setEvents(evts);
                 const stats = await getEposEventStats(selectedRestaurant || null);
                 setEventStats(stats);
             } catch (e) {
@@ -681,6 +694,33 @@ const EposIntegrationSection = () => {
         };
         loadEvents();
     }, [selectedRestaurant]);
+
+    // Client-side filtering
+    const filteredEvents = events.filter(ev => {
+        if (statusFilter && ev.processing_status !== statusFilter) return false;
+        if (searchQuery) {
+            const q = searchQuery.toLowerCase();
+            if (!(ev.epos_order_id || '').toLowerCase().includes(q) &&
+                !(ev.restaurant_name || '').toLowerCase().includes(q)) return false;
+        }
+        if (dateFrom) {
+            const from = new Date(dateFrom);
+            from.setHours(0, 0, 0, 0);
+            if (!ev.received_at || ev.received_at < from) return false;
+        }
+        if (dateTo) {
+            const to = new Date(dateTo);
+            to.setHours(23, 59, 59, 999);
+            if (!ev.received_at || ev.received_at > to) return false;
+        }
+        return true;
+    });
+
+    // Reset page on filter change
+    useEffect(() => { setEvtPage(1); }, [statusFilter, searchQuery, dateFrom, dateTo, selectedRestaurant]);
+
+    const totalPages = Math.ceil(filteredEvents.length / evtPageSize) || 1;
+    const pagedEvents = filteredEvents.slice((evtPage - 1) * evtPageSize, evtPage * evtPageSize);
 
     const handleGenerate = async (rest) => {
         setGenerating(rest.id);
@@ -717,10 +757,22 @@ const EposIntegrationSection = () => {
             processed: { label: 'Processed', cls: 'badge-success' },
             partial_failure: { label: 'Partial Fail', cls: 'badge-danger' },
             has_unmapped: { label: 'Unmapped Items', cls: 'badge-warning' },
+            mapping_broken: { label: 'Mapping Broken', cls: 'badge-danger' },
+            no_recipe: { label: 'No Recipe', cls: 'badge-warning' },
             pending: { label: 'Pending', cls: 'badge-neutral' },
         };
-        const s = map[status] || { label: status, cls: 'badge-neutral' };
+        const s = map[status] || { label: status || 'Unknown', cls: 'badge-neutral' };
         return <span className={`badge ${s.cls}`}>{s.label}</span>;
+    };
+
+    const rowBgColor = (status) => {
+        const map = {
+            processed: 'rgba(34,197,94,0.04)',
+            partial_failure: 'rgba(239,68,68,0.06)',
+            has_unmapped: 'rgba(245,158,11,0.05)',
+            pending: 'transparent',
+        };
+        return map[status] || 'transparent';
     };
 
     return (
@@ -858,57 +910,225 @@ const EposIntegrationSection = () => {
                 </div>
             )}
 
-            {/* Recent Events Log */}
+            {/* ── Events Log ── */}
             <div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                    <h5 style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-secondary)', margin: 0 }}>
-                        <MdReceipt style={{ verticalAlign: 'middle', marginRight: 6 }} /> Recent Webhook Events
-                    </h5>
-                    <select className="settings-field-input" style={{ width: 'auto', minWidth: 180 }}
+                <h5 style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-secondary)', margin: '0 0 10px' }}>
+                    <MdReceipt style={{ verticalAlign: 'middle', marginRight: 6 }} /> Webhook Events
+                    <span style={{ fontWeight: 400, fontSize: 11, color: 'var(--color-text-muted)', marginLeft: 8 }}>
+                        ({filteredEvents.length} of {events.length})
+                    </span>
+                </h5>
+
+                {/* Filter Bar */}
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10, alignItems: 'center' }}>
+                    <select className="settings-field-input" style={{ width: 'auto', minWidth: 160 }}
                         value={selectedRestaurant} onChange={e => setSelectedRestaurant(e.target.value)}>
                         <option value="">All Restaurants</option>
-                        {restaurants.map(r => (
-                            <option key={r.id} value={r.id}>{r.name}</option>
-                        ))}
+                        {restaurants.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                     </select>
+                    <select className="settings-field-input" style={{ width: 'auto', minWidth: 140 }}
+                        value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+                        <option value="">All Statuses</option>
+                        <option value="processed">Processed</option>
+                        <option value="has_unmapped">Unmapped</option>
+                        <option value="partial_failure">Partial Fail</option>
+                        <option value="pending">Pending</option>
+                    </select>
+                    <input type="date" className="settings-field-input" style={{ width: 'auto' }}
+                        value={dateFrom} onChange={e => setDateFrom(e.target.value)} title="From date" />
+                    <input type="date" className="settings-field-input" style={{ width: 'auto' }}
+                        value={dateTo} onChange={e => setDateTo(e.target.value)} title="To date" />
+                    <input className="settings-field-input" style={{ width: 'auto', minWidth: 150 }}
+                        placeholder="Search order ID…" value={searchQuery}
+                        onChange={e => setSearchQuery(e.target.value)} />
+                    {(statusFilter || dateFrom || dateTo || searchQuery) && (
+                        <button className="btn btn-ghost btn-sm" onClick={() => { setStatusFilter(''); setDateFrom(''); setDateTo(''); setSearchQuery(''); }}>
+                            <MdClose size={14} /> Clear
+                        </button>
+                    )}
                 </div>
 
-                {events.length === 0 ? (
-                    <div style={{
-                        padding: '30px 20px', textAlign: 'center',
-                        color: 'var(--color-text-muted)', background: 'var(--color-surface)',
-                        borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)',
-                    }}>
+                {filteredEvents.length === 0 ? (
+                    <div style={{ padding: '30px 20px', textAlign: 'center', color: 'var(--color-text-muted)', background: 'var(--color-surface)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}>
                         <MdReceipt style={{ fontSize: 28, display: 'block', margin: '0 auto 8px' }} />
-                        No EPOS events received yet. Events will appear here after the vendor starts sending webhook data.
+                        {events.length === 0 ? 'No EPOS events received yet.' : 'No events match the current filters.'}
                     </div>
                 ) : (
-                    <div style={{ maxHeight: 300, overflowY: 'auto', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}>
-                        <table className="data-table" style={{ fontSize: 12 }}>
-                            <thead>
-                                <tr>
-                                    <th>Time</th>
-                                    <th>Restaurant</th>
-                                    <th>EPOS Order</th>
-                                    <th>Items</th>
-                                    <th>Status</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {events.map(ev => (
-                                    <tr key={ev.id}>
-                                        <td>{ev.received_at ? ev.received_at.toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}</td>
-                                        <td>{ev.restaurant_name || '—'}</td>
-                                        <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{ev.epos_order_id}</td>
-                                        <td>{ev.line_items?.length || 0}</td>
-                                        <td>{statusBadge(ev.processing_status)}</td>
+                    <>
+                        <div style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
+                            <table className="data-table" style={{ fontSize: 12 }}>
+                                <thead>
+                                    <tr>
+                                        <th>Time</th><th>Restaurant</th><th>EPOS Order</th>
+                                        <th>Items</th><th>Processed</th><th>Unmapped</th><th>Errors</th><th>Status</th>
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
+                                </thead>
+                                <tbody>
+                                    {pagedEvents.map(ev => {
+                                        const pr = ev.processing_result || {};
+                                        const processed = (pr.results || []).filter(r => r.status === 'processed').length;
+                                        const unmapped = (pr.results || []).filter(r => r.status === 'unmapped' || r.status === 'mapping_broken').length;
+                                        const errCount = (pr.errors || []).length;
+                                        return (
+                                            <tr key={ev.id} onClick={() => setDetailEvent(ev)}
+                                                style={{ cursor: 'pointer', background: rowBgColor(ev.processing_status), transition: 'background 0.15s' }}
+                                                onMouseEnter={e => e.currentTarget.style.background = 'rgba(201,169,110,0.08)'}
+                                                onMouseLeave={e => e.currentTarget.style.background = rowBgColor(ev.processing_status)}>
+                                                <td>{ev.received_at ? ev.received_at.toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+                                                <td>{ev.restaurant_name || '—'}</td>
+                                                <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{ev.epos_order_id}</td>
+                                                <td>{ev.line_items?.length || 0}</td>
+                                                <td style={{ color: '#22c55e', fontWeight: 600 }}>{processed || '—'}</td>
+                                                <td style={{ color: unmapped > 0 ? '#f59e0b' : undefined, fontWeight: unmapped > 0 ? 600 : 400 }}>{unmapped || '—'}</td>
+                                                <td style={{ color: errCount > 0 ? '#ef4444' : undefined, fontWeight: errCount > 0 ? 600 : 400 }}>{errCount || '—'}</td>
+                                                <td>{statusBadge(ev.processing_status)}</td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                        {/* Pagination */}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', fontSize: 12, color: 'var(--color-text-muted)' }}>
+                            <span>Showing {(evtPage - 1) * evtPageSize + 1}–{Math.min(evtPage * evtPageSize, filteredEvents.length)} of {filteredEvents.length}</span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <select value={evtPageSize} onChange={e => { setEvtPageSize(+e.target.value); setEvtPage(1); }}
+                                    style={{ padding: '4px 8px', borderRadius: 4, fontSize: 12, background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>
+                                    {[25, 50, 100].map(n => <option key={n} value={n}>{n}/page</option>)}
+                                </select>
+                                <button disabled={evtPage <= 1} onClick={() => setEvtPage(p => p - 1)}
+                                    style={{ padding: '4px 10px', borderRadius: 4, cursor: 'pointer', background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)', opacity: evtPage <= 1 ? 0.4 : 1 }}>←</button>
+                                <span>{evtPage} / {totalPages}</span>
+                                <button disabled={evtPage >= totalPages} onClick={() => setEvtPage(p => p + 1)}
+                                    style={{ padding: '4px 10px', borderRadius: 4, cursor: 'pointer', background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text)', opacity: evtPage >= totalPages ? 0.4 : 1 }}>→</button>
+                            </div>
+                        </div>
+                    </>
                 )}
             </div>
+
+            {/* ── Detail Modal ── */}
+            {detailEvent && (() => {
+                const classifyError = (errMsg) => {
+                    if (!errMsg) return { source: 'Unknown', label: 'Unknown error', color: '#6b7280' };
+                    const msg = errMsg.toLowerCase();
+                    if (msg.includes('not defined') || msg.includes('cannot read') || msg.includes('typeerror') || msg.includes('referenceerror'))
+                        return { source: '🐛 App Bug', label: 'Internal application error — fixed in latest deploy.', color: '#8b5cf6' };
+                    if (msg.includes('not found in database') || (msg.includes('menu item') && msg.includes('deleted')))
+                        return { source: '🗑️ Deleted Item', label: 'Mapped menu item was deleted. Needs remapping.', color: '#ef4444' };
+                    if (msg.includes('no mapping') || msg.includes('unmapped'))
+                        return { source: '🔗 No Mapping', label: 'No mapping to menu item. Needs mapping.', color: '#f59e0b' };
+                    if (msg.includes('no recipe'))
+                        return { source: '📋 No Recipe', label: 'Menu item has no recipe defined.', color: '#f59e0b' };
+                    if (msg.includes('inventory') || msg.includes('stock'))
+                        return { source: '📦 Inventory', label: 'Inventory item not found or stock error.', color: '#3b82f6' };
+                    if (msg.includes('portion'))
+                        return { source: '⚙️ Portion', label: 'Could not find the portion on menu item.', color: '#f59e0b' };
+                    if (msg.includes('timeout') || msg.includes('network'))
+                        return { source: '🌐 Network', label: 'Network or timeout issue.', color: '#6b7280' };
+                    return { source: '❓ Other', label: errMsg, color: '#6b7280' };
+                };
+                const pr = detailEvent.processing_result || {};
+                const results = pr.results || [];
+                const errors = pr.errors || [];
+                const cellPad = { padding: '6px 8px' };
+                return (
+                    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        onClick={() => setDetailEvent(null)}>
+                        <div style={{ background: 'var(--color-card, #1e1e2e)', borderRadius: 12, width: '90%', maxWidth: 780, maxHeight: '85vh', overflow: 'auto', padding: 24, position: 'relative' }}
+                            onClick={e => e.stopPropagation()}>
+                            <button onClick={() => setDetailEvent(null)}
+                                style={{ position: 'absolute', top: 12, right: 12, background: 'none', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer', fontSize: 20 }}><MdClose /></button>
+                            <div style={{ marginBottom: 16 }}>
+                                <h4 style={{ margin: 0, fontSize: 16 }}>Event Detail</h4>
+                                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 8, fontSize: 13, color: 'var(--color-text-muted)' }}>
+                                    <span><strong>Order:</strong> <code style={{ fontSize: 12 }}>{detailEvent.epos_order_id}</code></span>
+                                    <span><strong>Restaurant:</strong> {detailEvent.restaurant_name || '—'}</span>
+                                    <span><strong>Time:</strong> {detailEvent.received_at?.toLocaleString('en-GB') || '—'}</span>
+                                    <span>{statusBadge(detailEvent.processing_status)}</span>
+                                </div>
+                                {detailEvent.error_message && (
+                                    <div style={{ marginTop: 8, padding: '8px 12px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 6, fontSize: 12, color: '#ef4444' }}>
+                                        ⚠️ {detailEvent.error_message}
+                                    </div>
+                                )}
+                            </div>
+                            {results.length > 0 && (
+                                <div style={{ marginBottom: 16 }}>
+                                    <h5 style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--color-text-secondary)' }}>📋 Items ({results.length})</h5>
+                                    <div style={{ border: '1px solid var(--color-border)', borderRadius: 8, overflowX: 'auto' }}>
+                                        <table className="data-table" style={{ fontSize: 11, minWidth: 600 }}>
+                                            <thead><tr><th>EPOS Item</th><th>Menu Item</th><th>Portion</th><th>Qty</th><th>Status</th><th>Detail</th></tr></thead>
+                                            <tbody>
+                                                {results.map((r, i) => (
+                                                    <tr key={i} style={{ background: r.status === 'processed' ? 'rgba(34,197,94,0.04)' : r.status === 'unmapped' || r.status === 'mapping_broken' ? 'rgba(245,158,11,0.06)' : 'transparent' }}>
+                                                        <td style={{ ...cellPad, fontWeight: 600 }}>{r.epos_item_name || r.epos_item_id}</td>
+                                                        <td style={cellPad}>{r.menu_item || '—'}</td>
+                                                        <td style={cellPad}>{r.portion || '—'}</td>
+                                                        <td style={cellPad}>{r.quantity_sold || '—'}</td>
+                                                        <td style={cellPad}>{statusBadge(r.status)}</td>
+                                                        <td style={{ ...cellPad, fontSize: 10, color: 'var(--color-text-muted)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                                            title={r.message || ''}>{r.message || (r.deductions?.length ? `${r.deductions.length} deductions` : '—')}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+                            {errors.length > 0 && (
+                                <div style={{ marginBottom: 16 }}>
+                                    <h5 style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: '#ef4444' }}>❌ Errors ({errors.length})</h5>
+                                    <div style={{ border: '1px solid var(--color-border)', borderRadius: 8, overflowX: 'auto' }}>
+                                        <table className="data-table" style={{ fontSize: 11, minWidth: 550 }}>
+                                            <thead><tr><th>EPOS Item</th><th>Source</th><th>Explanation</th><th>Raw Error</th></tr></thead>
+                                            <tbody>
+                                                {errors.map((err, i) => {
+                                                    const c = classifyError(err.error);
+                                                    return (
+                                                        <tr key={i} style={{ background: 'rgba(239,68,68,0.04)' }}>
+                                                            <td style={{ ...cellPad, fontWeight: 600 }}>{err.epos_item_name || err.epos_item_id}</td>
+                                                            <td style={cellPad}><span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: c.color + '18', color: c.color, whiteSpace: 'nowrap' }}>{c.source}</span></td>
+                                                            <td style={{ ...cellPad, fontSize: 11, color: 'var(--color-text-secondary)' }}>{c.label}</td>
+                                                            <td style={{ ...cellPad, fontSize: 10, fontFamily: 'monospace', color: 'var(--color-text-muted)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                                                title={err.error}>{err.error}</td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+                            {results.some(r => r.deductions?.length > 0) && (
+                                <div>
+                                    <h5 style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--color-text-secondary)' }}>📦 Inventory Deductions</h5>
+                                    <div style={{ border: '1px solid var(--color-border)', borderRadius: 8, overflowX: 'auto' }}>
+                                        <table className="data-table" style={{ fontSize: 11, minWidth: 500 }}>
+                                            <thead><tr><th>Item</th><th>Required</th><th>Unit</th><th>Before</th><th>After</th><th>Status</th></tr></thead>
+                                            <tbody>
+                                                {results.flatMap((r, ri) => (r.deductions || []).map((d, di) => (
+                                                    <tr key={`${ri}-${di}`}>
+                                                        <td style={{ ...cellPad, fontWeight: 600 }}>{d.item_name}</td>
+                                                        <td style={cellPad}>{d.required?.toFixed(3)}</td>
+                                                        <td style={cellPad}>{d.unit}</td>
+                                                        <td style={cellPad}>{d.previous_stock?.toFixed(2) ?? '—'}</td>
+                                                        <td style={{ ...cellPad, color: d.new_stock <= 0 ? '#ef4444' : undefined }}>{d.new_stock?.toFixed(2) ?? '—'}</td>
+                                                        <td style={cellPad}>{d.status === 'depleted' ? <span className="badge badge-danger">Depleted</span> : d.status === 'not_in_inventory' ? <span className="badge badge-warning">Not in inventory</span> : <span className="badge badge-success">Deducted</span>}</td>
+                                                    </tr>
+                                                )))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+                            {results.length === 0 && errors.length === 0 && (
+                                <div style={{ padding: 20, textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 13 }}>No processing details available for this event.</div>
+                            )}
+                        </div>
+                    </div>
+                );
+            })()}
         </div>
     );
 };

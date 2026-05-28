@@ -173,7 +173,7 @@ export const getAvailableUnits = (inventoryItem) => {
         }
     }
 
-    // Add common sub-units that match the base unit type
+    // Add common sub-units that match ANY unit already in the list
     const commonSubs = {
         kg: [{ value: 'g', label: 'Grams (g)', factor: 0.001 }],
         g: [{ value: 'kg', label: 'Kilogram (kg)', factor: 1000 }],
@@ -181,18 +181,24 @@ export const getAvailableUnits = (inventoryItem) => {
         ml: [{ value: 'l', label: 'Litre (L)', factor: 1000 }],
     };
 
-    const base = inventoryItem.base_unit || masterUnit;
-    if (commonSubs[base]) {
-        for (const sub of commonSubs[base]) {
-            if (!units.find(u => u.value === sub.value)) {
-                units.push(sub);
-            }
-        }
-    }
-    if (commonSubs[masterUnit]) {
-        for (const sub of commonSubs[masterUnit]) {
-            if (!units.find(u => u.value === sub.value)) {
-                units.push(sub);
+    // Normalise unit values to match commonSubs keys
+    const normaliseUnit = (u) => {
+        const low = (u || '').toLowerCase().trim();
+        if (low === 'litre (l)' || low === 'litre' || low === 'liter' || low === 'litres') return 'l';
+        if (low === 'millilitre (ml)' || low === 'millilitre' || low === 'milliliter') return 'ml';
+        if (low === 'kilogram (kg)' || low === 'kilogram' || low === 'kilograms') return 'kg';
+        if (low === 'gram (g)' || low === 'gram' || low === 'grams') return 'g';
+        return low;
+    };
+
+    // Check ALL existing units (master, base, and levels) for metric counterparts
+    const existingNorms = new Set(units.map(u => normaliseUnit(u.value)));
+    for (const normKey of existingNorms) {
+        if (commonSubs[normKey]) {
+            for (const sub of commonSubs[normKey]) {
+                if (!units.find(u => normaliseUnit(u.value) === normaliseUnit(sub.value))) {
+                    units.push(sub);
+                }
             }
         }
     }
@@ -215,34 +221,109 @@ export const getAvailableUnits = (inventoryItem) => {
  */
 export const getConversionToMaster = (selectedUnit, inventoryItem) => {
     if (!inventoryItem) return 1;
-    const masterUnit = inventoryItem.unit || inventoryItem.base_unit || 'unit';
+    const masterUnit = (inventoryItem.unit || inventoryItem.base_unit || 'unit').toLowerCase();
+    const selected = (selectedUnit || 'unit').toLowerCase();
 
-    if (selectedUnit === masterUnit) return 1;
+    if (selected === masterUnit) return 1;
 
-    // Common conversions
-    if (selectedUnit === 'g' && masterUnit === 'kg') return 0.001;
-    if (selectedUnit === 'kg' && masterUnit === 'g') return 1000;
-    if (selectedUnit === 'ml' && masterUnit === 'l') return 0.001;
-    if (selectedUnit === 'l' && masterUnit === 'ml') return 1000;
+    // ── Known metric relationships ──
+    // These let us bridge sub-units that aren't explicitly in the breakdown
+    const metricPairs = {
+        'ml': { parent: 'l', factor: 0.001 },     // 1 ml = 0.001 L
+        'l': { parent: 'ml', factor: 1000 },       // 1 L = 1000 ml (reverse)
+        'g': { parent: 'kg', factor: 0.001 },      // 1 g = 0.001 kg
+        'kg': { parent: 'g', factor: 1000 },        // 1 kg = 1000 g
+        'litre (l)': { parent: 'l', factor: 1 },    // alias
+        'litre': { parent: 'l', factor: 1 },
+        'liter': { parent: 'l', factor: 1 },
+        'millilitre': { parent: 'ml', factor: 1 },
+        'milliliter': { parent: 'ml', factor: 1 },
+        'gram': { parent: 'g', factor: 1 },
+        'grams': { parent: 'g', factor: 1 },
+        'kilogram': { parent: 'kg', factor: 1 },
+    };
 
-    // From unit_conversion levels
+    // Normalise a unit name to its canonical form
+    const normalise = (u) => {
+        const low = u.toLowerCase().trim();
+        // Strip common suffixes like "Litre (L)" → "l"
+        if (low === 'litre (l)' || low === 'litre' || low === 'liter' || low === 'litres') return 'l';
+        if (low === 'millilitre (ml)' || low === 'millilitre' || low === 'milliliter' || low === 'ml') return 'ml';
+        if (low === 'kilogram (kg)' || low === 'kilogram' || low === 'kilograms') return 'kg';
+        if (low === 'gram (g)' || low === 'gram' || low === 'grams') return 'g';
+        if (low === 'packs' || low === 'pack') return 'packs';
+        if (low === 'units' || low === 'unit') return 'units';
+        if (low === 'pieces' || low === 'piece' || low === 'pcs') return 'pcs';
+        return low;
+    };
+
+    const normSelected = normalise(selected);
+    const normMaster = normalise(masterUnit);
+
+    if (normSelected === normMaster) return 1;
+
+    // ── Build conversion graph from unit_conversion levels ──
+    // Graph: edges[fromUnit][toUnit] = factor (1 fromUnit = factor × toUnit)
+    const edges = {};
+    const addEdge = (from, to, factor) => {
+        const nf = normalise(from);
+        const nt = normalise(to);
+        if (!edges[nf]) edges[nf] = {};
+        if (!edges[nt]) edges[nt] = {};
+        edges[nf][nt] = factor;
+        if (factor > 0) edges[nt][nf] = 1 / factor;
+    };
+
+    // Add breakdown levels
     if (inventoryItem.unit_conversion?.levels) {
         for (const level of inventoryItem.unit_conversion.levels) {
-            if (level.to === selectedUnit && level.from === masterUnit) {
-                // 1 masterUnit = factor × subUnit → 1 subUnit = 1/factor × masterUnit
-                return 1 / level.factor;
-            }
-            if (level.from === selectedUnit) {
-                return level.factor;
+            // level: { from: "Packs", to: "Units", factor: 6 }
+            // means 1 Packs = 6 Units → 1 Units = 1/6 Packs
+            addEdge(level.to, level.from, 1 / level.factor);
+        }
+    }
+
+    // Add base_factor if present
+    if (inventoryItem.unit_conversion?.base_factor) {
+        const baseUnit = normalise(inventoryItem.base_unit || inventoryItem.unit_conversion?.base_unit || 'unit');
+        addEdge(baseUnit, normMaster, 1 / inventoryItem.unit_conversion.base_factor);
+    }
+
+    // Add metric sub-unit relationships
+    const metricEntries = [
+        ['ml', 'l', 0.001],
+        ['g', 'kg', 0.001],
+    ];
+    for (const [sub, parent, factor] of metricEntries) {
+        addEdge(sub, parent, factor);
+    }
+
+    // ── BFS to find conversion path from normSelected → normMaster ──
+    const visited = new Set();
+    const queue = [[normSelected, 1]]; // [currentUnit, cumulativeFactor]
+    visited.add(normSelected);
+
+    while (queue.length > 0) {
+        const [current, factor] = queue.shift();
+
+        if (current === normMaster) return factor;
+
+        if (edges[current]) {
+            for (const [neighbor, edgeFactor] of Object.entries(edges[current])) {
+                if (!visited.has(neighbor)) {
+                    visited.add(neighbor);
+                    queue.push([neighbor, factor * edgeFactor]);
+                }
             }
         }
     }
 
-    // If base_factor is available
-    if (inventoryItem.unit_conversion?.base_factor && selectedUnit === (inventoryItem.base_unit || 'g')) {
-        return 1 / inventoryItem.unit_conversion.base_factor;
+    // ── Fallback: direct metric if master itself is a metric unit ──
+    if (metricPairs[normSelected] && metricPairs[normSelected].parent === normMaster) {
+        return metricPairs[normSelected].factor;
     }
 
+    console.warn(`[getConversionToMaster] No conversion path found: ${selectedUnit} → ${masterUnit}`);
     return 1;
 };
 

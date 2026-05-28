@@ -889,9 +889,32 @@ exports.eposWebhook = onRequest({
             // 5b. Look up the menu item and its recipe
             const menuSnap = await db.collection('menu_items').doc(mapping.mapped_menu_item_id).get();
             if (!menuSnap.exists) {
-                errors.push({
+                // Menu item was deleted — deactivate the broken mapping
+                console.warn(`Mapped menu item ${mapping.mapped_menu_item_id} deleted. Deactivating mapping for EPOS item ${item.epos_item_id}`);
+                await mappingSnap.docs[0].ref.update({
+                    is_active: false,
+                    broken_reason: 'menu_item_deleted',
+                    broken_at: admin.firestore.FieldValue.serverTimestamp(),
+                });
+
+                // Re-add to unmapped items so admin can remap
+                hasUnmapped = true;
+                const unmappedRef = db.collection('epos_unmapped_items').doc(`${restaurantId}_${item.epos_item_id}`);
+                await unmappedRef.set({
+                    restaurant_id: restaurantId,
                     epos_item_id: item.epos_item_id,
-                    error: `Mapped menu item ${mapping.mapped_menu_item_id} not found in database.`,
+                    epos_item_name: item.epos_item_name,
+                    portion: item.portion,
+                    last_seen_at: admin.firestore.FieldValue.serverTimestamp(),
+                    occurrence_count: admin.firestore.FieldValue.increment(1),
+                    remap_reason: `Previously mapped to "${mapping.mapped_menu_item_name || mapping.mapped_menu_item_id}" which was deleted`,
+                }, { merge: true });
+
+                results.push({
+                    epos_item_id: item.epos_item_id,
+                    epos_item_name: item.epos_item_name,
+                    status: 'mapping_broken',
+                    message: `Mapped menu item "${mapping.mapped_menu_item_name || mapping.mapped_menu_item_id}" was deleted. Item moved to unmapped for remapping.`,
                 });
                 continue;
             }
@@ -924,30 +947,79 @@ exports.eposWebhook = onRequest({
                 continue;
             }
 
-            // 5d. Deduct each ingredient from restaurant inventory
+            // 5d. Recursively resolve all ingredients (recipe[] + sub_items[]) into
+            // a flat deduplicated map keyed by item_id. This prevents double-deduction
+            // when the same inventory item appears in both direct recipe and a sub-item recipe.
+            //
+            // ingredientMap: { [item_id]: { item_id, item_name, master_unit, totalQty } }
+            const ingredientMap = {};
+
+            /**
+             * Recursively collects all inventory ingredient quantities from a portion.
+             * @param {Object} portion - the portion object { recipe[], sub_items[] }
+             * @param {number} multiplier - qty multiplier (e.g., 2 for 2× parent portions)
+             */
+            const collectIngredients = async (portion, multiplier) => {
+                // Direct recipe ingredients
+                for (const ing of (portion.recipe || [])) {
+                    const reqQty = (Number(ing.quantity) || 0)
+                        * (Number(ing.conversion_to_master) || 1)
+                        * multiplier;
+                    if (reqQty <= 0) continue;
+                    if (!ingredientMap[ing.item_id]) {
+                        ingredientMap[ing.item_id] = {
+                            item_id: ing.item_id,
+                            item_name: ing.item_name,
+                            master_unit: ing.master_unit || ing.unit || '',
+                            totalQty: 0,
+                        };
+                    }
+                    ingredientMap[ing.item_id].totalQty += reqQty;
+                }
+                // Sub-menu-item components (combos / platters)
+                for (const sub of (portion.sub_items || [])) {
+                    try {
+                        const subMenuSnap = await db.collection('menu_items')
+                            .doc(sub.menu_item_id).get();
+                        if (!subMenuSnap.exists) continue;
+                        const subMenuData = subMenuSnap.data();
+                        // Find the correct sub-portion
+                        let subPortion = sub.portion_id
+                            ? (subMenuData.portions || []).find(p => p.id === sub.portion_id)
+                            : null;
+                        if (!subPortion) subPortion = (subMenuData.portions || [])[0];
+                        if (!subPortion) continue;
+                        // Recurse: multiply by sub.quantity (e.g., 2 Cokes per combo)
+                        await collectIngredients(subPortion, multiplier * (Number(sub.quantity) || 1));
+                    } catch (subErr) {
+                        console.warn(`Failed to resolve sub_item ${sub.menu_item_id}:`, subErr.message);
+                    }
+                }
+            };
+
+            // Collect all ingredients for (item.quantity) sold
+            await collectIngredients(targetPortion, item.quantity);
+
+            // Track deductions for this item
             const deductions = [];
-            const recipe = targetPortion.recipe || [];
 
-            for (const ingredient of recipe) {
-                const requiredQty = (Number(ingredient.quantity) || 0)
-                    * (Number(ingredient.conversion_to_master) || 1)
-                    * item.quantity; // multiply by items sold
-
+            // Deduct each unique ingredient exactly once
+            for (const ingEntry of Object.values(ingredientMap)) {
+                const { item_id, item_name, master_unit, totalQty } = ingEntry;
+                const requiredQty = Math.round(totalQty * 1000) / 1000;
                 if (requiredQty <= 0) continue;
 
                 // Find the ingredient in restaurant_inventory
                 const invSnap = await db.collection('restaurant_inventory')
                     .where('restaurant_id', '==', restaurantId)
-                    .where('item_id', '==', ingredient.item_id)
+                    .where('item_id', '==', item_id)
                     .limit(1)
                     .get();
 
                 if (invSnap.empty) {
                     deductions.push({
-                        item_id: ingredient.item_id,
-                        item_name: ingredient.item_name,
-                        required: requiredQty,
-                        status: 'not_in_inventory',
+                        item_id, item_name, required: requiredQty,
+                        unit: master_unit, status: 'not_in_inventory',
                     });
                     continue;
                 }
@@ -963,39 +1035,32 @@ exports.eposWebhook = onRequest({
                 });
 
                 deductions.push({
-                    item_id: ingredient.item_id,
-                    item_name: ingredient.item_name,
-                    required: Math.round(requiredQty * 1000) / 1000,
+                    item_id, item_name,
+                    required: requiredQty,
                     previous_stock: currentStock,
                     new_stock: newStock,
-                    unit: ingredient.master_unit || ingredient.unit || '',
+                    unit: master_unit,
+                    cost_price: invData.cost_price || 0,
+                    selling_price: invData.selling_price || 0,
+                    category_name: invData.category_name || '',
+                    item_type: invData.item_type || '',
                     status: newStock <= 0 ? 'depleted' : 'deducted',
                 });
 
                 // Check low-stock threshold
                 const threshold = invData.low_stock_threshold || 5;
                 if (newStock <= threshold && currentStock > threshold) {
-                    // Trigger low-stock alert (create notification for admins)
                     try {
                         const adminSnap = await db.collection('users')
-                            .where('role', '==', 'admin')
-                            .get();
-                        const adminIds = adminSnap.docs.map(d => d.id);
-
-                        for (const adminId of adminIds) {
+                            .where('role', '==', 'admin').get();
+                        for (const adminDoc of adminSnap.docs) {
                             await db.collection('notifications').add({
-                                user_id: adminId,
-                                type: 'low_stock',
-                                priority: 'high',
-                                title: `Low Stock: ${ingredient.item_name}`,
-                                message: `${ingredient.item_name} at ${restaurantName} dropped to ${newStock.toFixed(1)} ${ingredient.master_unit || ''}. Triggered by EPOS sale.`,
+                                user_id: adminDoc.id,
+                                type: 'low_stock', priority: 'high',
+                                title: `Low Stock: ${item_name}`,
+                                message: `${item_name} at ${restaurantName} dropped to ${newStock.toFixed(1)} ${master_unit}. Triggered by EPOS sale.`,
                                 is_read: false,
-                                metadata: {
-                                    restaurant_id: restaurantId,
-                                    item_id: ingredient.item_id,
-                                    current_stock: newStock,
-                                    threshold,
-                                },
+                                metadata: { restaurant_id: restaurantId, item_id, current_stock: newStock, threshold },
                                 created_at: admin.firestore.FieldValue.serverTimestamp(),
                             });
                         }
@@ -1009,7 +1074,12 @@ exports.eposWebhook = onRequest({
                 epos_item_id: item.epos_item_id,
                 epos_item_name: item.epos_item_name,
                 menu_item: menuItem.name,
+                menu_item_id: mapping.mapped_menu_item_id,
+                menu_item_category: menuItem.category || '',
+                menu_item_model: menuItem.model_type || '',
                 portion: targetPortion.name,
+                portion_selling_price: targetPortion.selling_price || 0,
+                portion_cost_price: targetPortion.cost_price || 0,
                 quantity_sold: item.quantity,
                 deductions,
                 status: 'processed',
@@ -1080,8 +1150,7 @@ exports.reprocessAfterMapping = onCall({ maxInstances: 5 }, async (request) => {
         .where('restaurant_id', '==', restaurant_id)
         .where('epos_item_id', '==', epos_item_id)
         .where('is_active', '==', true)
-        .limit(1)
-        .get();
+        .limit(1).get();
 
     if (mappingSnap.empty) {
         throw new HttpsError('not-found', 'No active mapping found for this item');
@@ -1125,39 +1194,54 @@ exports.reprocessAfterMapping = onCall({ maxInstances: 5 }, async (request) => {
         const errors = event.processing_result?.errors || [];
         let modified = false;
 
-        // Check each result for unmapped items matching our epos_item_id
         const updatedResults = [];
         for (const r of results) {
             if (r.status === 'unmapped' && r.epos_item_id === epos_item_id) {
-                // This item needs to be processed now!
-                // Find quantity from line_items
                 const lineItem = (event.line_items || []).find(li => li.epos_item_id === epos_item_id);
                 const qty = lineItem?.quantity || 1;
 
-                // Deduct ingredients from restaurant inventory
+                // Recursively collect deduplicated ingredients (same as webhook handler)
+                const reprocessIngMap = {};
+                const reprocessCollect = async (portion, mult) => {
+                    for (const ing of (portion.recipe || [])) {
+                        const reqQty = (Number(ing.quantity) || 0)
+                            * (Number(ing.conversion_to_master) || 1) * mult;
+                        if (reqQty <= 0) continue;
+                        if (!reprocessIngMap[ing.item_id]) {
+                            reprocessIngMap[ing.item_id] = {
+                                item_id: ing.item_id, item_name: ing.item_name,
+                                master_unit: ing.master_unit || ing.unit || '', totalQty: 0,
+                            };
+                        }
+                        reprocessIngMap[ing.item_id].totalQty += reqQty;
+                    }
+                    for (const sub of (portion.sub_items || [])) {
+                        try {
+                            const subSnap = await db.collection('menu_items').doc(sub.menu_item_id).get();
+                            if (!subSnap.exists) continue;
+                            const subData = subSnap.data();
+                            let subPortion = sub.portion_id
+                                ? (subData.portions || []).find(p => p.id === sub.portion_id)
+                                : null;
+                            if (!subPortion) subPortion = (subData.portions || [])[0];
+                            if (subPortion) await reprocessCollect(subPortion, mult * (Number(sub.quantity) || 1));
+                        } catch (e) { console.warn('sub_item resolve error:', e.message); }
+                    }
+                };
+                await reprocessCollect(targetPortion, qty);
+
                 const deductions = [];
-                const recipe = targetPortion.recipe || [];
-
-                for (const ingredient of recipe) {
-                    const requiredQty = (Number(ingredient.quantity) || 0)
-                        * (Number(ingredient.conversion_to_master) || 1)
-                        * qty;
-
+                for (const ingEntry of Object.values(reprocessIngMap)) {
+                    const { item_id, item_name, master_unit, totalQty } = ingEntry;
+                    const requiredQty = Math.round(totalQty * 1000) / 1000;
                     if (requiredQty <= 0) continue;
 
                     const invSnap = await db.collection('restaurant_inventory')
                         .where('restaurant_id', '==', restaurant_id)
-                        .where('item_id', '==', ingredient.item_id)
-                        .limit(1)
-                        .get();
+                        .where('item_id', '==', item_id).limit(1).get();
 
                     if (invSnap.empty) {
-                        deductions.push({
-                            item_id: ingredient.item_id,
-                            item_name: ingredient.item_name,
-                            required: requiredQty,
-                            status: 'not_in_inventory',
-                        });
+                        deductions.push({ item_id, item_name, required: requiredQty, unit: master_unit, status: 'not_in_inventory' });
                         continue;
                     }
 
@@ -1165,30 +1249,34 @@ exports.reprocessAfterMapping = onCall({ maxInstances: 5 }, async (request) => {
                     const invData = invDoc.data();
                     const currentStock = invData.current_stock || 0;
                     const newStock = Math.max(0, currentStock - requiredQty);
-
                     await invDoc.ref.update({
                         current_stock: newStock,
                         last_updated: admin.firestore.FieldValue.serverTimestamp(),
                     });
 
                     deductions.push({
-                        item_id: ingredient.item_id,
-                        item_name: ingredient.item_name,
-                        required: Math.round(requiredQty * 1000) / 1000,
-                        previous_stock: currentStock,
-                        new_stock: newStock,
-                        unit: ingredient.master_unit || ingredient.unit || '',
+                        item_id, item_name, required: requiredQty,
+                        previous_stock: currentStock, new_stock: newStock,
+                        unit: master_unit,
+                        cost_price: invData.cost_price || 0,
+                        selling_price: invData.selling_price || 0,
+                        category_name: invData.category_name || '',
+                        item_type: invData.item_type || '',
                         status: newStock <= 0 ? 'depleted' : 'deducted',
                     });
                     totalDeductions++;
                 }
 
-                // Replace the unmapped result with a processed result
                 updatedResults.push({
                     epos_item_id: r.epos_item_id,
                     epos_item_name: r.epos_item_name,
                     menu_item: menuItem.name,
+                    menu_item_id: mapping.mapped_menu_item_id,
+                    menu_item_category: menuItem.category || '',
+                    menu_item_model: menuItem.model_type || '',
                     portion: targetPortion.name,
+                    portion_selling_price: targetPortion.selling_price || 0,
+                    portion_cost_price: targetPortion.cost_price || 0,
                     quantity_sold: qty,
                     deductions,
                     status: 'processed',
@@ -1196,13 +1284,11 @@ exports.reprocessAfterMapping = onCall({ maxInstances: 5 }, async (request) => {
                 });
                 modified = true;
             } else {
-                // Keep existing result as-is (preserves history)
                 updatedResults.push(r);
             }
         }
 
         if (modified) {
-            // Recalculate overall status
             const hasRemaining = updatedResults.some(r => r.status === 'unmapped');
             const hasErrors = errors.length > 0;
             const newStatus = hasErrors ? 'partial_failure'

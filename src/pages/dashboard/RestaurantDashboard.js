@@ -16,6 +16,7 @@ import { getOrders } from '../../services/orderService';
 import { getInvoices } from '../../services/invoiceService';
 import { getMenuItems, MENU_CATEGORIES, getCategoryInfo, calcPortionCost } from '../../services/menuService';
 import { getEposEvents } from '../../services/eposService';
+import EposSalesTable from '../../components/epos/EposSalesTable';
 import toast from 'react-hot-toast';
 import { seedRestaurantDashboard } from '../../scripts/seedRestaurantDashboard';
 import './Dashboard.css';
@@ -111,25 +112,34 @@ const RestaurantDashboard = () => {
         if (!restaurantId) return;
         setLoading(true);
         try {
-            const [stats, inv, ord, inv2, menu, eposEvts] = await Promise.all([
+            // Phase 1: Core dashboard data (KPIs, orders, inventory)
+            const [stats, inv, ord, inv2] = await Promise.all([
                 getRestaurantInventoryStats(restaurantId),
                 getRestaurantInventory(restaurantId).catch(() => []),
                 getOrders({ restaurant_id: restaurantId }).catch(() => []),
                 getInvoices({ restaurant_id: restaurantId }).catch(() => []),
-                getMenuItems(restaurantId).catch(() => []),
-                getEposEvents(restaurantId).catch(() => []),
             ]);
             setInvStats(stats);
             setInventoryItems(inv || []);
             setOrders(ord || []);
             setInvoices(inv2 || []);
-            setMenuItems(menu || []);
-            setEposEvents(eposEvts || []);
         } catch (err) {
             console.error('Dashboard load error:', err);
             toast.error('Failed to load dashboard data');
         } finally {
             setLoading(false);
+        }
+
+        // Phase 2: EPOS + Menu data (deferred — loads in background after UI renders)
+        try {
+            const [menu, eposEvts] = await Promise.all([
+                getMenuItems(restaurantId).catch(() => []),
+                getEposEvents(restaurantId).catch(() => []),
+            ]);
+            setMenuItems(menu || []);
+            setEposEvents(eposEvts || []);
+        } catch (err) {
+            console.error('EPOS/Menu load error:', err);
         }
     }, [restaurantId]);
 
@@ -143,7 +153,7 @@ const RestaurantDashboard = () => {
         const active = all.filter(o => ['pending', 'confirmed', 'preparing', 'ready'].includes(o.status));
         const delivered = all.filter(o => o.status === 'delivered');
         const cancelled = all.filter(o => o.status === 'cancelled');
-        const totalAmount = delivered.reduce((s, o) => s + (o.total_amount || 0), 0);
+        const totalAmount = delivered.reduce((s, o) => s + (o.total || o.total_amount || 0), 0);
 
         // Orders by status (pie)
         const statusMap = {};
@@ -170,9 +180,12 @@ const RestaurantDashboard = () => {
 
             if (!byPeriod[key]) byPeriod[key] = { period: label, orders: 0, amount: 0 };
             byPeriod[key].orders++;
-            byPeriod[key].amount += (o.total_amount || 0);
+            byPeriod[key].amount += (o.total || o.total_amount || 0);
         });
-        const trend = Object.keys(byPeriod).sort().map(k => byPeriod[k]);
+        const trend = Object.keys(byPeriod).sort().map(k => ({
+            ...byPeriod[k],
+            amount: Number(byPeriod[k].amount.toFixed(2)),
+        }));
 
         // Recent 5
         const recent = [...all]
@@ -218,7 +231,7 @@ const RestaurantDashboard = () => {
         // By category (bar)
         const catMap = {};
         items.forEach(i => {
-            const c = i.category || 'Uncategorised';
+            const c = i.category_name || i.category || 'Uncategorised';
             if (!catMap[c]) catMap[c] = { name: c, count: 0, value: 0 };
             catMap[c].count++;
             catMap[c].value += (i.current_stock || 0) * (i.cost_price || 0);
@@ -296,7 +309,7 @@ const RestaurantDashboard = () => {
 
         // Top 10 highest margin portions (bar)
         const topMargin = [...allPortions]
-            .filter(p => p.sellingPrice > 0)
+            .filter(p => p.sellingPrice > 0 && p.ingredientCount > 0)
             .sort((a, b) => b.marginPct - a.marginPct)
             .slice(0, 10)
             .map(p => ({
@@ -308,7 +321,7 @@ const RestaurantDashboard = () => {
 
         // Lowest margin (risk) portions (bar)
         const lowMargin = [...allPortions]
-            .filter(p => p.sellingPrice > 0)
+            .filter(p => p.sellingPrice > 0 && p.ingredientCount > 0)
             .sort((a, b) => a.marginPct - b.marginPct)
             .slice(0, 10)
             .map(p => ({
@@ -452,7 +465,7 @@ const RestaurantDashboard = () => {
 
         let totalItemsSold = 0;
         let totalRevenue = 0;
-        const itemMap = {}; // mappedName → { qty, revenue }
+        const itemMap = {}; // mappedName → { qty, revenue, portions: { portionName: qty } }
         const dailyMap = {}; // YYYY-MM-DD → { revenue, orders }
         const hourlyMap = {}; // hourLabel → revenue total
 
@@ -479,16 +492,17 @@ const RestaurantDashboard = () => {
                     if (r.status === 'processed') {
                         totalItemsSold += qty;
                         const mappedName = r.menu_item || 'Unknown';
-                        const portionName = r.portion || '';
+                        const portionName = r.portion || 'Standard';
                         // Look up our selling price
                         const unitPrice = priceLookup[`${mappedName}__${portionName}`]
                             || priceLookup[mappedName]
                             || 0;
                         const itemRevenue = unitPrice * qty;
 
-                        if (!itemMap[mappedName]) itemMap[mappedName] = { name: mappedName, revenue: 0, qty: 0 };
+                        if (!itemMap[mappedName]) itemMap[mappedName] = { name: mappedName, revenue: 0, qty: 0, portions: {} };
                         itemMap[mappedName].qty += qty;
                         itemMap[mappedName].revenue += itemRevenue;
+                        itemMap[mappedName].portions[portionName] = (itemMap[mappedName].portions[portionName] || 0) + qty;
                         orderRevenue += itemRevenue;
                     }
                     // Skip unmapped items — don't show EPOS names
@@ -499,8 +513,9 @@ const RestaurantDashboard = () => {
                     const qty = li.quantity || 1;
                     totalItemsSold += qty;
                     const name = li.epos_item_name || 'Unknown';
-                    if (!itemMap[name]) itemMap[name] = { name, revenue: 0, qty: 0 };
+                    if (!itemMap[name]) itemMap[name] = { name, revenue: 0, qty: 0, portions: {} };
                     itemMap[name].qty += qty;
+                    itemMap[name].portions['Standard'] = (itemMap[name].portions['Standard'] || 0) + qty;
                 });
             }
 
@@ -517,10 +532,17 @@ const RestaurantDashboard = () => {
             hourlyMap[hourLabel] = (hourlyMap[hourLabel] || 0) + orderRevenue;
         });
 
-        // Top sellers (by qty)
+        // Top sellers (by qty) with portion breakdown labels
         const topSellers = Object.values(itemMap)
             .sort((a, b) => b.qty - a.qty)
-            .slice(0, 10);
+            .slice(0, 10)
+            .map(item => ({
+                ...item,
+                portionLabel: Object.entries(item.portions || {})
+                    .sort(([, a], [, b]) => b - a)
+                    .map(([p, q]) => `${p}: ${q}`)
+                    .join(', '),
+            }));
 
         // Daily revenue sorted by date
         const dailyRevenue = Object.entries(dailyMap)
@@ -761,7 +783,12 @@ const RestaurantDashboard = () => {
                                     <BarChart data={inventoryAnalytics.topByValue} layout="vertical" margin={{ left: 20, right: 20 }}>
                                         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.06)" />
                                         <XAxis type="number" tick={{ fontSize: 11, fill: '#9ca3af' }} tickFormatter={v => `£${v}`} />
-                                        <YAxis dataKey="name" type="category" tick={{ fontSize: 10, fill: '#9ca3af' }} width={110} />
+                                        <YAxis dataKey="name" type="category" width={130} tick={({ x, y, payload }) => (
+                                            <text x={x} y={y} dy={4} textAnchor="end" fontSize={10} fill="#9ca3af">
+                                                <title>{payload.value}</title>
+                                                {payload.value.length > 18 ? payload.value.slice(0, 16) + '…' : payload.value}
+                                            </text>
+                                        )} />
                                         <Tooltip contentStyle={tooltipStyle} formatter={(v) => `£${Number(v).toFixed(2)}`} />
                                         <Bar dataKey="value" fill="#c9a96e" radius={[0, 4, 4, 0]} />
                                     </BarChart>
@@ -936,7 +963,7 @@ const RestaurantDashboard = () => {
                                 orderAnalytics.recent.map((order, idx) => {
                                     const num = order.order_number || order.id?.slice(0, 8);
                                     const items = order.items?.length || 0;
-                                    const total = (order.total_amount || 0).toFixed(2);
+                                    const total = (order.total || order.total_amount || 0).toFixed(2);
                                     return (
                                         <div key={idx} className="activity-item">
                                             <div className="activity-dot" style={{ background: getStatusColor(order.status) }} />
@@ -1062,9 +1089,14 @@ const RestaurantDashboard = () => {
                                 <BarChart data={menuAnalytics.topMargin} layout="vertical" margin={{ left: 20, right: 20 }}>
                                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.06)" />
                                     <XAxis type="number" tick={{ fontSize: 11, fill: '#9ca3af' }} domain={[0, 100]} tickFormatter={v => `${v}%`} />
-                                    <YAxis dataKey="name" type="category" tick={{ fontSize: 10, fill: '#9ca3af' }} width={120} />
+                                    <YAxis dataKey="name" type="category" width={150} tick={({ x, y, payload }) => (
+                                        <text x={x} y={y} dy={4} textAnchor="end" fontSize={10} fill="#9ca3af">
+                                            <title>{payload.value}</title>
+                                            {payload.value.length > 22 ? payload.value.slice(0, 20) + '…' : payload.value}
+                                        </text>
+                                    )} />
                                     <Tooltip contentStyle={tooltipStyle}
-                                        formatter={(v, name) => name === 'margin' ? `${v}%` : `£${v}`}
+                                        formatter={(v) => `${v}%`}
                                         labelFormatter={name => name} />
                                     <Bar dataKey="margin" fill="#22c55e" radius={[0, 4, 4, 0]} name="Margin %" />
                                 </BarChart>
@@ -1084,9 +1116,14 @@ const RestaurantDashboard = () => {
                                 <BarChart data={menuAnalytics.lowMargin} layout="vertical" margin={{ left: 20, right: 20 }}>
                                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.06)" />
                                     <XAxis type="number" tick={{ fontSize: 11, fill: '#9ca3af' }} tickFormatter={v => `${v}%`} />
-                                    <YAxis dataKey="name" type="category" tick={{ fontSize: 10, fill: '#9ca3af' }} width={120} />
+                                    <YAxis dataKey="name" type="category" width={150} tick={({ x, y, payload }) => (
+                                        <text x={x} y={y} dy={4} textAnchor="end" fontSize={10} fill="#9ca3af">
+                                            <title>{payload.value}</title>
+                                            {payload.value.length > 22 ? payload.value.slice(0, 20) + '…' : payload.value}
+                                        </text>
+                                    )} />
                                     <Tooltip contentStyle={tooltipStyle}
-                                        formatter={(v, name) => name === 'margin' ? `${v}%` : `£${v}`} />
+                                        formatter={(v) => `${v}%`} />
                                     <Bar dataKey="margin" fill="#ef4444" radius={[0, 4, 4, 0]} name="Margin %" />
                                 </BarChart>
                             </ResponsiveContainer>
@@ -1303,7 +1340,25 @@ const RestaurantDashboard = () => {
                                             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.06)" />
                                             <XAxis type="number" tick={{ fontSize: 11, fill: '#9ca3af' }} />
                                             <YAxis dataKey="name" type="category" tick={{ fontSize: 10, fill: '#9ca3af' }} width={140} />
-                                            <Tooltip contentStyle={tooltipStyle} formatter={(v, name) => name === 'qty' ? `${v} sold` : `£${v}`} />
+                                            <Tooltip
+                                                contentStyle={tooltipStyle}
+                                                content={({ active, payload }) => {
+                                                    if (!active || !payload?.[0]) return null;
+                                                    const d = payload[0].payload;
+                                                    return (
+                                                        <div style={{ ...tooltipStyle, padding: '8px 12px', fontSize: 12 }}>
+                                                            <div style={{ fontWeight: 700, marginBottom: 4 }}>{d.name}</div>
+                                                            <div>Total Sold: <strong>{d.qty}</strong> units</div>
+                                                            <div>Revenue: <strong>£{(d.revenue || 0).toFixed(2)}</strong></div>
+                                                            {d.portionLabel && (
+                                                                <div style={{ marginTop: 4, fontSize: 11, color: '#9ca3af', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 4 }}>
+                                                                    {d.portionLabel}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                }}
+                                            />
                                             <Bar dataKey="qty" fill="#c9a96e" radius={[0, 4, 4, 0]} name="Quantity Sold" />
                                         </BarChart>
                                     </ResponsiveContainer>
@@ -1311,23 +1366,15 @@ const RestaurantDashboard = () => {
                             </div>
                         )}
 
-                        {eposData.hourlySales.length > 0 && (
-                            <div className="card dash-chart-card">
-                                <div className="card-header"><h3>Hourly Sales Pattern</h3></div>
-                                <div className="dash-chart-body">
-                                    <p style={{ fontSize: 11, color: 'var(--color-text-muted)', margin: '0 0 8px 8px' }}>Revenue by hour — identify peak and slow periods</p>
-                                    <ResponsiveContainer width="100%" height={250}>
-                                        <BarChart data={eposData.hourlySales} margin={{ left: 10, right: 20 }}>
-                                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.06)" />
-                                            <XAxis dataKey="hour" tick={{ fontSize: 10, fill: '#9ca3af' }} />
-                                            <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} tickFormatter={v => `£${v}`} />
-                                            <Tooltip contentStyle={tooltipStyle} formatter={v => `£${v}`} />
-                                            <Bar dataKey="sales" fill="#8b5cf6" radius={[4, 4, 0, 0]} name="Revenue" />
-                                        </BarChart>
-                                    </ResponsiveContainer>
-                                </div>
-                            </div>
-                        )}
+                        {/* Item-wise Sales Trends Table */}
+                        <EposSalesTable
+                            eposEvents={filterByDate(eposEvents.filter(e =>
+                                e.processing_status === 'processed' ||
+                                e.processing_status === 'has_unmapped'
+                            ), 'received_at')}
+                            menuItems={menuItems}
+                            inventoryItems={inventoryItems}
+                        />
                     </>
                 )}
             </div>
