@@ -99,8 +99,16 @@ const FilterBar = ({ filters, onChange, restaurants }) => {
 
     const applyCustom = () => {
         if (!customFrom || !customTo) { toast.error('Please select both dates'); return; }
-        const df = startOfDay(new Date(customFrom));
-        const dt = endOfDay(new Date(customTo));
+        // Use London timezone for consistent date boundaries
+        const toLondonDate = (dateStr, h, m, s, ms) => {
+            const [y, mo, d] = dateStr.split('-').map(Number);
+            // Calculate offset WITHOUT ms (toLocaleString drops ms, causing rounding errors)
+            const guess = new Date(y, mo - 1, d, h, m, s, 0);
+            const inTz = new Date(guess.toLocaleString('en-US', { timeZone: 'Europe/London' }));
+            return new Date(guess.getTime() + (guess - inTz) + ms);
+        };
+        const df = toLondonDate(customFrom, 0, 0, 0, 0);
+        const dt = toLondonDate(customTo, 23, 59, 59, 999);
         if (df > dt) { toast.error('Start date must be before end date'); return; }
         onChange({ ...filters, preset: 'custom', dateFrom: df, dateTo: dt });
         setShowCustom(false);
@@ -173,7 +181,7 @@ const FilterBar = ({ filters, onChange, restaurants }) => {
             {(filters.restaurantName || filters.preset !== '30d') && (
                 <div className="dash-filter-active">
                     {filters.preset === 'custom'
-                        ? `${filters.dateFrom?.toLocaleDateString('en-GB')} → ${filters.dateTo?.toLocaleDateString('en-GB')}`
+                        ? `${filters.dateFrom?.toLocaleDateString('en-GB', { timeZone: 'Europe/London' })} → ${filters.dateTo?.toLocaleDateString('en-GB', { timeZone: 'Europe/London' })}`
                         : DATE_PRESETS.find(p => p.id === filters.preset)?.label}
                     {filters.restaurantName && ` • ${filters.restaurantName}`}
                 </div>
@@ -233,11 +241,14 @@ const AdminDashboard = () => {
         if (!restaurantList?.length) return;
         setEposAdminLoading(true);
         try {
+            // Pass date range to getEposEvents so Firestore filters by date BEFORE applying limit
+            const from = filters.dateFrom || undefined;
+            const to = filters.dateTo || undefined;
             // Fetch all restaurants in parallel
             const results = await Promise.all(
                 restaurantList.map(async (r) => {
                     const [evts, menu, inv] = await Promise.all([
-                        getEposEvents(r.id).catch(() => []),
+                        getEposEvents(r.id, { from, to, limit: 500 }).catch(() => []),
                         getMenuItems(r.id).catch(() => []),
                         getRestaurantInventory(r.id).catch(() => []),
                     ]);
@@ -259,7 +270,7 @@ const AdminDashboard = () => {
         } finally {
             setEposAdminLoading(false);
         }
-    }, []); // eslint-disable-line
+    }, [filters.dateFrom, filters.dateTo]); // eslint-disable-line
 
     // Load restaurant list once (EPOS data loads on-demand via Refresh button)
     useEffect(() => {
@@ -798,13 +809,32 @@ const AdminDashboard = () => {
                         <div style={{ fontSize: 13 }}>Data appears once EPOS webhook events are processed</div>
                     </div>
                 ) : (() => {
+                    // Helper: parse EPOS event date (prefer order_date — the business date)
+                    const parseEposDate = (e) => {
+                        if (e.order_date) {
+                            // Date-only string → midnight in London; ISO string → parse normally
+                            const d = e.order_date;
+                            if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+                                const [y, m, day] = d.split('-').map(Number);
+                                const guess = new Date(y, m - 1, day, 0, 0, 0, 0);
+                                const inTz = new Date(guess.toLocaleString('en-US', { timeZone: 'Europe/London' }));
+                                return new Date(guess.getTime() + (guess - inTz));
+                            }
+                            return new Date(d);
+                        }
+                        return e.received_at ? new Date(e.received_at) : null;
+                    };
+
                     // Filter events by restaurant + date range
-                    const filteredEvts = eposAllEvents.filter(e =>
-                        (e.processing_status === 'processed' || e.processing_status === 'has_unmapped') &&
-                        (!eposRestaurantFilter || e._restaurant_id === eposRestaurantFilter) &&
-                        (!filters.dateFrom || (e.received_at && new Date(e.received_at) >= filters.dateFrom)) &&
-                        (!filters.dateTo || (e.received_at && new Date(e.received_at) <= filters.dateTo))
-                    );
+                    const filteredEvts = eposAllEvents.filter(e => {
+                        if (e.processing_status !== 'processed' && e.processing_status !== 'has_unmapped') return false;
+                        if (eposRestaurantFilter && e._restaurant_id !== eposRestaurantFilter) return false;
+                        const d = parseEposDate(e);
+                        if (!d) return false;
+                        if (filters.dateFrom && d < filters.dateFrom) return false;
+                        if (filters.dateTo && d > filters.dateTo) return false;
+                        return true;
+                    });
                     // Filter menu items and inventory by restaurant if needed
                     const filteredMenu = eposRestaurantFilter
                         ? eposAllMenuItems.filter(m => m.restaurant_id === eposRestaurantFilter)

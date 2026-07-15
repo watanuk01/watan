@@ -220,7 +220,7 @@ export const generateOrderInvoice = async (orderId) => {
     // 6. Build line items with VAT
     const lineItems = (order.items || []).map(item => {
         const netAmount = (item.selling_price || 0) * (item.quantity || 0);
-        const vatRate = item.vat_exempt ? 0 : (item.vat_rate || 20);
+        const vatRate = item.vat_exempt ? 0 : (item.vat_rate ?? 20);
         const vatAmount = netAmount * (vatRate / 100);
         return {
             item_id: item.item_id,
@@ -323,7 +323,7 @@ export const updateInvoice = async (invoiceId, updates) => {
     // Recalculate line item amounts
     const recalculatedItems = (line_items || []).map(item => {
         const netAmount = (item.unit_price || 0) * (item.quantity || 0);
-        const vatRate = item.vat_exempt ? 0 : (item.vat_rate || 20);
+        const vatRate = item.vat_exempt ? 0 : (item.vat_rate ?? 20);
         const vatAmount = netAmount * (vatRate / 100);
         return {
             ...item,

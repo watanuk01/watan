@@ -680,22 +680,59 @@ const EposIntegrationSection = () => {
         if (restaurants.length > 0) load();
     }, [restaurants]);
 
-    // Load ALL events (no slice)
+    // Helper: convert a date string + time to London timezone boundary
+    const toLondonDate = useCallback((dateStr, h, m, s, ms) => {
+        const [y, mo, d] = dateStr.split('-').map(Number);
+        const guess = new Date(y, mo - 1, d, h, m, s, 0);
+        const inTz = new Date(guess.toLocaleString('en-US', { timeZone: 'Europe/London' }));
+        return new Date(guess.getTime() + (guess - inTz) + ms);
+    }, []);
+
+    // Helper: get event date (prefer order_date — consistent with dashboards)
+    const getEventDate = useCallback((ev) => {
+        if (ev.order_date) {
+            const d = ev.order_date;
+            if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+                const [y, m, day] = d.split('-').map(Number);
+                const guess = new Date(y, m - 1, day, 0, 0, 0, 0);
+                const inTz = new Date(guess.toLocaleString('en-US', { timeZone: 'Europe/London' }));
+                return new Date(guess.getTime() + (guess - inTz));
+            }
+            return new Date(d);
+        }
+        return ev.received_at || null;
+    }, []);
+
+    // Load events
     useEffect(() => {
         const loadEvents = async () => {
             try {
-                const evts = await getEposEvents(selectedRestaurant || null, {});
+                // Pass date range filters if active, otherwise fetch recent events (defaults to limit 300)
+                const queryFilters = {};
+                if (statusFilter) queryFilters.status = statusFilter;
+                if (dateFrom) queryFilters.from = toLondonDate(dateFrom, 0, 0, 0, 0);
+                if (dateTo) queryFilters.to = toLondonDate(dateTo, 23, 59, 59, 999);
+
+                const evts = await getEposEvents(selectedRestaurant || null, queryFilters);
                 setEvents(evts);
-                const stats = await getEposEventStats(selectedRestaurant || null);
-                setEventStats(stats);
+                
+                // Calculate stats locally from loaded events to avoid duplicate reads
+                const total = evts.length;
+                const processed = evts.filter(e => e.processing_status === 'processed').length;
+                const failed = evts.filter(e => e.processing_status === 'partial_failure').length;
+                const unmapped = evts.filter(e => e.processing_status === 'has_unmapped').length;
+                const pending = evts.filter(e => e.processing_status === 'pending').length;
+                const lastEvent = evts.length > 0 ? evts[0] : null;
+                
+                setEventStats({ total, processed, failed, unmapped, pending, lastEvent });
             } catch (e) {
                 console.error('Failed to load EPOS events:', e);
             }
         };
         loadEvents();
-    }, [selectedRestaurant]);
+    }, [selectedRestaurant, dateFrom, dateTo, statusFilter, toLondonDate]);
 
-    // Client-side filtering
+    // Client-side filtering (uses London timezone, order_date first — consistent with dashboards)
     const filteredEvents = events.filter(ev => {
         if (statusFilter && ev.processing_status !== statusFilter) return false;
         if (searchQuery) {
@@ -703,15 +740,14 @@ const EposIntegrationSection = () => {
             if (!(ev.epos_order_id || '').toLowerCase().includes(q) &&
                 !(ev.restaurant_name || '').toLowerCase().includes(q)) return false;
         }
+        const evDate = getEventDate(ev);
         if (dateFrom) {
-            const from = new Date(dateFrom);
-            from.setHours(0, 0, 0, 0);
-            if (!ev.received_at || ev.received_at < from) return false;
+            const from = toLondonDate(dateFrom, 0, 0, 0, 0);
+            if (!evDate || evDate < from) return false;
         }
         if (dateTo) {
-            const to = new Date(dateTo);
-            to.setHours(23, 59, 59, 999);
-            if (!ev.received_at || ev.received_at > to) return false;
+            const to = toLondonDate(dateTo, 23, 59, 59, 999);
+            if (!evDate || evDate > to) return false;
         }
         return true;
     });
@@ -974,7 +1010,7 @@ const EposIntegrationSection = () => {
                                                 style={{ cursor: 'pointer', background: rowBgColor(ev.processing_status), transition: 'background 0.15s' }}
                                                 onMouseEnter={e => e.currentTarget.style.background = 'rgba(201,169,110,0.08)'}
                                                 onMouseLeave={e => e.currentTarget.style.background = rowBgColor(ev.processing_status)}>
-                                                <td>{ev.received_at ? ev.received_at.toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+                                                <td>{ev.received_at ? ev.received_at.toLocaleString('en-GB', { timeZone: 'Europe/London', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}</td>
                                                 <td>{ev.restaurant_name || '—'}</td>
                                                 <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{ev.epos_order_id}</td>
                                                 <td>{ev.line_items?.length || 0}</td>
@@ -1044,7 +1080,7 @@ const EposIntegrationSection = () => {
                                 <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 8, fontSize: 13, color: 'var(--color-text-muted)' }}>
                                     <span><strong>Order:</strong> <code style={{ fontSize: 12 }}>{detailEvent.epos_order_id}</code></span>
                                     <span><strong>Restaurant:</strong> {detailEvent.restaurant_name || '—'}</span>
-                                    <span><strong>Time:</strong> {detailEvent.received_at?.toLocaleString('en-GB') || '—'}</span>
+                                    <span><strong>Time:</strong> {detailEvent.received_at?.toLocaleString('en-GB', { timeZone: 'Europe/London' }) || '—'}</span>
                                     <span>{statusBadge(detailEvent.processing_status)}</span>
                                 </div>
                                 {detailEvent.error_message && (

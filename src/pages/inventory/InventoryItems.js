@@ -402,7 +402,7 @@ const InventoryItems = () => {
                                             {item.vat_exempt ? (
                                                 <span className="badge badge-muted">Exempt</span>
                                             ) : (
-                                                <span className="badge badge-info">{item.vat_rate || 20}%</span>
+                                                <span className="badge badge-info">{item.vat_rate ?? 20}%</span>
                                             )}
                                         </td>
                                         {activeType !== 'cooked_meat' && (
@@ -568,7 +568,7 @@ const InventoryItems = () => {
                                     {item.vat_exempt ? (
                                         <span className="badge badge-muted">VAT Exempt</span>
                                     ) : (
-                                        <span className="badge badge-info">{item.vat_rate || 20}% VAT</span>
+                                        <span className="badge badge-info">{item.vat_rate ?? 20}% VAT</span>
                                     )}
                                 </div>
                             </div>

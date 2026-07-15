@@ -15,8 +15,10 @@ import {
     updateDoc,
     query,
     where,
+    orderBy,
     serverTimestamp,
     onSnapshot,
+    Timestamp,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { deductStockFIFO, adjustStock } from './inventoryService';
@@ -71,7 +73,7 @@ export const createOrder = async (orderData) => {
 
     const processedItems = items.map(item => {
         const lineTotal = (item.selling_price || 0) * item.quantity;
-        const itemVatRate = item.vat_exempt ? 0 : (item.vat_rate || 20);
+        const itemVatRate = item.vat_exempt ? 0 : (item.vat_rate ?? 20);
         const itemVat = lineTotal * (itemVatRate / 100);
 
         subtotal += lineTotal;
@@ -245,7 +247,13 @@ const mapOrderDoc = (d) => ({
  * @returns {Function} unsubscribe
  */
 export const subscribeToOrders = (callback) => {
-    const q = query(collection(db, ORDERS));
+    // Only listen to orders from the last 7 days to avoid downloading the entire collection
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const q = query(
+        collection(db, ORDERS),
+        where('created_at', '>=', Timestamp.fromDate(sevenDaysAgo)),
+        orderBy('created_at', 'desc')
+    );
     return onSnapshot(q, (snap) => {
         const orders = snap.docs.map(mapOrderDoc);
         orders.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
@@ -260,7 +268,14 @@ export const subscribeToOrders = (callback) => {
  * @returns {Function} unsubscribe
  */
 export const subscribeToRestaurantOrders = (restaurantId, callback) => {
-    const q = query(collection(db, ORDERS), where('restaurant_id', '==', restaurantId));
+    // Only listen to orders from the last 7 days to avoid downloading the entire collection
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const q = query(
+        collection(db, ORDERS),
+        where('restaurant_id', '==', restaurantId),
+        where('created_at', '>=', Timestamp.fromDate(sevenDaysAgo)),
+        orderBy('created_at', 'desc')
+    );
     return onSnapshot(q, (snap) => {
         const orders = snap.docs.map(mapOrderDoc);
         orders.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
@@ -275,7 +290,14 @@ export const subscribeToRestaurantOrders = (restaurantId, callback) => {
  * @returns {Function} unsubscribe
  */
 export const subscribeToDeliveryPartnerOrders = (partnerId, callback) => {
-    const q = query(collection(db, ORDERS), where('delivery_partner_id', '==', partnerId));
+    // Only listen to orders from the last 7 days to avoid downloading the entire collection
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const q = query(
+        collection(db, ORDERS),
+        where('delivery_partner_id', '==', partnerId),
+        where('created_at', '>=', Timestamp.fromDate(sevenDaysAgo)),
+        orderBy('created_at', 'desc')
+    );
     return onSnapshot(q, (snap) => {
         const orders = snap.docs.map(mapOrderDoc);
         orders.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
@@ -586,7 +608,7 @@ export const addItemsToOrder = async (orderId, newItems) => {
 
     const processedNewItems = newItems.map(item => {
         const lineTotal = (item.selling_price || 0) * item.quantity;
-        const itemVatRate = item.vat_exempt ? 0 : (item.vat_rate || 20);
+        const itemVatRate = item.vat_exempt ? 0 : (item.vat_rate ?? 20);
         const itemVat = lineTotal * (itemVatRate / 100);
         subtotal += lineTotal;
         vatAmount += itemVat;
@@ -618,7 +640,7 @@ export const addItemsToOrder = async (orderId, newItems) => {
 
             mergedItems[existingIdx].quantity += newItem.quantity;
             mergedItems[existingIdx].line_total = mergedItems[existingIdx].selling_price * mergedItems[existingIdx].quantity;
-            const rate = mergedItems[existingIdx].vat_exempt ? 0 : (mergedItems[existingIdx].vat_rate || 20);
+            const rate = mergedItems[existingIdx].vat_exempt ? 0 : (mergedItems[existingIdx].vat_rate ?? 20);
             mergedItems[existingIdx].vat_amount = mergedItems[existingIdx].line_total * (rate / 100);
 
             subtotal += mergedItems[existingIdx].line_total;

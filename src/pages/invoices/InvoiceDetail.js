@@ -107,10 +107,17 @@ const InvoiceDetail = ({ invoice, onClose, supplierDetails, onUpdated }) => {
     // ─── EDIT MODE HELPERS ───
     const handleItemChange = (index, field, value) => {
         const updated = [...editItems];
-        updated[index] = { ...updated[index], [field]: parseFloat(value) || 0 };
+        
+        // Handle vat_exempt separately as it is a boolean
+        if (field === 'vat_exempt') {
+            updated[index] = { ...updated[index], vat_exempt: value, vat_rate: value ? 0 : 20 };
+        } else {
+            updated[index] = { ...updated[index], [field]: parseFloat(value) || 0 };
+        }
+        
         // Recalculate net_amount
         const netAmount = updated[index].unit_price * updated[index].quantity;
-        const vatRate = updated[index].vat_exempt ? 0 : (updated[index].vat_rate || 20);
+        const vatRate = updated[index].vat_exempt ? 0 : (updated[index].vat_rate ?? 20);
         const vatAmount = netAmount * (vatRate / 100);
         updated[index].net_amount = Math.round(netAmount * 100) / 100;
         updated[index].vat_amount = Math.round(vatAmount * 100) / 100;
@@ -249,7 +256,7 @@ const InvoiceDetail = ({ invoice, onClose, supplierDetails, onUpdated }) => {
                 description: `Output: ${invoice.quantity_produced}${invoice.item_unit || 'kg'} ${invoice.item_name} (Batch ${invoice.batch_number})`,
                 quantity: 1, unit: 'batch', unit_price: invoice.total_ingredient_cost,
                 net_amount: invoice.total_ingredient_cost,
-                vat_rate: invoice.vat_exempt ? 0 : (invoice.vat_rate || 20),
+                vat_rate: invoice.vat_exempt ? 0 : (invoice.vat_rate ?? 20),
                 vat_exempt: invoice.vat_exempt,
                 vat_amount: invoice.vat_amount || 0,
                 gross_amount: invoice.total_with_vat || 0,
@@ -389,7 +396,7 @@ const InvoiceDetail = ({ invoice, onClose, supplierDetails, onUpdated }) => {
                                                         step="0.01"
                                                         value={item.quantity}
                                                         onChange={e => handleItemChange(i, 'quantity', e.target.value)}
-                                                        style={{ width: 70, textAlign: 'right', padding: '4px 6px', border: '1px solid #d1d5db', borderRadius: 4, fontSize: 14 }}
+                                                        style={{ width: 70, textAlign: 'right', padding: '4px 6px', border: '1px solid #d1d5db', borderRadius: 4, fontSize: 14, backgroundColor: '#ffffff', color: '#111111' }}
                                                     />
                                                 ) : (
                                                     `${item.quantity} ${item.unit}`
@@ -402,7 +409,7 @@ const InvoiceDetail = ({ invoice, onClose, supplierDetails, onUpdated }) => {
                                                         step="0.01"
                                                         value={item.unit_price}
                                                         onChange={e => handleItemChange(i, 'unit_price', e.target.value)}
-                                                        style={{ width: 80, textAlign: 'right', padding: '4px 6px', border: '1px solid #d1d5db', borderRadius: 4, fontSize: 14 }}
+                                                        style={{ width: 80, textAlign: 'right', padding: '4px 6px', border: '1px solid #d1d5db', borderRadius: 4, fontSize: 14, backgroundColor: '#ffffff', color: '#111111' }}
                                                     />
                                                 ) : (
                                                     formatCurrency(item.unit_price)
@@ -410,7 +417,36 @@ const InvoiceDetail = ({ invoice, onClose, supplierDetails, onUpdated }) => {
                                             </td>
                                             <td style={{ padding: '12px', textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#111', fontWeight: 500 }}>{formatCurrency(item.net_amount)}</td>
                                             <td style={{ padding: '12px', textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#374151', fontSize: 13 }}>
-                                                {item.vat_exempt ? 'Exempt' : `${item.vat_rate || 20}%`}
+                                                {editing ? (
+                                                    <select
+                                                        value={item.vat_exempt ? 'exempt' : (item.vat_rate ?? 20)}
+                                                        onChange={e => {
+                                                            const val = e.target.value;
+                                                            if (val === 'exempt') {
+                                                                handleItemChange(i, 'vat_exempt', true);
+                                                            } else {
+                                                                const numVal = parseInt(val);
+                                                                const updated = [...editItems];
+                                                                updated[i] = { ...updated[i], vat_exempt: false, vat_rate: numVal };
+                                                                // Manually call handleItemChange to trigger recalculations
+                                                                const netAmount = updated[i].unit_price * updated[i].quantity;
+                                                                const vatAmount = netAmount * (numVal / 100);
+                                                                updated[i].net_amount = Math.round(netAmount * 100) / 100;
+                                                                updated[i].vat_amount = Math.round(vatAmount * 100) / 100;
+                                                                updated[i].gross_amount = Math.round((netAmount + vatAmount) * 100) / 100;
+                                                                setEditItems(updated);
+                                                            }
+                                                        }}
+                                                        style={{ width: 130, textAlign: 'right', padding: '4px 6px', border: '1px solid #d1d5db', borderRadius: 4, fontSize: 13, backgroundColor: '#ffffff', color: '#111111' }}
+                                                    >
+                                                        <option value="exempt">Exempt</option>
+                                                        <option value="0">Zero-rated (0%)</option>
+                                                        <option value="5">Reduced (5%)</option>
+                                                        <option value="20">Standard (20%)</option>
+                                                    </select>
+                                                ) : (
+                                                    item.vat_exempt ? 'Exempt' : `${item.vat_rate ?? 20}%`
+                                                )}
                                             </td>
                                             <td style={{ padding: '12px', textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#374151' }}>{formatCurrency(item.vat_amount)}</td>
                                         </tr>
@@ -426,7 +462,7 @@ const InvoiceDetail = ({ invoice, onClose, supplierDetails, onUpdated }) => {
                                         <select
                                             value={editDiscount.type}
                                             onChange={e => setEditDiscount(prev => ({ ...prev, type: e.target.value, value: e.target.value === 'none' ? 0 : prev.value }))}
-                                            style={{ padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 14 }}
+                                            style={{ padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 14, backgroundColor: '#ffffff', color: '#111111' }}
                                         >
                                             <option value="none">No Discount</option>
                                             <option value="amount">Amount (£)</option>
@@ -439,7 +475,7 @@ const InvoiceDetail = ({ invoice, onClose, supplierDetails, onUpdated }) => {
                                                 min="0"
                                                 value={editDiscount.value}
                                                 onChange={e => setEditDiscount(prev => ({ ...prev, value: parseFloat(e.target.value) || 0 }))}
-                                                style={{ width: 100, padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 14, textAlign: 'right' }}
+                                                style={{ width: 100, padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 14, textAlign: 'right', backgroundColor: '#ffffff', color: '#111111' }}
                                                 placeholder={editDiscount.type === 'amount' ? '£0.00' : '0%'}
                                             />
                                         )}

@@ -173,7 +173,7 @@ export const seedInvoiceData = async () => {
         const qtyProduced = randInt(5, 30);
         const ingredientCost = rand(2.0, 8.0) * qtyProduced;
         const totalIngredientCost = Math.round(ingredientCost * 100) / 100;
-        const vatRate = item.vat_exempt ? 0 : (item.vat_rate || 20);
+        const vatRate = item.vat_exempt ? 0 : (item.vat_rate ?? 20);
         const vatAmount = Math.round(totalIngredientCost * (vatRate / 100) * 100) / 100;
         const totalWithVat = Math.round((totalIngredientCost + vatAmount) * 100) / 100;
 

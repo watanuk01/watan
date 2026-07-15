@@ -114,7 +114,7 @@ const ReplenishmentPanel = ({ restaurant, ckItems, onOrderPlaced, adminUser }) =
                 quantity: Number(quantities[getItemId(item)] || 0),
                 cost_price: item.cost_price || 0,
                 selling_price: item.selling_price || 0,
-                vat_rate: item.vat_rate || 20,
+                vat_rate: item.vat_rate ?? 20,
                 vat_exempt: item.vat_exempt || false,
             }))
             .filter(i => i.quantity > 0);

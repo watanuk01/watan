@@ -48,6 +48,13 @@ const parseDate = (d) => {
     if (d instanceof Date) return d;
     if (typeof d.toDate === 'function') return d.toDate();
     if (d.seconds) return new Date(d.seconds * 1000);
+    // Date-only strings like '2026-06-02': interpret as midnight in business TZ (Europe/London)
+    if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+        const [y, m, day] = d.split('-').map(Number);
+        const guess = new Date(y, m - 1, day, 0, 0, 0, 0);
+        const inTz = new Date(guess.toLocaleString('en-US', { timeZone: 'Europe/London' }));
+        return new Date(guess.getTime() + (guess - inTz));
+    }
     return new Date(d);
 };
 
@@ -75,29 +82,68 @@ const RestaurantDashboard = () => {
     const [customFrom, setCustomFrom] = useState('');
     const [customTo, setCustomTo] = useState('');
 
-    /* ─── date range helper ─── */
-    const getDateRangeFilter = useCallback(() => {
+    /* ─── UK business timezone for consistent date filtering ─── */
+    const BUSINESS_TZ = 'Europe/London';
+
+    /** Get current date parts in the business timezone (Europe/London) */
+    const getNowInBusinessTz = useCallback(() => {
         const now = new Date();
+        // Format current instant in the business timezone to extract year/month/day
+        const parts = new Intl.DateTimeFormat('en-GB', {
+            timeZone: BUSINESS_TZ,
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit', second: '2-digit',
+            hour12: false,
+        }).formatToParts(now);
+        const get = (type) => parseInt(parts.find(p => p.type === type)?.value || '0', 10);
+        return {
+            year: get('year'),
+            month: get('month') - 1, // JS months are 0-based
+            day: get('day'),
+            hour: get('hour'),
+            minute: get('minute'),
+            second: get('second'),
+            now,
+        };
+    }, []);
+
+    /** Convert a date + time-of-day in business TZ to an absolute Date object */
+    const businessTzDate = useCallback((year, month, day, h = 0, m = 0, s = 0, ms = 0) => {
+        // Calculate offset WITHOUT milliseconds (toLocaleString drops ms, causing rounding errors)
+        const guess = new Date(year, month, day, h, m, s, 0);
+        const localStr = guess.toLocaleString('en-US', { timeZone: BUSINESS_TZ });
+        const localDate = new Date(localStr);
+        const offset = guess - localDate;
+        // Add ms back after offset calculation to avoid double-counting
+        return new Date(guess.getTime() + offset + ms);
+    }, []);
+
+    /* ─── date range helper (uses UK business timezone) ─── */
+    const getDateRangeFilter = useCallback(() => {
+        const { year, month, day, now } = getNowInBusinessTz();
         let from;
         switch (dateRange) {
-            case 'today': from = new Date(now.getFullYear(), now.getMonth(), now.getDate()); break;
-            case 'yesterday': from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1); break;
-            case '3days': from = new Date(now); from.setDate(from.getDate() - 3); break;
-            case 'week': from = new Date(now); from.setDate(from.getDate() - 7); break;
-            case 'month': from = new Date(now); from.setMonth(from.getMonth() - 1); break;
-            case 'custom': from = customFrom ? new Date(customFrom) : new Date(0); break;
+            case 'today': from = businessTzDate(year, month, day); break;
+            case 'yesterday': from = businessTzDate(year, month, day - 1); break;
+            case '3days': from = new Date(now.getTime() - 3 * 86400000); break;
+            case 'week': from = new Date(now.getTime() - 7 * 86400000); break;
+            case 'month': from = new Date(now.getTime() - 30 * 86400000); break;
+            case 'custom': from = customFrom ? businessTzDate(
+                ...customFrom.split('-').map((v, i) => i === 1 ? Number(v) - 1 : Number(v))
+            ) : new Date(0); break;
             default: from = new Date(0);
         }
         let to;
         if (dateRange === 'yesterday') {
-            to = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 23, 59, 59, 999);
+            to = businessTzDate(year, month, day - 1, 23, 59, 59, 999);
         } else if (dateRange === 'custom' && customTo) {
-            to = new Date(customTo + 'T23:59:59');
+            const [cy, cm, cd] = customTo.split('-').map(Number);
+            to = businessTzDate(cy, cm - 1, cd, 23, 59, 59, 999);
         } else {
             to = now;
         }
         return { from, to };
-    }, [dateRange, customFrom, customTo]);
+    }, [dateRange, customFrom, customTo, getNowInBusinessTz, businessTzDate]);
 
     const filterByDate = useCallback((items, dateField = 'created_at') => {
         const { from, to } = getDateRangeFilter();
@@ -106,6 +152,20 @@ const RestaurantDashboard = () => {
             return d >= from && d <= to;
         });
     }, [getDateRangeFilter]);
+
+    /* ─── filtered EPOS events (uses order_date first — the business date of the sale) ─── */
+    const filteredEposEvents = useMemo(() => {
+        const { from, to } = getDateRangeFilter();
+        return eposEvents
+            .filter(e => e.processing_status === 'processed' || e.processing_status === 'has_unmapped')
+            .filter(e => {
+                // Prefer order_date (business date) over received_at (webhook receipt time)
+                const d = e.order_date ? parseDate(e.order_date)
+                        : e.received_at ? parseDate(e.received_at)
+                        : null;
+                return d && d >= from && d <= to;
+            });
+    }, [eposEvents, getDateRangeFilter]);
 
     /* ═══════════════════════════════════════ FETCH ═══ */
     const fetchAll = useCallback(async () => {
@@ -131,17 +191,19 @@ const RestaurantDashboard = () => {
         }
 
         // Phase 2: EPOS + Menu data (deferred — loads in background after UI renders)
+        // Pass date range to getEposEvents so Firestore filters by date BEFORE applying limit
         try {
+            const { from, to } = getDateRangeFilter();
             const [menu, eposEvts] = await Promise.all([
                 getMenuItems(restaurantId).catch(() => []),
-                getEposEvents(restaurantId).catch(() => []),
+                getEposEvents(restaurantId, { from, to, limit: 1000 }).catch(() => []),
             ]);
             setMenuItems(menu || []);
             setEposEvents(eposEvts || []);
         } catch (err) {
             console.error('EPOS/Menu load error:', err);
         }
-    }, [restaurantId]);
+    }, [restaurantId, getDateRangeFilter]);
 
     useEffect(() => { fetchAll(); }, [fetchAll]);
 
@@ -438,11 +500,7 @@ const RestaurantDashboard = () => {
 
     // ─── EPOS SALES ANALYTICS (LIVE DATA from epos_events) ───
     const eposData = useMemo(() => {
-        // Apply the same date range filter used by Orders & Invoices sections
-        const allProcessed = eposEvents.filter(e => e.processing_status === 'processed' || e.processing_status === 'has_unmapped');
-        const processed = filterByDate(allProcessed, 'received_at').length > 0
-            ? filterByDate(allProcessed, 'received_at')
-            : filterByDate(allProcessed, 'order_date');
+        const processed = filteredEposEvents;
         if (processed.length === 0) return null; // No data yet
 
         const totalOrders = processed.length;
@@ -470,14 +528,21 @@ const RestaurantDashboard = () => {
         const hourlyMap = {}; // hourLabel → revenue total
 
         processed.forEach(ev => {
-            const evDate = ev.received_at || (ev.order_date ? new Date(ev.order_date) : new Date());
-            const dateKey = evDate instanceof Date
-                ? `${evDate.getFullYear()}-${String(evDate.getMonth() + 1).padStart(2, '0')}-${String(evDate.getDate()).padStart(2, '0')}`
-                : '';
+            const evDate = ev.order_date ? parseDate(ev.order_date) : (ev.received_at || new Date());
+            // Use London timezone for date bucketing (consistent with filter boundaries)
+            const londonParts = evDate instanceof Date
+                ? new Intl.DateTimeFormat('en-GB', {
+                    timeZone: 'Europe/London',
+                    year: 'numeric', month: '2-digit', day: '2-digit',
+                    hour: '2-digit', minute: '2-digit', hour12: false,
+                }).formatToParts(evDate)
+                : null;
+            const lGet = (type) => londonParts?.find(p => p.type === type)?.value || '';
+            const dateKey = londonParts ? `${lGet('year')}-${lGet('month')}-${lGet('day')}` : '';
             const dayLabel = evDate instanceof Date
-                ? evDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
+                ? evDate.toLocaleDateString('en-GB', { timeZone: 'Europe/London', day: '2-digit', month: 'short' })
                 : '';
-            const hour = evDate instanceof Date ? evDate.getHours() : 12;
+            const hour = londonParts ? parseInt(lGet('hour'), 10) : 12;
             const hourLabel = hour === 0 ? '12am' : hour < 12 ? `${hour}am` : hour === 12 ? '12pm' : `${hour - 12}pm`;
 
             let orderRevenue = 0;
@@ -571,7 +636,7 @@ const RestaurantDashboard = () => {
             avgTicket: totalOrders ? totalRevenue / totalOrders : 0,
             itemsSold: totalItemsSold,
         };
-    }, [eposEvents, menuItems, filterByDate]);
+    }, [filteredEposEvents, menuItems]);
     /* ═══════════════════════════════════════ HELPERS ═══ */
     const formatTime = (date) => {
         if (!date) return '';
@@ -1368,10 +1433,7 @@ const RestaurantDashboard = () => {
 
                         {/* Item-wise Sales Trends Table */}
                         <EposSalesTable
-                            eposEvents={filterByDate(eposEvents.filter(e =>
-                                e.processing_status === 'processed' ||
-                                e.processing_status === 'has_unmapped'
-                            ), 'received_at')}
+                            eposEvents={filteredEposEvents}
                             menuItems={menuItems}
                             inventoryItems={inventoryItems}
                         />

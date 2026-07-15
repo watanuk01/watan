@@ -22,6 +22,7 @@ import {
     orderBy,
     limit,
     serverTimestamp,
+    Timestamp,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { getFunctions, httpsCallable } from 'firebase/functions';
@@ -126,39 +127,104 @@ export const getAllApiKeys = async () => {
  * Fetch EPOS events for a restaurant (or all if no restaurantId).
  */
 export const getEposEvents = async (restaurantId = null, filters = {}) => {
-    const constraints = [];
+    // Equality constraints (don't need composite index by themselves)
+    const eqConstraints = [];
     if (restaurantId) {
-        constraints.push(where('restaurant_id', '==', restaurantId));
+        eqConstraints.push(where('restaurant_id', '==', restaurantId));
     }
     if (filters.status) {
-        constraints.push(where('processing_status', '==', filters.status));
+        eqConstraints.push(where('processing_status', '==', filters.status));
     }
 
-    const q = query(collection(db, EVENTS), ...constraints);
-    const snap = await getDocs(q);
-
-    let events = snap.docs.map(d => ({
-        id: d.id,
-        ...d.data(),
-        received_at: d.data().received_at?.toDate?.() || null,
-        processed_at: d.data().processed_at?.toDate?.() || null,
-    }));
-
-    // Client-side date filter
+    // Date range constraints (require composite index when combined with equality filters)
+    const rangeConstraints = [];
+    let fromDate = null;
+    let toDate = null;
     if (filters.from) {
-        const fromDate = new Date(filters.from);
-        events = events.filter(e => e.received_at && e.received_at >= fromDate);
+        fromDate = filters.from instanceof Date ? filters.from : new Date(filters.from);
+        rangeConstraints.push(where('received_at', '>=', Timestamp.fromDate(fromDate)));
     }
     if (filters.to) {
-        const toDate = new Date(filters.to);
-        toDate.setHours(23, 59, 59, 999);
-        events = events.filter(e => e.received_at && e.received_at <= toDate);
+        toDate = filters.to instanceof Date ? filters.to : new Date(filters.to);
+        // Ensure we include the entire end-of-day
+        const endOfDay = new Date(toDate);
+        if (endOfDay.getHours() === 0 && endOfDay.getMinutes() === 0) {
+            endOfDay.setHours(23, 59, 59, 999);
+        }
+        toDate = endOfDay;
+        rangeConstraints.push(where('received_at', '<=', Timestamp.fromDate(endOfDay)));
     }
 
-    // Sort newest first
-    events.sort((a, b) => (b.received_at || 0) - (a.received_at || 0));
+    const queryLimit = filters.limit || 300;
 
-    return events;
+    const parseResults = (docs) => {
+        let events = docs.map(d => ({
+            id: d.id,
+            ...d.data(),
+            received_at: d.data().received_at?.toDate?.() || null,
+            processed_at: d.data().processed_at?.toDate?.() || null,
+        }));
+
+        // Sort newest first client-side as safety/backup
+        events.sort((a, b) => (b.received_at || 0) - (a.received_at || 0));
+        return events;
+    };
+
+    // Client-side date filter (used as fallback when composite index is missing)
+    const applyClientDateFilter = (events) => {
+        let filtered = events;
+        if (fromDate) {
+            filtered = filtered.filter(e => e.received_at && e.received_at >= fromDate);
+        }
+        if (toDate) {
+            filtered = filtered.filter(e => e.received_at && e.received_at <= toDate);
+        }
+        return filtered;
+    };
+
+    try {
+        // Try server-side date filtering + sorting (requires composite index)
+        const q = query(
+            collection(db, EVENTS),
+            ...eqConstraints,
+            ...rangeConstraints,
+            orderBy('received_at', 'desc'),
+            limit(queryLimit)
+        );
+        const snap = await getDocs(q);
+        return parseResults(snap.docs);
+    } catch (err) {
+        // Fallback: if composite index is missing, query with equality filters only
+        // then apply date filtering client-side
+        if (err.code === 'failed-precondition' || err.message?.includes('index')) {
+            console.warn("Firestore index missing, falling back to client-side date filtering:", err.message);
+            try {
+                // Try with just equality constraints + orderBy
+                const qFallback = query(
+                    collection(db, EVENTS),
+                    ...eqConstraints,
+                    orderBy('received_at', 'desc'),
+                    limit(queryLimit * 3) // Fetch more to account for client-side date filtering
+                );
+                const snapFallback = await getDocs(qFallback);
+                return applyClientDateFilter(parseResults(snapFallback.docs));
+            } catch (err2) {
+                // Final fallback: no orderBy either
+                if (err2.code === 'failed-precondition' || err2.message?.includes('index')) {
+                    console.warn("Firestore index missing (2nd fallback), fetching without orderBy:", err2.message);
+                    const qFinal = query(
+                        collection(db, EVENTS),
+                        ...eqConstraints,
+                        limit(queryLimit * 3)
+                    );
+                    const snapFinal = await getDocs(qFinal);
+                    return applyClientDateFilter(parseResults(snapFinal.docs));
+                }
+                throw err2;
+            }
+        }
+        throw err;
+    }
 };
 
 /**

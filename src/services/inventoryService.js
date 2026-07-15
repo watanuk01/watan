@@ -410,7 +410,7 @@ export const addItem = async (data) => {
         min_stock: Number(data.min_stock) || 0,
         cost_price: Number(data.cost_price) || 0,
         selling_price: Number(data.selling_price) || 0,
-        vat_rate: data.vat_exempt ? 0 : (Number(data.vat_rate) || 20),
+        vat_rate: data.vat_exempt ? 0 : (data.vat_rate !== undefined && data.vat_rate !== '' ? Number(data.vat_rate) : 20),
         vat_exempt: Boolean(data.vat_exempt),
         low_stock_threshold: Number(data.low_stock_threshold || data.min_stock) || 0,
         storage_type: data.storage_type || 'chilled',

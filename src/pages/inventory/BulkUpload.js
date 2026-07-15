@@ -129,7 +129,7 @@ const BulkUpload = () => {
                 'Selling Price': item.selling_price || 0,
                 'Min Stock': item.min_stock || 0,
                 'Vendor': item.vendor || '',
-                'VAT Rate': item.vat_rate || 20,
+                'VAT Rate': item.vat_rate ?? 20,
                 'Storage': item.storage_type || 'ambient',
             }));
 
@@ -201,7 +201,7 @@ const BulkUpload = () => {
                         selling_price: Number(row['Selling Price']) || 0,
                         min_stock: Number(row['Min Stock']) || 0,
                         vendor: row['Vendor'] || '',
-                        vat_rate: Number(row['VAT Rate']) || 20,
+                        vat_rate: (row['VAT Rate'] !== undefined && row['VAT Rate'] !== '') ? Number(row['VAT Rate']) : 20,
                         storage_type: (row['Storage'] || 'ambient').toLowerCase(),
                         _rowNum: idx + 2
                     };

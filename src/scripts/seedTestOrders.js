@@ -59,7 +59,7 @@ export const seedTestOrders = async (inventoryItems = []) => {
                     quantity: Math.floor(Math.random() * 10) + 2,
                     cost_price: i.cost_price || 0,
                     selling_price: i.selling_price || i.cost_price || 0,
-                    vat_rate: i.vat_rate || 20,
+                    vat_rate: i.vat_rate ?? 20,
                     vat_exempt: i.vat_exempt || false,
                 })),
                 ...pickItems(rawMeatItems, 2).map(i => ({
@@ -90,7 +90,7 @@ export const seedTestOrders = async (inventoryItems = []) => {
                     quantity: Math.floor(Math.random() * 6) + 3,
                     cost_price: i.cost_price || 0,
                     selling_price: i.selling_price || i.cost_price || 0,
-                    vat_rate: i.vat_rate || 20,
+                    vat_rate: i.vat_rate ?? 20,
                     vat_exempt: i.vat_exempt || false,
                 })),
                 ...pickItems(cookedMeatItems, 2).map(i => ({
@@ -122,7 +122,7 @@ export const seedTestOrders = async (inventoryItems = []) => {
                     quantity: 5,
                     cost_price: groceryItems[0].cost_price || 0,
                     selling_price: groceryItems[0].selling_price || groceryItems[0].cost_price || 0,
-                    vat_rate: groceryItems[0].vat_rate || 20,
+                    vat_rate: groceryItems[0].vat_rate ?? 20,
                     vat_exempt: groceryItems[0].vat_exempt || false,
                 }] : []),
                 ...pickItems(rawMeatItems, 1).map(i => ({
@@ -169,7 +169,7 @@ export const seedTestOrders = async (inventoryItems = []) => {
 
         const processedItems = orderData.items.map(item => {
             const lineTotal = (item.selling_price || 0) * item.quantity;
-            const itemVatRate = item.vat_exempt ? 0 : (item.vat_rate || 20);
+            const itemVatRate = item.vat_exempt ? 0 : (item.vat_rate ?? 20);
             const itemVat = lineTotal * (itemVatRate / 100);
             subtotal += lineTotal;
             vatAmount += itemVat;

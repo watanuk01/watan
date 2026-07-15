@@ -57,6 +57,27 @@ const PlaceOrder = () => {
             // Only show enabled items with stock
             const available = allItems.filter(i => i.enabled !== false);
             setItems(available);
+            
+            // Sync cart with live inventory prices and vat
+            setCart(prevCart => {
+                if (!prevCart.length) return prevCart;
+                let updated = false;
+                const newCart = prevCart.map(cItem => {
+                    const invItem = allItems.find(i => i.id === cItem.item_id);
+                    if (invItem) {
+                        const newVatRate = invItem.vat_rate != null ? Number(invItem.vat_rate) : (invItem.vat_exempt ? 0 : 20);
+                        const newVatExempt = invItem.vat_exempt || false;
+                        const newSellingPrice = invItem.selling_price || invItem.cost_price || 0;
+                        
+                        if (cItem.vat_rate !== newVatRate || cItem.vat_exempt !== newVatExempt || cItem.selling_price !== newSellingPrice) {
+                            updated = true;
+                            return { ...cItem, vat_rate: newVatRate, vat_exempt: newVatExempt, selling_price: newSellingPrice };
+                        }
+                    }
+                    return cItem;
+                });
+                return updated ? newCart : prevCart;
+            });
         } catch (err) {
             console.error('Failed to load items:', err);
             toast.error('Failed to load inventory');
@@ -129,7 +150,7 @@ const PlaceOrder = () => {
                 unit: item.unit || 'kg',
                 cost_price: item.cost_price || 0,
                 selling_price: item.selling_price || item.cost_price || 0,
-                vat_rate: item.vat_rate || 20,
+                vat_rate: item.vat_rate != null ? Number(item.vat_rate) : (item.vat_exempt ? 0 : 20),
                 vat_exempt: item.vat_exempt || false,
                 quantity: qty,
             }];
@@ -159,7 +180,7 @@ const PlaceOrder = () => {
         let vat = 0;
         cart.forEach(item => {
             const lineTotal = (item.selling_price || 0) * item.quantity;
-            const vatRate = item.vat_exempt ? 0 : (item.vat_rate || 20);
+            const vatRate = item.vat_exempt ? 0 : (item.vat_rate ?? 20);
             const itemVat = lineTotal * (vatRate / 100);
             subtotal += lineTotal;
             vat += itemVat;
