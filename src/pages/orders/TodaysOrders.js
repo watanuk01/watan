@@ -11,6 +11,7 @@ import {
     MdFileDownload, MdLocalShipping, MdCheckBox, MdCheckBoxOutlineBlank,
     MdVisibility, MdCancel, MdClose, MdPending, MdViewColumn
 } from 'react-icons/md';
+import Pagination from '../../components/common/Pagination';
 import toast from 'react-hot-toast';
 import './Orders.css';
 
@@ -41,6 +42,15 @@ const TodaysOrders = () => {
     const [markReadyLoading, setMarkReadyLoading] = useState(false);
     const [cancelModal, setCancelModal] = useState(null);
     const [cancelReason, setCancelReason] = useState('');
+
+    // Pagination State (for List View)
+    const [currentPageList, setCurrentPageList] = useState(1);
+    const [itemsPerPageList, setItemsPerPageList] = useState(15);
+
+    // Reset pagination on filter or view mode changes
+    useEffect(() => {
+        setCurrentPageList(1);
+    }, [viewMode, searchQuery, dateRange, customStartDate, customEndDate, activeStatus]);
 
     // Grid View State
     const [categories, setCategories] = useState({});
@@ -601,6 +611,11 @@ const TodaysOrders = () => {
                 o.restaurant_name?.toLowerCase().includes(searchQuery.toLowerCase()))
         );
 
+        const paginatedList = filteredList.slice(
+            (currentPageList - 1) * itemsPerPageList,
+            currentPageList * itemsPerPageList
+        );
+
         return (
             <div className="orders-list-view">
                 <div className="orders-status-tabs" style={{ marginBottom: 'var(--space-4)' }}>
@@ -673,7 +688,7 @@ const TodaysOrders = () => {
                                     </td>
                                 </tr>
                             ) : (
-                                filteredList.map(order => {
+                                paginatedList.map(order => {
                                     const isSelected = selectedIds.has(order.id);
                                     const itemPreview = order.items?.map(i => i.item_name).join(', ') || '';
 
@@ -748,6 +763,15 @@ const TodaysOrders = () => {
                         </tbody>
                     </table>
                 </div>
+                {!loading && filteredList.length > 0 && (
+                    <Pagination
+                        currentPage={currentPageList}
+                        totalItems={filteredList.length}
+                        itemsPerPage={itemsPerPageList}
+                        onPageChange={setCurrentPageList}
+                        onItemsPerPageChange={setItemsPerPageList}
+                    />
+                )}
 
                 {/* ─── Order Detail Modal ─── */}
                 {detailOrder && (() => {

@@ -247,11 +247,8 @@ const mapOrderDoc = (d) => ({
  * @returns {Function} unsubscribe
  */
 export const subscribeToOrders = (callback) => {
-    // Only listen to orders from the last 7 days to avoid downloading the entire collection
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const q = query(
         collection(db, ORDERS),
-        where('created_at', '>=', Timestamp.fromDate(sevenDaysAgo)),
         orderBy('created_at', 'desc')
     );
     return onSnapshot(q, (snap) => {
@@ -268,12 +265,9 @@ export const subscribeToOrders = (callback) => {
  * @returns {Function} unsubscribe
  */
 export const subscribeToRestaurantOrders = (restaurantId, callback) => {
-    // Only listen to orders from the last 7 days to avoid downloading the entire collection
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const q = query(
         collection(db, ORDERS),
         where('restaurant_id', '==', restaurantId),
-        where('created_at', '>=', Timestamp.fromDate(sevenDaysAgo)),
         orderBy('created_at', 'desc')
     );
     return onSnapshot(q, (snap) => {
@@ -290,12 +284,9 @@ export const subscribeToRestaurantOrders = (restaurantId, callback) => {
  * @returns {Function} unsubscribe
  */
 export const subscribeToDeliveryPartnerOrders = (partnerId, callback) => {
-    // Only listen to orders from the last 7 days to avoid downloading the entire collection
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const q = query(
         collection(db, ORDERS),
         where('delivery_partner_id', '==', partnerId),
-        where('created_at', '>=', Timestamp.fromDate(sevenDaysAgo)),
         orderBy('created_at', 'desc')
     );
     return onSnapshot(q, (snap) => {

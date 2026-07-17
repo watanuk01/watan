@@ -12,6 +12,7 @@ import {
     MdFileDownload,
 } from 'react-icons/md';
 import toast from 'react-hot-toast';
+import Pagination from '../../components/common/Pagination';
 import './Restaurant.css';
 import '../orders/Orders.css';
 
@@ -22,6 +23,15 @@ const OrderHistory = () => {
     const [statusFilter, setStatusFilter] = useState('all');
     const [searchQuery, setSearchQuery] = useState('');
     const [detailOrder, setDetailOrder] = useState(null);
+
+    // Pagination State
+    const [currentPage, setCurrentPage] = useState(1);
+    const [itemsPerPage, setItemsPerPage] = useState(15);
+
+    // Reset pagination to page 1 on filter or search changes
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [statusFilter, searchQuery]);
 
     const loadOrders = useCallback(async () => {
         setLoading(true);
@@ -57,8 +67,14 @@ const OrderHistory = () => {
                 o.order_number?.toLowerCase().includes(q)
             );
         }
-        return result;
     }, [orders, statusFilter, searchQuery]);
+
+    const paginatedOrders = useMemo(() => {
+        return filteredOrders.slice(
+            (currentPage - 1) * itemsPerPage,
+            currentPage * itemsPerPage
+        );
+    }, [filteredOrders, currentPage, itemsPerPage]);
 
     const formatDate = (date) => {
         if (!date) return '—';
@@ -147,39 +163,50 @@ const OrderHistory = () => {
                     <p>Your order history will appear here</p>
                 </div>
             ) : (
-                filteredOrders.map(order => {
-                    const statusInfo = getStatusInfo(order.status);
-                    return (
-                        <div
-                            key={order.id}
-                            className="order-history-card"
-                            style={{ cursor: 'pointer' }}
-                            onClick={() => setDetailOrder(order)}
-                        >
-                            <div className="order-card-header">
-                                <div>
-                                    <div className="order-card-number">{order.order_number}</div>
-                                    <div className="order-card-date">{formatDate(order.created_at)}</div>
+                <>
+                    {paginatedOrders.map(order => {
+                        const statusInfo = getStatusInfo(order.status);
+                        return (
+                            <div
+                                key={order.id}
+                                className="order-history-card"
+                                style={{ cursor: 'pointer' }}
+                                onClick={() => setDetailOrder(order)}
+                            >
+                                <div className="order-card-header">
+                                    <div>
+                                        <div className="order-card-number">{order.order_number}</div>
+                                        <div className="order-card-date">{formatDate(order.created_at)}</div>
+                                    </div>
+                                    <span className="order-status-badge" style={{
+                                        background: `${statusInfo.color}15`,
+                                        color: statusInfo.color,
+                                    }}>
+                                        {statusInfo.icon} {statusInfo.label}
+                                    </span>
                                 </div>
-                                <span className="order-status-badge" style={{
-                                    background: `${statusInfo.color}15`,
-                                    color: statusInfo.color,
-                                }}>
-                                    {statusInfo.icon} {statusInfo.label}
-                                </span>
+                                <div className="order-card-items">
+                                    {order.items?.map(i => i.item_name).join(', ') || 'No items'}
+                                </div>
+                                <div className="order-card-footer">
+                                    <span style={{ color: 'var(--color-text-tertiary)', fontSize: 'var(--text-sm)' }}>
+                                        {order.item_count || order.items?.length || 0} item(s)
+                                    </span>
+                                    <div className="order-card-total">£{(order.total || 0).toFixed(2)}</div>
+                                </div>
                             </div>
-                            <div className="order-card-items">
-                                {order.items?.map(i => i.item_name).join(', ') || 'No items'}
-                            </div>
-                            <div className="order-card-footer">
-                                <span style={{ color: 'var(--color-text-tertiary)', fontSize: 'var(--text-sm)' }}>
-                                    {order.item_count || order.items?.length || 0} item(s)
-                                </span>
-                                <div className="order-card-total">£{(order.total || 0).toFixed(2)}</div>
-                            </div>
-                        </div>
-                    );
-                })
+                        );
+                    })}
+                    {!loading && filteredOrders.length > 0 && (
+                        <Pagination
+                            currentPage={currentPage}
+                            totalItems={filteredOrders.length}
+                            itemsPerPage={itemsPerPage}
+                            onPageChange={setCurrentPage}
+                            onItemsPerPageChange={setItemsPerPage}
+                        />
+                    )}
+                </>
             )}
 
             {/* Detail Modal */}

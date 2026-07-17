@@ -22,6 +22,7 @@ import {
     MdEdit, MdSave, MdClose, MdCheckCircle, MdStore,
     MdInventory2, MdAdd, MdRemove, MdSend, MdInfo,
 } from 'react-icons/md';
+import Pagination from '../../components/common/Pagination';
 import toast from 'react-hot-toast';
 import './Inventory.css';
 import './LowStock.css';
@@ -274,6 +275,15 @@ const LowStockAlerts = () => {
     const [loadingRestItems, setLoadingRestItems] = useState(false);     // loading indicator for restaurant item fetch
     const [noInventoryForRest, setNoInventoryForRest] = useState(false); // flag when restaurant has no inventory
 
+    // Pagination State
+    const [currentPage, setCurrentPage] = useState(1);
+    const [itemsPerPage, setItemsPerPage] = useState(15);
+
+    // Reset pagination to page 1 on filter or tab changes
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [activeTab, filterType]);
+
     const fetchData = useCallback(async () => {
         setLoading(true);
         try {
@@ -321,6 +331,11 @@ const LowStockAlerts = () => {
     const ckFiltered = filterType === 'all'
         ? ckLowStock
         : ckLowStock.filter(i => i.item_type === filterType);
+
+    const paginatedCkItems = ckFiltered.slice(
+        (currentPage - 1) * itemsPerPage,
+        currentPage * itemsPerPage
+    );
 
     // Stats
     const outOfStock = ckLowStock.filter(i => i.current_stock <= 0).length;
@@ -455,7 +470,7 @@ const LowStockAlerts = () => {
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                {ckFiltered.map(item => {
+                                                {paginatedCkItems.map(item => {
                                                     const urgency = getUrgency(item);
                                                     const threshold = item.low_stock_threshold || item.min_stock || 0;
                                                     const deficitVal = Math.max(0, threshold - item.current_stock);
@@ -546,6 +561,15 @@ const LowStockAlerts = () => {
                                             </tbody>
                                         </table>
                                     </div>
+                                    {!loading && ckFiltered.length > 0 && (
+                                        <Pagination
+                                            currentPage={currentPage}
+                                            totalItems={ckFiltered.length}
+                                            itemsPerPage={itemsPerPage}
+                                            onPageChange={setCurrentPage}
+                                            onItemsPerPageChange={setItemsPerPage}
+                                        />
+                                    )}
                                 </div>
                             )}
                         </div>

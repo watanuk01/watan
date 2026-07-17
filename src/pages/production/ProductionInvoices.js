@@ -13,6 +13,7 @@ import {
     MdPrint,
     MdSearch,
 } from 'react-icons/md';
+import Pagination from '../../components/common/Pagination';
 import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
 import './Production.css';
@@ -21,6 +22,8 @@ const ProductionInvoices = () => {
     const [invoices, setInvoices] = useState([]);
     const [loading, setLoading] = useState(true);
     const [cookedItems, setCookedItems] = useState([]);
+    const [currentPage, setCurrentPage] = useState(1);
+    const [itemsPerPage, setItemsPerPage] = useState(15);
     const [filters, setFilters] = useState({
         item_id: '',
         dateFrom: '',
@@ -53,6 +56,11 @@ const ProductionInvoices = () => {
 
     useEffect(() => { fetchData(); }, [fetchData]);
 
+    // Reset pagination on filter change
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [filters]);
+
     const filteredInvoices = invoices.filter(inv => {
         if (!filters.search) return true;
         const q = filters.search.toLowerCase();
@@ -64,6 +72,11 @@ const ProductionInvoices = () => {
             inv.chef_name?.toLowerCase().includes(q)
         );
     });
+
+    const paginatedInvoices = filteredInvoices.slice(
+        (currentPage - 1) * itemsPerPage,
+        currentPage * itemsPerPage
+    );
 
     const formatDate = (date) => {
         if (!date) return '—';
@@ -298,7 +311,7 @@ const ProductionInvoices = () => {
                                     </td>
                                 </tr>
                             ) : (
-                                filteredInvoices.map(inv => (
+                                paginatedInvoices.map(inv => (
                                     <tr key={inv.id} style={{ cursor: 'pointer' }} onClick={() => openInvoice(inv)}>
                                         <td>
                                             <span style={{ fontFamily: 'var(--font-mono, monospace)', fontWeight: 700, color: 'var(--color-primary)', fontSize: 'var(--text-xs)' }}>
@@ -326,6 +339,15 @@ const ProductionInvoices = () => {
                         </tbody>
                     </table>
                 </div>
+                {!loading && filteredInvoices.length > 0 && (
+                    <Pagination
+                        currentPage={currentPage}
+                        totalItems={filteredInvoices.length}
+                        itemsPerPage={itemsPerPage}
+                        onPageChange={setCurrentPage}
+                        onItemsPerPageChange={setItemsPerPage}
+                    />
+                )}
             </div>
 
             {/* ═══ Invoice Detail Modal ═══ */}

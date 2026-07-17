@@ -236,23 +236,22 @@ const AdminDashboard = () => {
     // Filter — empty string = All Restaurants
     const [eposRestaurantFilter, setEposRestaurantFilter] = useState('');
 
-    // Load EPOS data for ALL restaurants in parallel
+    // Load EPOS data for ALL restaurants in parallel — NO Firestore date filter.
+    // We fetch up to 2000 events per restaurant once, then the render IIFE
+    // filters client-side using the live `filters` state. This avoids ALL
+    // stale-closure issues: no re-fetch is ever needed when the date changes.
     const loadEposAllData = useCallback(async (restaurantList) => {
         if (!restaurantList?.length) return;
         setEposAdminLoading(true);
         try {
-            // Pass date range to getEposEvents so Firestore filters by date BEFORE applying limit
-            const from = filters.dateFrom || undefined;
-            const to = filters.dateTo || undefined;
-            // Fetch all restaurants in parallel
             const results = await Promise.all(
                 restaurantList.map(async (r) => {
                     const [evts, menu, inv] = await Promise.all([
-                        getEposEvents(r.id, { from, to, limit: 500 }).catch(() => []),
+                        // Fetch all recent events — no date constraint so client-side filter is authoritative
+                        getEposEvents(r.id, { limit: 2000 }).catch(() => []),
                         getMenuItems(r.id).catch(() => []),
                         getRestaurantInventory(r.id).catch(() => []),
                     ]);
-                    // Tag each event with restaurant_name for display
                     const taggedEvts = (evts || []).map(e => ({
                         ...e,
                         restaurant_name: e.restaurant_name || r.restaurant_name,
@@ -270,7 +269,7 @@ const AdminDashboard = () => {
         } finally {
             setEposAdminLoading(false);
         }
-    }, [filters.dateFrom, filters.dateTo]); // eslint-disable-line
+    }, []); // stable — no date deps; client-side filtering handles all date narrowing
 
     // Load restaurant list once (EPOS data loads on-demand via Refresh button)
     useEffect(() => {
@@ -809,23 +808,43 @@ const AdminDashboard = () => {
                         <div style={{ fontSize: 13 }}>Data appears once EPOS webhook events are processed</div>
                     </div>
                 ) : (() => {
-                    // Helper: parse EPOS event date (prefer order_date — the business date)
+                    // Parse EPOS event date safely (prefer order_date — the business date of the sale)
+                    // Uses Intl to avoid the toLocaleString locale-parsing bug in non-en-GB systems.
                     const parseEposDate = (e) => {
-                        if (e.order_date) {
-                            // Date-only string → midnight in London; ISO string → parse normally
-                            const d = e.order_date;
-                            if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
-                                const [y, m, day] = d.split('-').map(Number);
-                                const guess = new Date(y, m - 1, day, 0, 0, 0, 0);
-                                const inTz = new Date(guess.toLocaleString('en-US', { timeZone: 'Europe/London' }));
-                                return new Date(guess.getTime() + (guess - inTz));
+                        const raw = e.order_date || e.received_at;
+                        if (!raw) return null;
+                        if (raw instanceof Date) return isNaN(raw.getTime()) ? null : raw;
+                        // Firestore Timestamp
+                        if (raw && typeof raw.toDate === 'function') return raw.toDate();
+                        if (raw && raw.seconds) return new Date(raw.seconds * 1000);
+                        if (typeof raw === 'string') {
+                            // Date-only string: treat as midnight London time
+                            if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+                                const [y, m, d] = raw.split('-').map(Number);
+                                // Build a UTC midnight, then adjust for London offset using Intl
+                                const utcGuess = Date.UTC(y, m - 1, d, 0, 0, 0);
+                                const guessDate = new Date(utcGuess);
+                                const fmt = new Intl.DateTimeFormat('en-US', {
+                                    timeZone: 'Europe/London',
+                                    year: 'numeric', month: '2-digit', day: '2-digit',
+                                    hour: '2-digit', minute: '2-digit', second: '2-digit',
+                                    hour12: false
+                                });
+                                const parts = fmt.formatToParts(guessDate);
+                                const gp = (type) => parseInt(parts.find(p => p.type === type)?.value || '0', 10);
+                                const londonUtc = Date.UTC(gp('year'), gp('month') - 1, gp('day'), gp('hour'), gp('minute'), gp('second'));
+                                const offset = londonUtc - utcGuess;
+                                return new Date(utcGuess - offset);
                             }
-                            return new Date(d);
+                            // ISO or other string
+                            const parsed = new Date(raw);
+                            return isNaN(parsed.getTime()) ? null : parsed;
                         }
-                        return e.received_at ? new Date(e.received_at) : null;
+                        return null;
                     };
 
-                    // Filter events by restaurant + date range
+                    // Client-side filter by restaurant + current dashboard date range
+                    // This always uses the live `filters` from the render closure — no stale state.
                     const filteredEvts = eposAllEvents.filter(e => {
                         if (e.processing_status !== 'processed' && e.processing_status !== 'has_unmapped') return false;
                         if (eposRestaurantFilter && e._restaurant_id !== eposRestaurantFilter) return false;

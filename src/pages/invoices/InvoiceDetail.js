@@ -445,7 +445,7 @@ const InvoiceDetail = ({ invoice, onClose, supplierDetails, onUpdated }) => {
                                                         <option value="20">Standard (20%)</option>
                                                     </select>
                                                 ) : (
-                                                    item.vat_exempt ? 'Exempt' : `${item.vat_rate ?? 20}%`
+                                                    item.vat_exempt ? 'Exempt' : `${item.vat_rate != null ? item.vat_rate : (item.vat_amount > 0 ? Math.round((item.vat_amount / item.net_amount) * 100) : 0)}%`
                                                 )}
                                             </td>
                                             <td style={{ padding: '12px', textAlign: 'right', borderBottom: '1px solid #f3f4f6', color: '#374151' }}>{formatCurrency(item.vat_amount)}</td>

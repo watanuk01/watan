@@ -18,7 +18,7 @@ import { getMenuItems, MENU_CATEGORIES, getCategoryInfo, calcPortionCost } from 
 import { getEposEvents } from '../../services/eposService';
 import EposSalesTable from '../../components/epos/EposSalesTable';
 import toast from 'react-hot-toast';
-import { seedRestaurantDashboard } from '../../scripts/seedRestaurantDashboard';
+import { createLondonDate, parseDateSafe } from '../../utils/dateUtils';
 import './Dashboard.css';
 
 /* ═══ Chart colour palette ═══ */
@@ -43,20 +43,7 @@ const renderPieLabel = ({ percent }) =>
     percent > 0.04 ? `${(percent * 100).toFixed(0)}%` : '';
 
 /* ═══ Date Parser ═══ */
-const parseDate = (d) => {
-    if (!d) return new Date(0);
-    if (d instanceof Date) return d;
-    if (typeof d.toDate === 'function') return d.toDate();
-    if (d.seconds) return new Date(d.seconds * 1000);
-    // Date-only strings like '2026-06-02': interpret as midnight in business TZ (Europe/London)
-    if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
-        const [y, m, day] = d.split('-').map(Number);
-        const guess = new Date(y, m - 1, day, 0, 0, 0, 0);
-        const inTz = new Date(guess.toLocaleString('en-US', { timeZone: 'Europe/London' }));
-        return new Date(guess.getTime() + (guess - inTz));
-    }
-    return new Date(d);
-};
+const parseDate = parseDateSafe;
 
 const RestaurantDashboard = () => {
     const { currentUser, userProfile } = useAuth();
@@ -109,13 +96,7 @@ const RestaurantDashboard = () => {
 
     /** Convert a date + time-of-day in business TZ to an absolute Date object */
     const businessTzDate = useCallback((year, month, day, h = 0, m = 0, s = 0, ms = 0) => {
-        // Calculate offset WITHOUT milliseconds (toLocaleString drops ms, causing rounding errors)
-        const guess = new Date(year, month, day, h, m, s, 0);
-        const localStr = guess.toLocaleString('en-US', { timeZone: BUSINESS_TZ });
-        const localDate = new Date(localStr);
-        const offset = guess - localDate;
-        // Add ms back after offset calculation to avoid double-counting
-        return new Date(guess.getTime() + offset + ms);
+        return createLondonDate(year, month, day, h, m, s, ms);
     }, []);
 
     /* ─── date range helper (uses UK business timezone) ─── */

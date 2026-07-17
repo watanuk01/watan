@@ -12,6 +12,7 @@ import {
 import { getUsersByRole } from '../../services/userService';
 import LogWasteModal from './LogWasteModal';
 import WasteDetailModal from './WasteDetailModal';
+import Pagination from '../../components/common/Pagination';
 import './Waste.css';
 import toast from 'react-hot-toast';
 import {
@@ -52,6 +53,15 @@ const WasteManagement = () => {
         dateTo: '',
         search: '',
     });
+
+    // Pagination State
+    const [currentPage, setCurrentPage] = useState(1);
+    const [itemsPerPage, setItemsPerPage] = useState(15);
+
+    // Reset pagination to page 1 on filter or active view change
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [filters, activeView]);
 
     // Fetch waste events
     const fetchEvents = useCallback(async () => {
@@ -140,6 +150,11 @@ const WasteManagement = () => {
             (e.submitted_by?.name || '').toLowerCase().includes(q)
         );
     });
+
+    const paginatedEvents = filteredEvents.slice(
+        (currentPage - 1) * itemsPerPage,
+        currentPage * itemsPerPage
+    );
 
     // ─── Prepare chart data ───
     const categoryChartData = stats ? WASTE_CATEGORIES
@@ -395,57 +410,68 @@ const WasteManagement = () => {
                             <p>Click "Log Waste Event" to record your first waste entry.</p>
                         </div>
                     ) : (
-                        <div className="waste-table-wrapper">
-                            <table className="data-table" style={{ fontSize: 13 }}>
-                                <thead>
-                                    <tr>
-                                        <th>DATE</th>
-                                        {isAdminUser && <th>LOCATION</th>}
-                                        <th>ITEM</th>
-                                        <th style={{ textAlign: 'right' }}>QTY</th>
-                                        <th style={{ textAlign: 'right' }}>VALUE</th>
-                                        <th>CATEGORY</th>
-                                        <th>SOURCE</th>
-                                        <th>SUBMITTED BY</th>
-                                        <th>NOTES</th>
-                                        <th>ACTIONS</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {filteredEvents.map(event => {
-                                        const catInfo = getCategoryInfo(event.category);
-                                        return (
-                                            <tr key={event.id} style={{ cursor: 'pointer' }} onClick={() => setSelectedEvent(event)}>
-                                                <td style={{ whiteSpace: 'nowrap', fontSize: 12 }}>{formatDate(event.created_at)}</td>
-                                                {isAdminUser && <td style={{ fontSize: 12 }}>📍 {event.location_name}</td>}
-                                                <td style={{ fontWeight: 500 }}>{event.item_name}</td>
-                                                <td style={{ textAlign: 'right', fontWeight: 500 }}>{event.quantity} {event.item_unit}</td>
-                                                <td style={{ textAlign: 'right', color: '#ef4444', fontWeight: 600 }}>{formatCurrency(event.total_value)}</td>
-                                                <td>
-                                                    <span className="waste-category-badge" style={{ background: `${catInfo.color}22`, color: catInfo.color }}>
-                                                        {catInfo.icon} {catInfo.label}
-                                                    </span>
-                                                </td>
-                                                <td>
-                                                    <span className={`waste-source-badge ${event.source === 'auto_expiry' ? 'auto' : 'manual'}`}>
-                                                        {event.source === 'auto_expiry' ? '🤖 Auto' : '👤 Manual'}
-                                                    </span>
-                                                </td>
-                                                <td style={{ fontSize: 12 }}>{event.submitted_by?.name || '—'}</td>
-                                                <td style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, color: 'var(--color-text-muted)' }}>
-                                                    {event.notes || '—'}
-                                                </td>
-                                                <td>
-                                                    <button className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); setSelectedEvent(event); }} title="View Details">
-                                                        <MdVisibility style={{ fontSize: 16 }} />
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
-                        </div>
+                        <>
+                            <div className="waste-table-wrapper">
+                                <table className="data-table" style={{ fontSize: 13 }}>
+                                    <thead>
+                                        <tr>
+                                            <th>DATE</th>
+                                            {isAdminUser && <th>LOCATION</th>}
+                                            <th>ITEM</th>
+                                            <th style={{ textAlign: 'right' }}>QTY</th>
+                                            <th style={{ textAlign: 'right' }}>VALUE</th>
+                                            <th>CATEGORY</th>
+                                            <th>SOURCE</th>
+                                            <th>SUBMITTED BY</th>
+                                            <th>NOTES</th>
+                                            <th>ACTIONS</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {paginatedEvents.map(event => {
+                                            const catInfo = getCategoryInfo(event.category);
+                                            return (
+                                                <tr key={event.id} style={{ cursor: 'pointer' }} onClick={() => setSelectedEvent(event)}>
+                                                    <td style={{ whiteSpace: 'nowrap', fontSize: 12 }}>{formatDate(event.created_at)}</td>
+                                                    {isAdminUser && <td style={{ fontSize: 12 }}>📍 {event.location_name}</td>}
+                                                    <td style={{ fontWeight: 500 }}>{event.item_name}</td>
+                                                    <td style={{ textAlign: 'right', fontWeight: 500 }}>{event.quantity} {event.item_unit}</td>
+                                                    <td style={{ textAlign: 'right', color: '#ef4444', fontWeight: 600 }}>{formatCurrency(event.total_value)}</td>
+                                                    <td>
+                                                        <span className="waste-category-badge" style={{ background: `${catInfo.color}22`, color: catInfo.color }}>
+                                                            {catInfo.icon} {catInfo.label}
+                                                        </span>
+                                                    </td>
+                                                    <td>
+                                                        <span className={`waste-source-badge ${event.source === 'auto_expiry' ? 'auto' : 'manual'}`}>
+                                                            {event.source === 'auto_expiry' ? '🤖 Auto' : '👤 Manual'}
+                                                        </span>
+                                                    </td>
+                                                    <td style={{ fontSize: 12 }}>{event.submitted_by?.name || '—'}</td>
+                                                    <td style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, color: 'var(--color-text-muted)' }}>
+                                                        {event.notes || '—'}
+                                                    </td>
+                                                    <td>
+                                                        <button className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); setSelectedEvent(event); }} title="View Details">
+                                                            <MdVisibility style={{ fontSize: 16 }} />
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {!loading && filteredEvents.length > 0 && (
+                                <Pagination
+                                    currentPage={currentPage}
+                                    totalItems={filteredEvents.length}
+                                    itemsPerPage={itemsPerPage}
+                                    onPageChange={setCurrentPage}
+                                    onItemsPerPageChange={setItemsPerPage}
+                                />
+                            )}
+                        </>
                     )}
 
                     {/* Summary footer */}

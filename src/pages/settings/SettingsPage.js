@@ -18,6 +18,7 @@ import {
     getApiKey, generateApiKey, revokeApiKey, getEposEvents,
     getEposEventStats, getWebhookUrl,
 } from '../../services/eposService';
+import { createLondonDate, parseDateSafe } from '../../utils/dateUtils';
 import toast from 'react-hot-toast';
 import './SettingsPage.css';
 
@@ -683,24 +684,12 @@ const EposIntegrationSection = () => {
     // Helper: convert a date string + time to London timezone boundary
     const toLondonDate = useCallback((dateStr, h, m, s, ms) => {
         const [y, mo, d] = dateStr.split('-').map(Number);
-        const guess = new Date(y, mo - 1, d, h, m, s, 0);
-        const inTz = new Date(guess.toLocaleString('en-US', { timeZone: 'Europe/London' }));
-        return new Date(guess.getTime() + (guess - inTz) + ms);
+        return createLondonDate(y, mo - 1, d, h, m, s, ms);
     }, []);
 
     // Helper: get event date (prefer order_date — consistent with dashboards)
     const getEventDate = useCallback((ev) => {
-        if (ev.order_date) {
-            const d = ev.order_date;
-            if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
-                const [y, m, day] = d.split('-').map(Number);
-                const guess = new Date(y, m - 1, day, 0, 0, 0, 0);
-                const inTz = new Date(guess.toLocaleString('en-US', { timeZone: 'Europe/London' }));
-                return new Date(guess.getTime() + (guess - inTz));
-            }
-            return new Date(d);
-        }
-        return ev.received_at || null;
+        return parseDateSafe(ev.order_date || ev.received_at);
     }, []);
 
     // Load events

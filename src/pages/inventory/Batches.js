@@ -15,6 +15,7 @@ import {
     MdTimer,
     MdCheckCircle,
 } from 'react-icons/md';
+import Pagination from '../../components/common/Pagination';
 import toast from 'react-hot-toast';
 import './Inventory.css';
 
@@ -40,6 +41,15 @@ const Batches = () => {
         source_ref: '',
     });
     const [saving, setSaving] = useState(false);
+
+    // Pagination State
+    const [currentPage, setCurrentPage] = useState(1);
+    const [itemsPerPage, setItemsPerPage] = useState(15);
+
+    // Reset pagination to page 1 on filter or search changes
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [searchQuery, statusFilter, typeFilter, itemFilter]);
 
     const fetchData = useCallback(async () => {
         setLoading(true);
@@ -70,6 +80,11 @@ const Batches = () => {
             b.item_name?.toLowerCase().includes(q)
         );
     });
+
+    const paginatedBatches = filteredBatches.slice(
+        (currentPage - 1) * itemsPerPage,
+        currentPage * itemsPerPage
+    );
 
     // Unique items from batches for filter dropdown
     const batchItems = batches.reduce((acc, b) => {
@@ -278,7 +293,7 @@ const Batches = () => {
                                 </td>
                             </tr>
                         ) : (
-                            filteredBatches.map(batch => {
+                            paginatedBatches.map(batch => {
                                 const expiry = getExpiryBadge(batch.expiry_date, batch.status);
                                 const typeInfo = getTypeInfo(batch.item_type);
                                 const days = getDaysUntilExpiry(batch.expiry_date);
@@ -346,6 +361,15 @@ const Batches = () => {
                     </tbody>
                 </table>
             </div>
+            {!loading && filteredBatches.length > 0 && (
+                <Pagination
+                    currentPage={currentPage}
+                    totalItems={filteredBatches.length}
+                    itemsPerPage={itemsPerPage}
+                    onPageChange={setCurrentPage}
+                    onItemsPerPageChange={setItemsPerPage}
+                />
+            )}
 
             {/* Add Batch Modal */}
             {showAddModal && (

@@ -405,6 +405,7 @@ const IncomingOrders = () => {
                             <button
                                 className="btn btn-primary"
                                 onClick={async () => {
+                                    setBulkLoading(true);
                                     try {
                                         await bulkMarkReady([detailOrder.id]);
                                         toast.success('Order marked as ready for pickup');
@@ -412,10 +413,13 @@ const IncomingOrders = () => {
                                         await loadOrders();
                                     } catch (err) {
                                         toast.error('Failed to update order');
+                                    } finally {
+                                        setBulkLoading(false);
                                     }
                                 }}
+                                disabled={bulkLoading}
                             >
-                                <MdLocalShipping /> Mark Ready for Pickup
+                                <MdLocalShipping /> {bulkLoading ? 'Processing...' : 'Mark Ready for Pickup'}
                             </button>
                         </div>
                     </div>

@@ -15,6 +15,7 @@ import {
     MdAdd,
     MdOutlineKitchen,
 } from 'react-icons/md';
+import Pagination from '../../components/common/Pagination';
 import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
 import './Production.css';
@@ -32,6 +33,15 @@ const ProductionHistory = () => {
         search: '',
     });
     const [detailModal, setDetailModal] = useState(null);
+
+    // Pagination State
+    const [currentPage, setCurrentPage] = useState(1);
+    const [itemsPerPage, setItemsPerPage] = useState(15);
+
+    // Reset pagination to page 1 on filter changes
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [filters]);
 
     const fetchData = useCallback(async () => {
         setLoading(true);
@@ -65,6 +75,11 @@ const ProductionHistory = () => {
             p.chef_name?.toLowerCase().includes(q)
         );
     });
+
+    const paginatedProductions = filteredProductions.slice(
+        (currentPage - 1) * itemsPerPage,
+        currentPage * itemsPerPage
+    );
 
     const formatDate = (date) => {
         if (!date) return '—';
@@ -269,7 +284,7 @@ const ProductionHistory = () => {
                                     </td>
                                 </tr>
                             ) : (
-                                filteredProductions.map(prod => {
+                                paginatedProductions.map(prod => {
                                     const status = getStatusInfo(prod.status);
                                     return (
                                         <tr key={prod.id} style={{ cursor: 'pointer' }} onClick={() => setDetailModal(prod)}>
@@ -305,6 +320,15 @@ const ProductionHistory = () => {
                         </tbody>
                     </table>
                 </div>
+                {!loading && filteredProductions.length > 0 && (
+                    <Pagination
+                        currentPage={currentPage}
+                        totalItems={filteredProductions.length}
+                        itemsPerPage={itemsPerPage}
+                        onPageChange={setCurrentPage}
+                        onItemsPerPageChange={setItemsPerPage}
+                    />
+                )}
             </div>
 
             {/* ═══ Detail Modal ═══ */}

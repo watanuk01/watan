@@ -308,6 +308,111 @@ export const generateOrderInvoice = async (orderId) => {
 };
 
 // ═══════════════════════════════════════════════════════
+//  REGENERATE INVOICE VAT FROM ORDER DATA
+// ═══════════════════════════════════════════════════════
+
+/**
+ * Regenerate an invoice's line item VAT rates from its source order.
+ * This fixes invoices that were generated before items had correct VAT rates.
+ *
+ * @param {string} invoiceId — Firestore invoice document ID
+ * @returns {{ updated: boolean, changes: number }}
+ */
+export const regenerateInvoiceFromOrder = async (invoiceId) => {
+    const invoiceSnap = await getDoc(doc(db, INVOICES, invoiceId));
+    if (!invoiceSnap.exists()) throw new Error('Invoice not found');
+    const invoice = invoiceSnap.data();
+
+    if (invoice.type !== 'order' || !invoice.order_id) {
+        return { updated: false, changes: 0 };
+    }
+
+    // Fetch the source order
+    const orderSnap = await getDoc(doc(db, ORDERS, invoice.order_id));
+    if (!orderSnap.exists()) {
+        return { updated: false, changes: 0, reason: 'Order not found' };
+    }
+    const order = orderSnap.data();
+
+    // Build a lookup from order items: item_id → { vat_rate, vat_exempt }
+    const orderVatMap = {};
+    (order.items || []).forEach(item => {
+        orderVatMap[item.item_id] = {
+            vat_rate: item.vat_rate ?? 0,
+            vat_exempt: item.vat_exempt || false,
+        };
+    });
+
+    // Update invoice line items with correct VAT from order
+    let changes = 0;
+    const updatedLineItems = (invoice.line_items || []).map(li => {
+        const orderVat = orderVatMap[li.item_id];
+        if (!orderVat) return li;
+
+        const currentRate = li.vat_rate ?? 20;
+        const correctRate = orderVat.vat_exempt ? 0 : orderVat.vat_rate;
+
+        if (currentRate !== correctRate || li.vat_exempt !== orderVat.vat_exempt) {
+            changes++;
+            const netAmount = li.net_amount || ((li.unit_price || 0) * (li.quantity || 0));
+            const vatAmount = netAmount * (correctRate / 100);
+            return {
+                ...li,
+                vat_rate: correctRate,
+                vat_exempt: orderVat.vat_exempt,
+                vat_amount: Math.round(vatAmount * 100) / 100,
+                gross_amount: Math.round((netAmount + vatAmount) * 100) / 100,
+            };
+        }
+        return li;
+    });
+
+    if (changes === 0) return { updated: false, changes: 0 };
+
+    // Recalculate totals
+    const vatSummary = buildVatSummary(updatedLineItems);
+    const totals = calculateTotals(updatedLineItems, invoice.discount_type, invoice.discount_value);
+
+    await updateDoc(doc(db, INVOICES, invoiceId), {
+        line_items: updatedLineItems,
+        vat_summary: vatSummary,
+        ...totals,
+        updated_at: serverTimestamp(),
+    });
+
+    return { updated: true, changes };
+};
+
+/**
+ * Regenerate VAT rates on ALL order invoices from their source orders.
+ * @returns {{ total: number, updated: number, skipped: number, errors: number }}
+ */
+export const regenerateAllInvoiceVat = async () => {
+    const q = query(collection(db, INVOICES), where('type', '==', 'order'));
+    const snap = await getDocs(q);
+
+    const results = { total: snap.size, updated: 0, skipped: 0, errors: 0 };
+
+    for (const invDoc of snap.docs) {
+        try {
+            const result = await regenerateInvoiceFromOrder(invDoc.id);
+            if (result.updated) {
+                results.updated++;
+                console.log(`✅ Fixed ${result.changes} VAT rate(s) on invoice ${invDoc.data().invoice_number}`);
+            } else {
+                results.skipped++;
+            }
+        } catch (err) {
+            results.errors++;
+            console.error(`❌ Failed to fix invoice ${invDoc.id}:`, err);
+        }
+    }
+
+    console.log(`🔄 VAT regeneration complete: ${results.updated} fixed, ${results.skipped} already correct, ${results.errors} errors (out of ${results.total})`);
+    return results;
+};
+
+// ═══════════════════════════════════════════════════════
 //  UPDATE INVOICE (EDIT)
 // ═══════════════════════════════════════════════════════
 

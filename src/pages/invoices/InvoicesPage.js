@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
     getInvoices, getInvoiceById, getSupplierDetails, saveSupplierDetails,
-    getConsolidatedData, getRestaurantUsers,
+    getConsolidatedData, getRestaurantUsers, regenerateAllInvoiceVat,
 } from '../../services/invoiceService';
 import { getProductionInvoices } from '../../services/productionService';
 import {
@@ -12,6 +12,7 @@ import {
 } from 'react-icons/md';
 import InvoiceDetail from './InvoiceDetail';
 import ConsolidatedDetailModal from './ConsolidatedDetailModal';
+import Pagination from '../../components/common/Pagination';
 import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
 import './Invoices.css';
@@ -99,6 +100,40 @@ const InvoicesPage = () => {
     const [viewGroup, setViewGroup] = useState(null);
     const [customDateFrom, setCustomDateFrom] = useState('');
     const [customDateTo, setCustomDateTo] = useState('');
+    const [fixingVat, setFixingVat] = useState(false);
+
+    // Pagination State
+    const [currentPageAll, setCurrentPageAll] = useState(1);
+    const [itemsPerPageAll, setItemsPerPageAll] = useState(15);
+    const [currentPageConsolidated, setCurrentPageConsolidated] = useState(1);
+    const [itemsPerPageConsolidated, setItemsPerPageConsolidated] = useState(15);
+
+    // Reset pagination to page 1 on search, tab, or filter changes
+    useEffect(() => {
+        setCurrentPageAll(1);
+    }, [activeTab, searchQuery, typeFilter, filters]);
+
+    useEffect(() => {
+        setCurrentPageConsolidated(1);
+    }, [activeTab, consolidatedType, consolidatedRestaurant, consolidatedPeriod, customDateFrom, customDateTo]);
+
+    const handleFixVat = async () => {
+        setFixingVat(true);
+        try {
+            const results = await regenerateAllInvoiceVat();
+            if (results.updated > 0) {
+                toast.success(`Fixed VAT on ${results.updated} invoice(s)`);
+                fetchData();
+            } else {
+                toast.success('All invoice VAT rates are already correct');
+            }
+        } catch (err) {
+            console.error(err);
+            toast.error('Failed to fix VAT rates');
+        } finally {
+            setFixingVat(false);
+        }
+    };
 
     useEffect(() => { getRestaurantUsers().then(setRestaurants); }, []);
 
@@ -161,6 +196,17 @@ const InvoicesPage = () => {
         return groupInvoicesByPeriod(src, consolidatedPeriod);
     })();
 
+    // Paginated arrays for display
+    const paginatedAllInvoices = allInvoices.slice(
+        (currentPageAll - 1) * itemsPerPageAll,
+        currentPageAll * itemsPerPageAll
+    );
+
+    const paginatedConsolidatedGroups = consolidatedGroups.slice(
+        (currentPageConsolidated - 1) * itemsPerPageConsolidated,
+        currentPageConsolidated * itemsPerPageConsolidated
+    );
+
     // ─── BADGES ───
     const getTypeBadge = (type) => type === 'order' ? <span className="inv-type-badge inv-type-order">📦 Order</span> : type === 'production' ? <span className="inv-type-badge inv-type-production">🍳 Production</span> : <span className="inv-type-badge">{type}</span>;
     const getStatusBadge = (status) => {
@@ -202,9 +248,12 @@ const InvoicesPage = () => {
                 </div>
                 <div style={{ display: 'flex', gap: 'var(--space-2)', flexShrink: 0, alignItems: 'center' }}>
                     <button className="btn-refresh" onClick={() => activeTab === 'all' ? fetchData() : fetchConsolidatedData()} title="Refresh"><MdRefresh /></button>
-                    {activeTab === 'all' && (
+                    {activeTab === 'all' && (<>
+                        {/* <button className="btn btn-secondary btn-sm" onClick={handleFixVat} disabled={fixingVat} title="Regenerate VAT rates from source orders">
+                            <MdSync className={fixingVat ? 'xero-spin' : ''} /> {fixingVat ? 'Fixing…' : 'Fix VAT Rates'}
+                        </button> */}
                         <button className="btn btn-secondary btn-sm" onClick={() => handleExportList()} disabled={!allInvoices.length}><MdFileDownload /> Export</button>
-                    )}
+                    </>)}
                 </div>
             </div>
 
@@ -239,39 +288,57 @@ const InvoicesPage = () => {
                         <input type="date" className="form-input" value={filters.dateTo} onChange={e => setFilters(f => ({ ...f, dateTo: e.target.value }))} style={{ maxWidth: 155 }} />
                     </div>
                 </div>
-                <div className="card"><div className="data-table-wrapper"><table className="data-table"><thead><tr>
-                    <th>INVOICE #</th><th>TYPE</th><th>DATE</th><th>CUSTOMER / ITEM</th><th>ORDER / PROD #</th>
-                    <th style={{ textAlign: 'right' }}>NET</th><th style={{ textAlign: 'right' }}>VAT</th><th style={{ textAlign: 'right' }}>TOTAL</th><th>STATUS</th><th>XERO</th><th>ACTIONS</th>
-                </tr></thead><tbody>
-                        {loading ? Array.from({ length: 5 }).map((_, i) => <tr key={i}>{Array.from({ length: 11 }).map((_, j) => <td key={j}><div className="skeleton skeleton-text" /></td>)}</tr>)
-                            : !allInvoices.length ? <tr><td colSpan="11" style={{ textAlign: 'center', padding: 'var(--space-8)', color: 'var(--color-text-muted)' }}>
-                                <MdReceipt style={{ fontSize: 36, display: 'block', margin: '0 auto var(--space-2)' }} /> No invoices found
-                            </td></tr>
-                                : allInvoices.map(inv => <tr key={inv.id} style={{ cursor: 'pointer' }} onClick={() => handleViewInvoice(inv)}>
-                                    <td><span style={{ fontFamily: 'var(--font-mono,monospace)', fontWeight: 700, color: 'var(--color-primary)', fontSize: 'var(--text-xs)' }}>{inv.invoice_number || inv.production_number || '—'}</span>{getDiscountBadge(inv)}</td>
-                                    <td>{getTypeBadge(inv.type)}</td><td>{formatDate(inv.invoice_date)}</td>
-                                    <td style={{ fontWeight: 500 }}>{inv.type === 'production' ? (inv.item_name || 'Production Item') : (inv.customer?.restaurant_name || inv.customer?.name || '—')}</td>
-                                    <td style={{ fontFamily: 'var(--font-mono,monospace)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{inv.order_number || inv.production_number || '—'}</td>
-                                    <td style={{ textAlign: 'right', fontWeight: 500 }}>{formatCurrency(inv.subtotal || inv.total_ingredient_cost)}</td>
-                                    <td style={{ textAlign: 'right', color: 'var(--color-text-muted)' }}>{formatCurrency(inv.total_vat || inv.vat_amount)}</td>
-                                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--color-primary)' }}>{formatCurrency(inv.grand_total || inv.total_with_vat)}</td>
-                                    <td>{getStatusBadge(inv.status)}</td>
-                                    <td>
-                                        {inv.xero_invoice_id ? (
-                                            <span title={`Xero: ${inv.xero_invoice_number || inv.xero_invoice_id}`} style={{ color: '#13b5ea', fontSize: 16, display: 'flex', alignItems: 'center', gap: 4 }}>
-                                                <MdCheckCircle /> <span style={{ fontSize: 10, fontWeight: 600 }}>Synced</span>
-                                            </span>
-                                        ) : inv.xero_sync_error ? (
-                                            <span title={inv.xero_sync_error} style={{ color: '#ef4444', fontSize: 16, display: 'flex', alignItems: 'center', gap: 4 }}>
-                                                <MdWarning /> <span style={{ fontSize: 10, fontWeight: 600 }}>Error</span>
-                                            </span>
-                                        ) : inv.type === 'order' ? (
-                                            <span style={{ color: 'var(--color-text-muted)', fontSize: 10 }}>—</span>
-                                        ) : null}
-                                    </td>
-                                    <td><button className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); handleViewInvoice(inv) }}><MdVisibility /></button></td>
-                                </tr>)}
-                    </tbody></table></div></div>
+                <div className="card">
+                    <div className="data-table-wrapper">
+                        <table className="data-table">
+                            <thead>
+                                <tr>
+                                    <th>INVOICE #</th><th>TYPE</th><th>DATE</th><th>CUSTOMER / ITEM</th><th>ORDER / PROD #</th>
+                                    <th style={{ textAlign: 'right' }}>NET</th><th style={{ textAlign: 'right' }}>VAT</th><th style={{ textAlign: 'right' }}>TOTAL</th><th>STATUS</th><th>XERO</th><th>ACTIONS</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {loading ? Array.from({ length: 5 }).map((_, i) => <tr key={i}>{Array.from({ length: 11 }).map((_, j) => <td key={j}><div className="skeleton skeleton-text" /></td>)}</tr>)
+                                    : !allInvoices.length ? <tr><td colSpan="11" style={{ textAlign: 'center', padding: 'var(--space-8)', color: 'var(--color-text-muted)' }}>
+                                        <MdReceipt style={{ fontSize: 36, display: 'block', margin: '0 auto var(--space-2)' }} /> No invoices found
+                                    </td></tr>
+                                        : paginatedAllInvoices.map(inv => <tr key={inv.id} style={{ cursor: 'pointer' }} onClick={() => handleViewInvoice(inv)}>
+                                            <td><span style={{ fontFamily: 'var(--font-mono,monospace)', fontWeight: 700, color: 'var(--color-primary)', fontSize: 'var(--text-xs)' }}>{inv.invoice_number || inv.production_number || '—'}</span>{getDiscountBadge(inv)}</td>
+                                            <td>{getTypeBadge(inv.type)}</td><td>{formatDate(inv.invoice_date)}</td>
+                                            <td style={{ fontWeight: 500 }}>{inv.type === 'production' ? (inv.item_name || 'Production Item') : (inv.customer?.restaurant_name || inv.customer?.name || '—')}</td>
+                                            <td style={{ fontFamily: 'var(--font-mono,monospace)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{inv.order_number || inv.production_number || '—'}</td>
+                                            <td style={{ textAlign: 'right', fontWeight: 500 }}>{formatCurrency(inv.subtotal || inv.total_ingredient_cost)}</td>
+                                            <td style={{ textAlign: 'right', color: 'var(--color-text-muted)' }}>{formatCurrency(inv.total_vat || inv.vat_amount)}</td>
+                                            <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--color-primary)' }}>{formatCurrency(inv.grand_total || inv.total_with_vat)}</td>
+                                            <td>{getStatusBadge(inv.status)}</td>
+                                            <td>
+                                                {inv.xero_invoice_id ? (
+                                                    <span title={`Xero: ${inv.xero_invoice_number || inv.xero_invoice_id}`} style={{ color: '#13b5ea', fontSize: 16, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                                        <MdCheckCircle /> <span style={{ fontSize: 10, fontWeight: 600 }}>Synced</span>
+                                                    </span>
+                                                ) : inv.xero_sync_error ? (
+                                                    <span title={inv.xero_sync_error} style={{ color: '#ef4444', fontSize: 16, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                                        <MdWarning /> <span style={{ fontSize: 10, fontWeight: 600 }}>Error</span>
+                                                    </span>
+                                                ) : inv.type === 'order' ? (
+                                                    <span style={{ color: 'var(--color-text-muted)', fontSize: 10 }}>—</span>
+                                                ) : null}
+                                            </td>
+                                            <td><button className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); handleViewInvoice(inv) }}><MdVisibility /></button></td>
+                                        </tr>)}
+                            </tbody>
+                        </table>
+                    </div>
+                    {!loading && allInvoices.length > 0 && (
+                        <Pagination
+                            currentPage={currentPageAll}
+                            totalItems={allInvoices.length}
+                            itemsPerPage={itemsPerPageAll}
+                            onPageChange={setCurrentPageAll}
+                            onItemsPerPageChange={setItemsPerPageAll}
+                        />
+                    )}
+                </div>
             </>)}
 
             {/* ═══ CONSOLIDATED TAB ═══ */}
@@ -314,22 +381,38 @@ const InvoicesPage = () => {
                         {/* Period Groups Table */}
                         <div className="card" style={{ marginBottom: 'var(--space-5)' }}>
                             <div style={{ padding: 'var(--space-4)', borderBottom: '1px solid var(--color-border)' }}><h3 style={{ margin: 0, fontSize: '1rem' }}>📅 {consolidatedType === 'order' ? `${selectedRestaurantName} — ` : ''}Consolidated by {consolidatedPeriod === 'weekly' ? 'Week' : consolidatedPeriod === 'fortnightly' ? 'Fortnight' : 'Month'}</h3></div>
-                            <div className="data-table-wrapper"><table className="data-table"><thead><tr>
-                                <th>PERIOD</th><th style={{ textAlign: 'right' }}>INVOICES</th><th style={{ textAlign: 'right' }}>NET</th><th style={{ textAlign: 'right' }}>VAT</th>
-                                {consolidatedType === 'order' && <th style={{ textAlign: 'right' }}>DISCOUNT</th>}<th style={{ textAlign: 'right' }}>TOTAL</th><th>ACTIONS</th>
-                            </tr></thead><tbody>
-                                    {consolidatedGroups.map(g => (
-                                        <tr key={g.key} style={{ cursor: 'pointer' }} onClick={() => setViewGroup(g)}>
-                                            <td style={{ fontWeight: 600 }}>{g.label}</td>
-                                            <td style={{ textAlign: 'right' }}>{g.invoices.length}</td>
-                                            <td style={{ textAlign: 'right', fontWeight: 500 }}>{formatCurrency(g.subtotal)}</td>
-                                            <td style={{ textAlign: 'right', color: 'var(--color-text-muted)' }}>{formatCurrency(g.total_vat)}</td>
-                                            {consolidatedType === 'order' && <td style={{ textAlign: 'right', color: g.total_discount > 0 ? '#16a34a' : 'var(--color-text-muted)' }}>{g.total_discount > 0 ? `-${formatCurrency(g.total_discount)}` : '—'}</td>}
-                                            <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--color-primary)' }}>{formatCurrency(g.grand_total)}</td>
-                                            <td><button className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); setViewGroup(g); }} title="View details"><MdVisibility /></button></td>
+                            <div className="data-table-wrapper">
+                                <table className="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>PERIOD</th><th style={{ textAlign: 'right' }}>INVOICES</th><th style={{ textAlign: 'right' }}>NET</th><th style={{ textAlign: 'right' }}>VAT</th>
+                                            {consolidatedType === 'order' && <th style={{ textAlign: 'right' }}>DISCOUNT</th>}<th style={{ textAlign: 'right' }}>TOTAL</th><th>ACTIONS</th>
                                         </tr>
-                                    ))}
-                                </tbody></table></div>
+                                    </thead>
+                                    <tbody>
+                                        {paginatedConsolidatedGroups.map(g => (
+                                            <tr key={g.key} style={{ cursor: 'pointer' }} onClick={() => setViewGroup(g)}>
+                                                <td style={{ fontWeight: 600 }}>{g.label}</td>
+                                                <td style={{ textAlign: 'right' }}>{g.invoices.length}</td>
+                                                <td style={{ textAlign: 'right', fontWeight: 500 }}>{formatCurrency(g.subtotal)}</td>
+                                                <td style={{ textAlign: 'right', color: 'var(--color-text-muted)' }}>{formatCurrency(g.total_vat)}</td>
+                                                {consolidatedType === 'order' && <td style={{ textAlign: 'right', color: g.total_discount > 0 ? '#16a34a' : 'var(--color-text-muted)' }}>{g.total_discount > 0 ? `-${formatCurrency(g.total_discount)}` : '—'}</td>}
+                                                <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--color-primary)' }}>{formatCurrency(g.grand_total)}</td>
+                                                <td><button className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); setViewGroup(g); }} title="View details"><MdVisibility /></button></td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {!consolidatedLoading && consolidatedGroups.length > 0 && (
+                                <Pagination
+                                    currentPage={currentPageConsolidated}
+                                    totalItems={consolidatedGroups.length}
+                                    itemsPerPage={itemsPerPageConsolidated}
+                                    onPageChange={setCurrentPageConsolidated}
+                                    onItemsPerPageChange={setItemsPerPageConsolidated}
+                                />
+                            )}
                         </div>
                     </>
                 )}

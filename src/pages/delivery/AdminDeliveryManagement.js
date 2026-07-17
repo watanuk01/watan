@@ -19,6 +19,7 @@ import {
     MdSpeed,
 } from 'react-icons/md';
 import toast from 'react-hot-toast';
+import Pagination from '../../components/common/Pagination';
 import '../orders/Orders.css';
 import DeliveryDetailModal from './DeliveryDetailModal';
 
@@ -32,6 +33,18 @@ const AdminDeliveryManagement = () => {
     const [selectedPartner, setSelectedPartner] = useState('');
     const [filterPartner, setFilterPartner] = useState('');
     const [detailOrder, setDetailOrder] = useState(null);
+
+    // Pagination State
+    const [currentPageLive, setCurrentPageLive] = useState(1);
+    const [itemsPerPageLive, setItemsPerPageLive] = useState(15);
+    const [currentPageDelivered, setCurrentPageDelivered] = useState(1);
+    const [itemsPerPageDelivered, setItemsPerPageDelivered] = useState(15);
+
+    // Reset pagination to page 1 on tab or filter change
+    useEffect(() => {
+        setCurrentPageLive(1);
+        setCurrentPageDelivered(1);
+    }, [activeTab, filterPartner]);
 
     const loadData = useCallback(async () => {
         setLoading(true);
@@ -73,6 +86,16 @@ const AdminDeliveryManagement = () => {
     const filteredLiveOrders = filterPartner
         ? liveOrders.filter(o => o.delivery_partner_id === filterPartner)
         : liveOrders;
+
+    const paginatedLiveOrders = filteredLiveOrders.slice(
+        (currentPageLive - 1) * itemsPerPageLive,
+        currentPageLive * itemsPerPageLive
+    );
+
+    const paginatedDeliveredOrders = deliveredOrders.slice(
+        (currentPageDelivered - 1) * itemsPerPageDelivered,
+        currentPageDelivered * itemsPerPageDelivered
+    );
 
     // ─── Partner Analytics ───
     const partnerAnalytics = deliveryPartners.map(partner => {
@@ -212,37 +235,48 @@ const AdminDeliveryManagement = () => {
                             <h3>No active deliveries</h3>
                         </div>
                     ) : (
-                        <div className="data-table-wrapper">
-                            <table className="data-table">
-                                <thead>
-                                    <tr>
-                                        <th>Order</th><th>Restaurant</th><th>Items</th><th>Partner</th>
-                                        <th>Status</th><th>Time</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {filteredLiveOrders.map(order => (
-                                        <tr key={order.id} onClick={() => setDetailOrder(order)} style={{ cursor: 'pointer' }}>
-                                            <td style={{ fontWeight: 600, color: 'var(--color-primary)' }}>{order.order_number}</td>
-                                            <td>{order.restaurant_name}</td>
-                                            <td>{order.items?.length || 0}</td>
-                                            <td>{order.delivery_partner_name || <span style={{ color: 'var(--color-text-muted)' }}>Unassigned</span>}</td>
-                                            <td>
-                                                <span className="order-status-badge" style={{
-                                                    background: `${getStatusInfo(order.status).color}15`,
-                                                    color: getStatusInfo(order.status).color,
-                                                }}>
-                                                    {getStatusInfo(order.status).icon} {getStatusInfo(order.status).label}
-                                                </span>
-                                            </td>
-                                            <td style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
-                                                {getTimeSince(order.assigned_at || order.ready_at || order.created_at)}
-                                            </td>
+                        <>
+                            <div className="data-table-wrapper">
+                                <table className="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Order</th><th>Restaurant</th><th>Items</th><th>Partner</th>
+                                            <th>Status</th><th>Time</th>
                                         </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
+                                    </thead>
+                                    <tbody>
+                                        {paginatedLiveOrders.map(order => (
+                                            <tr key={order.id} onClick={() => setDetailOrder(order)} style={{ cursor: 'pointer' }}>
+                                                <td style={{ fontWeight: 600, color: 'var(--color-primary)' }}>{order.order_number}</td>
+                                                <td>{order.restaurant_name}</td>
+                                                <td>{order.items?.length || 0}</td>
+                                                <td>{order.delivery_partner_name || <span style={{ color: 'var(--color-text-muted)' }}>Unassigned</span>}</td>
+                                                <td>
+                                                    <span className="order-status-badge" style={{
+                                                        background: `${getStatusInfo(order.status).color}15`,
+                                                        color: getStatusInfo(order.status).color,
+                                                    }}>
+                                                        {getStatusInfo(order.status).icon} {getStatusInfo(order.status).label}
+                                                    </span>
+                                                </td>
+                                                <td style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
+                                                    {getTimeSince(order.assigned_at || order.ready_at || order.created_at)}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {!loading && filteredLiveOrders.length > 0 && (
+                                <Pagination
+                                    currentPage={currentPageLive}
+                                    totalItems={filteredLiveOrders.length}
+                                    itemsPerPage={itemsPerPageLive}
+                                    onPageChange={setCurrentPageLive}
+                                    onItemsPerPageChange={setItemsPerPageLive}
+                                />
+                            )}
+                        </>
                     )}
                 </>
             ) : activeTab === 'unassigned' ? (
@@ -293,30 +327,41 @@ const AdminDeliveryManagement = () => {
                         <h3>No delivered orders yet</h3>
                     </div>
                 ) : (
-                    <div className="data-table-wrapper">
-                        <table className="data-table">
-                            <thead>
-                                <tr>
-                                    <th>Order</th><th>Restaurant</th><th>Items</th><th>Partner</th>
-                                    <th>Delivery Time</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {deliveredOrders.map(order => (
-                                    <tr key={order.id} onClick={() => setDetailOrder(order)} style={{ cursor: 'pointer' }}>
-                                        <td style={{ fontWeight: 600, color: 'var(--color-primary)' }}>{order.order_number}</td>
-                                        <td>{order.restaurant_name}</td>
-                                        <td>{order.items?.length || 0}</td>
-                                        <td>{order.delivery_partner_name || '—'}</td>
-                                        <td style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
-                                            <MdCheckCircle style={{ color: '#22c55e', verticalAlign: 'middle', marginRight: 4 }} />
-                                            {formatDateTime(order.delivered_at)}
-                                        </td>
+                    <>
+                        <div className="data-table-wrapper">
+                            <table className="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Order</th><th>Restaurant</th><th>Items</th><th>Partner</th>
+                                        <th>Delivery Time</th>
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
+                                </thead>
+                                <tbody>
+                                    {paginatedDeliveredOrders.map(order => (
+                                        <tr key={order.id} onClick={() => setDetailOrder(order)} style={{ cursor: 'pointer' }}>
+                                            <td style={{ fontWeight: 600, color: 'var(--color-primary)' }}>{order.order_number}</td>
+                                            <td>{order.restaurant_name}</td>
+                                            <td>{order.items?.length || 0}</td>
+                                            <td>{order.delivery_partner_name || '—'}</td>
+                                            <td style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
+                                                <MdCheckCircle style={{ color: '#22c55e', verticalAlign: 'middle', marginRight: 4 }} />
+                                                {formatDateTime(order.delivered_at)}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                        {!loading && deliveredOrders.length > 0 && (
+                            <Pagination
+                                currentPage={currentPageDelivered}
+                                totalItems={deliveredOrders.length}
+                                itemsPerPage={itemsPerPageDelivered}
+                                onPageChange={setCurrentPageDelivered}
+                                onItemsPerPageChange={setItemsPerPageDelivered}
+                            />
+                        )}
+                    </>
                 )
             ) : (
                 /* ─── Partner Performance ─── */

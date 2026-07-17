@@ -23,6 +23,7 @@ import {
     MdVisibility,
 } from 'react-icons/md';
 import toast from 'react-hot-toast';
+import Pagination from '../../components/common/Pagination';
 import '../orders/Orders.css';
 
 import DeliveryDetailModal from './DeliveryDetailModal';
@@ -49,6 +50,15 @@ const DeliveryOrders = () => {
 
     // Detail modal for history
     const [detailOrder, setDetailOrder] = useState(null);
+
+    // Pagination State (for History Tab)
+    const [currentPageHistory, setCurrentPageHistory] = useState(1);
+    const [itemsPerPageHistory, setItemsPerPageHistory] = useState(15);
+
+    // Reset pagination to page 1 on tab changes
+    useEffect(() => {
+        setCurrentPageHistory(1);
+    }, [activeTab]);
 
     // Accordion: track which cards show all items
     const [expandedCards, setExpandedCards] = useState({});
@@ -314,6 +324,11 @@ const DeliveryOrders = () => {
         padding: 'var(--space-4, 16px)',
     };
 
+    const paginatedHistoryOrders = historyOrders.slice(
+        (currentPageHistory - 1) * itemsPerPageHistory,
+        currentPageHistory * itemsPerPageHistory
+    );
+
     return (
         <div className="page-content">
             <div className="page-header">
@@ -527,50 +542,61 @@ const DeliveryOrders = () => {
                         <p>Completed deliveries will appear here</p>
                     </div>
                 ) : (
-                    <div className="data-table-wrapper">
-                        <table className="data-table">
-                            <thead>
-                                <tr>
-                                    <th>Order</th><th>Restaurant</th><th>Items</th>
-                                    <th>Total</th><th>Status</th><th>Delivered</th><th>Received By</th><th></th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {historyOrders.map(order => (
-                                    <tr key={order.id} style={{ cursor: 'pointer' }} onClick={() => setDetailOrder(order)}>
-                                        <td style={{ fontWeight: 600, color: 'var(--color-primary)' }}>{order.order_number}</td>
-                                        <td>{order.restaurant_name}</td>
-                                        <td>{order.items?.length || 0}</td>
-                                        <td>£{(order.total || order.total_amount || 0).toFixed(2)}</td>
-                                        <td>
-                                            <span className="order-status-badge" style={{
-                                                background: `${getStatusInfo(order.status).color}15`,
-                                                color: getStatusInfo(order.status).color,
-                                            }}>
-                                                {getStatusInfo(order.status).icon} {getStatusInfo(order.status).label}
-                                            </span>
-                                        </td>
-                                        <td style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
-                                            {formatDateTime(order.delivered_at)}
-                                        </td>
-                                        <td style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-                                            {order.delivery_manager_name || '—'}
-                                        </td>
-                                        <td>
-                                            <button
-                                                className="btn-action"
-                                                title="View Details"
-                                                onClick={(e) => { e.stopPropagation(); setDetailOrder(order); }}
-                                                style={{ color: 'var(--color-primary)' }}
-                                            >
-                                                <MdVisibility />
-                                            </button>
-                                        </td>
+                    <>
+                        <div className="data-table-wrapper">
+                            <table className="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Order</th><th>Restaurant</th><th>Items</th>
+                                        <th>Total</th><th>Status</th><th>Delivered</th><th>Received By</th><th></th>
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
+                                </thead>
+                                <tbody>
+                                    {paginatedHistoryOrders.map(order => (
+                                        <tr key={order.id} style={{ cursor: 'pointer' }} onClick={() => setDetailOrder(order)}>
+                                            <td style={{ fontWeight: 600, color: 'var(--color-primary)' }}>{order.order_number}</td>
+                                            <td>{order.restaurant_name}</td>
+                                            <td>{order.items?.length || 0}</td>
+                                            <td>£{(order.total || order.total_amount || 0).toFixed(2)}</td>
+                                            <td>
+                                                <span className="order-status-badge" style={{
+                                                    background: `${getStatusInfo(order.status).color}15`,
+                                                    color: getStatusInfo(order.status).color,
+                                                }}>
+                                                    {getStatusInfo(order.status).icon} {getStatusInfo(order.status).label}
+                                                </span>
+                                            </td>
+                                            <td style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
+                                                {formatDateTime(order.delivered_at)}
+                                            </td>
+                                            <td style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+                                                {order.delivery_manager_name || '—'}
+                                            </td>
+                                            <td>
+                                                <button
+                                                    className="btn-action"
+                                                    title="View Details"
+                                                    onClick={(e) => { e.stopPropagation(); setDetailOrder(order); }}
+                                                    style={{ color: 'var(--color-primary)' }}
+                                                >
+                                                    <MdVisibility />
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                        {!loading && historyOrders.length > 0 && (
+                            <Pagination
+                                currentPage={currentPageHistory}
+                                totalItems={historyOrders.length}
+                                itemsPerPage={itemsPerPageHistory}
+                                onPageChange={setCurrentPageHistory}
+                                onItemsPerPageChange={setItemsPerPageHistory}
+                            />
+                        )}
+                    </>
                 )
             )}
 
