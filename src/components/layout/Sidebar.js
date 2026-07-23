@@ -25,6 +25,7 @@ import {
     MdPool,
     MdSync,
 } from 'react-icons/md';
+import { isSouthallBranch } from '../../router/ProtectedRoute';
 import './Sidebar.css';
 
 const Sidebar = () => {
@@ -42,6 +43,8 @@ const Sidebar = () => {
     const role = userProfile?.role || 'admin';
 
     const getNavItems = () => {
+        const isSouthall = isSouthallBranch(userProfile);
+
         switch (role) {
             case 'admin':
             case 'ck_staff':
@@ -106,20 +109,68 @@ const Sidebar = () => {
                         { type: 'item', label: 'User Management', icon: MdPeople, path: '/users' },
                     ] : []),
                     { type: 'item', label: 'Reports & Analytics', icon: MdBarChart, path: '/reports' },
+                    { type: 'item', label: 'Item Sales Report', icon: MdReceipt, path: '/reports/item-sales' },
                     ...(role === 'admin' ? [
                         { type: 'item', label: 'Settings', icon: MdSettings, path: '/settings' },
                     ] : []),
                 ];
 
+            case 'chef':
+                return [
+                    { type: 'section', label: 'Central Kitchen' },
+                    {
+                        type: 'submenu', label: 'Inventory', icon: MdInventory2, key: 'inventory',
+                        children: [
+                            { label: 'Items Master', path: '/inventory/items' },
+                            { label: 'Current Stock', path: '/inventory/stock' },
+                            { label: 'Batches', path: '/inventory/batches' },
+                            { label: 'Low Stock Alerts', path: '/inventory/low-stock' },
+                            { label: 'Bulk Upload', path: '/inventory/bulk-upload' },
+                        ]
+                    },
+                    {
+                        type: 'submenu', label: 'Purchase', icon: MdShoppingCart, key: 'purchase',
+                        children: [
+                            { label: 'Create Order', path: '/purchase/create' },
+                            { label: 'Pending Orders', path: '/purchase/pending' },
+                            { label: 'Purchase History', path: '/purchase/history' },
+                        ]
+                    },
+                    {
+                        type: 'submenu', label: 'Production', icon: MdOutlineKitchen, key: 'production',
+                        children: [
+                            { label: 'Start Production', path: '/production/start' },
+                            { label: 'In Progress', path: '/production/in-progress' },
+                            { label: 'Production History', path: '/production/history' },
+                        ]
+                    },
+                    {
+                        type: 'submenu', label: 'Orders', icon: MdReceipt, key: 'orders',
+                        children: [
+                            { label: "Today's Orders", path: '/orders/today' },
+                            { label: 'Undelivered Orders', path: '/orders/undelivered' },
+                        ]
+                    },
+                    {
+                        type: 'submenu', label: 'Deliveries', icon: MdLocalShipping, key: 'deliveries',
+                        children: [
+                            { label: 'Delivery Management', path: '/deliveries/manage' },
+                        ]
+                    },
+                    { type: 'divider' },
+                    { type: 'item', label: 'Notifications', icon: MdNotifications, path: '/notifications' },
+                ];
+
             case 'restaurant_manager':
                 return [
-                    { type: 'item', label: 'Dashboard', icon: MdDashboard, path: '/restaurant/dashboard' },
+                    ...(isSouthall ? [
+                        { type: 'item', label: 'Dashboard', icon: MdDashboard, path: '/restaurant/dashboard' },
+                    ] : []),
                     { type: 'divider' },
                     { type: 'section', label: 'Operations' },
                     { type: 'item', label: 'Order from CK', icon: MdShoppingCart, path: '/restaurant/order' },
                     { type: 'item', label: 'My Inventory', icon: MdInventory2, path: '/restaurant/inventory' },
                     { type: 'item', label: 'Order History', icon: MdHistory, path: '/restaurant/orders' },
-                    { type: 'item', label: 'Invoices', icon: MdReceipt, path: '/restaurant/invoices' },
                     { type: 'item', label: 'Waste Management', icon: MdDelete, path: '/waste' },
                     { type: 'item', label: 'Menu Management', icon: MdMenuBook, path: '/restaurant/menu' },
                     { type: 'item', label: 'EPOS Mapping', icon: MdSync, path: '/restaurant/epos-mapping' },
@@ -129,13 +180,14 @@ const Sidebar = () => {
 
             case 'restaurant_manager_non_managed':
                 return [
-                    { type: 'item', label: 'Dashboard', icon: MdDashboard, path: '/restaurant/dashboard' },
+                    ...(isSouthall ? [
+                        { type: 'item', label: 'Dashboard', icon: MdDashboard, path: '/restaurant/dashboard' },
+                    ] : []),
                     { type: 'divider' },
                     { type: 'section', label: 'Operations' },
                     { type: 'item', label: 'Order from CK', icon: MdShoppingCart, path: '/restaurant/order' },
                     { type: 'item', label: 'My Inventory', icon: MdInventory2, path: '/restaurant/inventory' },
                     { type: 'item', label: 'Order History', icon: MdHistory, path: '/restaurant/orders' },
-                    { type: 'item', label: 'Invoices', icon: MdReceipt, path: '/restaurant/invoices' },
                     { type: 'item', label: 'Waste Management', icon: MdDelete, path: '/waste' },
                     { type: 'divider' },
                     { type: 'item', label: 'Notifications', icon: MdNotifications, path: '/notifications' },

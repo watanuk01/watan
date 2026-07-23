@@ -229,6 +229,79 @@ exports.sendInvoiceEmail = onCall({ maxInstances: 10 }, async (request) => {
 });
 
 // ═══════════════════════════════════════════════════════
+//  1b. SEND REPORT EMAIL
+// ═══════════════════════════════════════════════════════
+
+/**
+ * sendReportEmail — Sends a report HTML via email
+ *
+ * Accepts: { recipientEmail, reportHtml, reportTitle }
+ * Returns: { success, message }
+ */
+exports.sendReportEmail = onCall({ maxInstances: 10 }, async (request) => {
+    const { recipientEmail, reportHtml, reportTitle } = request.data;
+
+    if (!recipientEmail || !reportHtml) {
+        throw new HttpsError('invalid-argument', 'recipientEmail and reportHtml are required');
+    }
+
+    const title = reportTitle || 'Reports & Analytics';
+    const dateStr = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+
+    const emailHtml = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <style>
+                body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 0; background: #f5f5f5; }
+                .email-wrapper { max-width: 1100px; margin: 0 auto; background: #ffffff; }
+                .email-header { background: #1a1a2e; color: #d4af37; padding: 24px 40px; }
+                .email-header h1 { margin: 0; font-size: 22px; font-weight: 800; }
+                .email-header p { margin: 4px 0 0; color: #ccc; font-size: 14px; }
+                .email-body { padding: 24px 40px; }
+                .email-footer { background: #f9fafb; padding: 20px 40px; text-align: center; font-size: 12px; color: #6b7280; border-top: 1px solid #e5e7eb; }
+                table { width: 100%; border-collapse: collapse; }
+                th, td { padding: 10px 12px; text-align: left; }
+                th { background: #f9fafb; color: #374151; font-weight: 600; border-bottom: 2px solid #e5e7eb; }
+                td { border-bottom: 1px solid #f3f4f6; color: #111; }
+            </style>
+        </head>
+        <body>
+            <div class="email-wrapper">
+                <div class="email-header">
+                    <h1>📊 ${title}</h1>
+                    <p>Generated on ${dateStr} — Watan Central Kitchen</p>
+                </div>
+                <div class="email-body">
+                    ${reportHtml}
+                </div>
+                <div class="email-footer">
+                    <p>This report was generated from Watan CK Management System.</p>
+                    <p>If you have any questions, please reply to this email.</p>
+                </div>
+            </div>
+        </body>
+        </html>
+    `;
+
+    try {
+        await transporter.sendMail({
+            from: `"Watan Central Kitchen" <${GMAIL_USER}>`,
+            to: recipientEmail,
+            subject: `${title} — ${dateStr}`,
+            html: emailHtml,
+        });
+
+        console.log(`Report email sent to ${recipientEmail}: ${title}`);
+        return { success: true, message: `Report emailed to ${recipientEmail}` };
+    } catch (err) {
+        console.error('Report email send failed:', err);
+        throw new HttpsError('internal', `Failed to send email: ${err.message}`);
+    }
+});
+
+// ═══════════════════════════════════════════════════════
 //  2. XERO TOKEN EXCHANGE
 // ═══════════════════════════════════════════════════════
 
@@ -1338,3 +1411,33 @@ exports.eposReprocessEvent = onCall({ maxInstances: 5 }, async (request) => {
     return { success: true, message: 'Event reset to pending.' };
 });
 
+// ═══════════════════════════════════════════════════════
+//  11. Reports & Analytics — Email Report
+// ═══════════════════════════════════════════════════════
+
+exports.sendReportEmail = onCall({ maxInstances: 5 }, async (request) => {
+    const { recipientEmail, reportHtml, reportTitle } = request.data;
+    if (!recipientEmail || !reportHtml) {
+        throw new HttpsError('invalid-argument', 'Missing recipientEmail or reportHtml');
+    }
+
+    try {
+        await transporter.sendMail({
+            from: `"Watan System" <watanuk01@gmail.com>`,
+            to: recipientEmail,
+            subject: reportTitle || 'Watan Analytics Report',
+            html: `
+                <div style="font-family: sans-serif; padding: 20px;">
+                    <h2>${reportTitle || 'Watan Analytics Report'}</h2>
+                    <p>Please find the requested report below:</p>
+                    <hr/>
+                    ${reportHtml}
+                </div>
+            `,
+        });
+        return { success: true };
+    } catch (e) {
+        console.error('Email send failed:', e);
+        throw new HttpsError('internal', 'Failed to send email: ' + e.message);
+    }
+});

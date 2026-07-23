@@ -303,17 +303,24 @@ export const fetchTopOrderedItems = async (limit = 10, filters = {}) => {
     const allOrders = await getOrders();
     const filtered = applyFilters(allOrders, filters);
     const map = {};
+    const categorySet = new Set();
     filtered.forEach(o => {
         (o.items || []).forEach(item => {
-            if (!map[item.item_name]) map[item.item_name] = { name: item.item_name, quantity: 0, value: 0 };
+            const cat = item.category_name || 'Uncategorised';
+            categorySet.add(cat);
+            if (!map[item.item_name]) map[item.item_name] = { name: item.item_name, quantity: 0, value: 0, unit: item.unit || 'units', category: cat };
             map[item.item_name].quantity += item.quantity || 0;
             map[item.item_name].value += item.line_total || 0;
+            // Keep updating unit/category from latest occurrence
+            if (item.unit) map[item.item_name].unit = item.unit;
+            if (item.category_name) map[item.item_name].category = item.category_name;
         });
     });
-    return Object.values(map)
+    const items = Object.values(map)
         .sort((a, b) => b.quantity - a.quantity)
         .slice(0, limit)
         .map(i => ({ ...i, quantity: Math.round(i.quantity * 10) / 10, value: Math.round(i.value * 100) / 100 }));
+    return { items, categories: [...categorySet].sort() };
 };
 
 /**
@@ -468,28 +475,82 @@ export const fetchRestaurantComparison = async (filters = {}) => {
 
     filteredOrders.forEach(o => {
         const name = o.restaurant_name || 'Unknown';
-        if (!map[name]) map[name] = { name, orders: 0, orderValue: 0, wasteValue: 0, itemsOrdered: {} };
+        if (!map[name]) map[name] = { name, orders: 0, orderValue: 0, wasteValue: 0, itemsOrdered: {}, wasteItems: {} };
         map[name].orders++;
         map[name].orderValue += o.total || 0;
         (o.items || []).forEach(item => {
-            map[name].itemsOrdered[item.item_name] = (map[name].itemsOrdered[item.item_name] || 0) + (item.quantity || 0);
+            const iname = item.item_name;
+            if (!map[name].itemsOrdered[iname]) map[name].itemsOrdered[iname] = { name: iname, quantity: 0, value: 0 };
+            map[name].itemsOrdered[iname].quantity += item.quantity || 0;
+            map[name].itemsOrdered[iname].value += item.line_total || 0;
         });
     });
 
-    filteredWaste.filter(w => w.location_type === 'restaurant').forEach(w => {
+    filteredWaste.forEach(w => {
+        // Match waste to restaurant: by location_type='restaurant' OR by location_name matching a known restaurant
         const name = w.location_name || 'Unknown';
-        if (!map[name]) map[name] = { name, orders: 0, orderValue: 0, wasteValue: 0, itemsOrdered: {} };
-        map[name].wasteValue += w.total_value || w.estimated_value || 0;
+        const isRestaurantWaste = w.location_type === 'restaurant' || map[name];
+        if (!isRestaurantWaste) return;
+        if (!map[name]) map[name] = { name, orders: 0, orderValue: 0, wasteValue: 0, itemsOrdered: {}, wasteItems: {} };
+        const val = w.total_value || w.estimated_value || 0;
+        map[name].wasteValue += val;
+        // Track waste items per restaurant
+        const wname = w.item_name || w.category || 'Unknown';
+        if (!map[name].wasteItems[wname]) map[name].wasteItems[wname] = { name: wname, value: 0, quantity: 0 };
+        map[name].wasteItems[wname].value += val;
+        map[name].wasteItems[wname].quantity += w.quantity || 0;
     });
 
-    return Object.values(map).map(r => ({
-        name: r.name, orders: r.orders,
-        orderValue: Math.round(r.orderValue * 100) / 100,
-        avgOrderValue: r.orders > 0 ? Math.round((r.orderValue / r.orders) * 100) / 100 : 0,
-        wasteValue: Math.round(r.wasteValue * 100) / 100,
-        wastePercent: r.orderValue > 0 ? Math.round((r.wasteValue / r.orderValue) * 1000) / 10 : 0,
-        topItem: Object.entries(r.itemsOrdered).sort((a, b) => b[1] - a[1])[0]?.[0] || '—',
-    })).sort((a, b) => b.orderValue - a.orderValue);
+    // Fetch EPOS events for all restaurants (cross-restaurant aggregation)
+    let eposMap = {};
+    try {
+        const eposSnap = await getDocs(collection(db, 'epos_events'));
+        eposSnap.docs.forEach(d => {
+            const data = d.data();
+            const restId = data.restaurant_id || 'unknown';
+            const restName = data.restaurant_name || restId;
+            if (!eposMap[restName]) eposMap[restName] = 0;
+            // Sum revenue from processing results
+            const results = data.processing_result?.results || [];
+            results.forEach(r => {
+                if (r.status === 'processed') {
+                    const price = r.portion_selling_price || 0;
+                    const qty = r.quantity_sold || 0;
+                    eposMap[restName] += price * qty;
+                }
+            });
+            // Also check line_items total as fallback
+            if (results.length === 0 && data.line_items) {
+                data.line_items.forEach(li => {
+                    eposMap[restName] += (li.total || li.price || 0) * (li.quantity || 1);
+                });
+            }
+        });
+    } catch (e) {
+        console.warn('Could not fetch EPOS events for comparison:', e.message);
+    }
+
+    return Object.values(map).map(r => {
+        const eposSaleValue = Math.round((eposMap[r.name] || 0) * 100) / 100;
+        const topItemsList = Object.values(r.itemsOrdered)
+            .sort((a, b) => b.quantity - a.quantity)
+            .slice(0, 10);
+        const topWasteList = Object.values(r.wasteItems)
+            .sort((a, b) => b.value - a.value)
+            .slice(0, 5);
+        return {
+            name: r.name, orders: r.orders,
+            orderValue: Math.round(r.orderValue * 100) / 100,
+            avgOrderValue: r.orders > 0 ? Math.round((r.orderValue / r.orders) * 100) / 100 : 0,
+            wasteValue: Math.round(r.wasteValue * 100) / 100,
+            wastePercent: r.orderValue > 0 ? Math.round((r.wasteValue / r.orderValue) * 1000) / 10 : 0,
+            topItem: topItemsList[0]?.name || '—',
+            eposSaleValue,
+            difference: Math.round((eposSaleValue - Math.round(r.orderValue * 100) / 100) * 100) / 100,
+            topItemsList,
+            topWasteList,
+        };
+    }).sort((a, b) => b.orderValue - a.orderValue);
 };
 
 export const fetchVendorAnalysis = async () => {
@@ -497,10 +558,10 @@ export const fetchVendorAnalysis = async () => {
     const map = {};
     snap.docs.forEach(d => {
         const data = d.data();
-        const vendor = data.vendor_name || data.supplier_name || 'Unknown';
+        const vendor = data.vendor || data.vendor_name || data.supplier_name || 'Unknown';
         if (!map[vendor]) map[vendor] = { name: vendor, orders: 0, value: 0, items: 0 };
         map[vendor].orders++;
-        map[vendor].value += data.total || 0;
+        map[vendor].value += data.total_amount || data.total || 0;
         map[vendor].items += (data.items || []).length;
     });
     return Object.values(map)
@@ -589,4 +650,24 @@ export const fetchRestaurantDirectory = async () => {
             recentOrders: orders.sort((a, b) => (b.created_at || 0) - (a.created_at || 0)).slice(0, 5),
         };
     }).sort((a, b) => b.totalOrderValue - a.totalOrderValue);
+};
+
+/**
+ * Fetch restaurant list for filter dropdowns.
+ * Returns [{ id, name, restaurant_name, restaurant_id }]
+ */
+export const fetchRestaurantList = async () => {
+    const snap = await getDocs(query(
+        collection(db, 'users'),
+        where('role', 'in', ['restaurant_manager', 'restaurant_manager_non_managed'])
+    ));
+    return snap.docs.map(d => {
+        const data = d.data();
+        return {
+            id: d.id,
+            name: data.name,
+            restaurant_name: data.restaurant_name || data.name,
+            restaurant_id: data.restaurant_id || d.id,
+        };
+    }).sort((a, b) => (a.restaurant_name || '').localeCompare(b.restaurant_name || ''));
 };
