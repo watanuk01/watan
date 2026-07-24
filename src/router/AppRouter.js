@@ -1,7 +1,7 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import ProtectedRoute from './ProtectedRoute';
+import ProtectedRoute, { isSouthallBranch } from './ProtectedRoute';
 import { getDashboardPath } from './ProtectedRoute';
 
 // Layout
@@ -67,6 +67,7 @@ import NotificationsPage from '../pages/notifications/NotificationsPage';
 
 // Reports & Analytics
 import ReportsPage from '../pages/reports/ReportsPage';
+import ItemSalesReport from '../pages/reports/ItemSalesReport';
 
 // Restaurants Management
 import RestaurantsPage from '../pages/restaurants/RestaurantsPage';
@@ -90,6 +91,18 @@ const PlaceholderPage = ({ title }) => (
     </div>
 );
 
+// Restaurant Dashboard Guard — only Southall branch gets access
+const RestaurantDashboardGuard = () => {
+    const { userProfile } = useAuth();
+    if (!userProfile) return null;
+    // Admin accessing via /restaurants/:id/dashboard is handled by a separate route
+    // This guard is only for restaurant roles
+    if (!isSouthallBranch(userProfile)) {
+        return <Navigate to="/restaurant/order" replace />;
+    }
+    return <RestaurantDashboard />;
+};
+
 const AppRouter = () => {
     const { currentUser, userProfile } = useAuth();
 
@@ -101,7 +114,7 @@ const AppRouter = () => {
                     path="/login"
                     element={
                         currentUser ? (
-                            <Navigate to={getDashboardPath(userProfile?.role)} replace />
+                            <Navigate to={getDashboardPath(userProfile?.role, userProfile?.restaurant_id, userProfile)} replace />
                         ) : (
                             <LoginPage />
                         )
@@ -111,7 +124,7 @@ const AppRouter = () => {
                     path="/forgot-password"
                     element={
                         currentUser ? (
-                            <Navigate to={getDashboardPath(userProfile?.role)} replace />
+                            <Navigate to={getDashboardPath(userProfile?.role, userProfile?.restaurant_id, userProfile)} replace />
                         ) : (
                             <ForgotPasswordPage />
                         )
@@ -136,7 +149,7 @@ const AppRouter = () => {
                         </ProtectedRoute>
                     }
                 >
-                    {/* Admin / CK Staff Dashboard */}
+                    {/* Admin / CK Staff Dashboard (chef excluded) */}
                     <Route
                         path="/dashboard"
                         element={
@@ -152,7 +165,7 @@ const AppRouter = () => {
                     <Route
                         path="/inventory/items"
                         element={
-                            <ProtectedRoute allowedRoles={['admin', 'ck_staff']}>
+                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef']}>
                                 <InventoryItems />
                             </ProtectedRoute>
                         }
@@ -160,7 +173,7 @@ const AppRouter = () => {
                     <Route
                         path="/inventory/stock"
                         element={
-                            <ProtectedRoute allowedRoles={['admin', 'ck_staff']}>
+                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef']}>
                                 <CurrentStock />
                             </ProtectedRoute>
                         }
@@ -168,7 +181,7 @@ const AppRouter = () => {
                     <Route
                         path="/inventory/batches"
                         element={
-                            <ProtectedRoute allowedRoles={['admin', 'ck_staff']}>
+                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef']}>
                                 <Batches />
                             </ProtectedRoute>
                         }
@@ -176,7 +189,7 @@ const AppRouter = () => {
                     <Route
                         path="/inventory/low-stock"
                         element={
-                            <ProtectedRoute allowedRoles={['admin', 'ck_staff']}>
+                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef']}>
                                 <LowStockAlerts />
                             </ProtectedRoute>
                         }
@@ -184,7 +197,7 @@ const AppRouter = () => {
                     <Route
                         path="/inventory/bulk-upload"
                         element={
-                            <ProtectedRoute allowedRoles={['admin', 'ck_staff']}>
+                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef']}>
                                 <BulkUpload />
                             </ProtectedRoute>
                         }
@@ -192,7 +205,7 @@ const AppRouter = () => {
                     <Route
                         path="/purchase/create"
                         element={
-                            <ProtectedRoute allowedRoles={['admin', 'ck_staff']}>
+                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef']}>
                                 <CreatePurchaseOrder />
                             </ProtectedRoute>
                         }
@@ -200,7 +213,7 @@ const AppRouter = () => {
                     <Route
                         path="/purchase/pending"
                         element={
-                            <ProtectedRoute allowedRoles={['admin', 'ck_staff']}>
+                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef']}>
                                 <PendingOrders />
                             </ProtectedRoute>
                         }
@@ -208,7 +221,7 @@ const AppRouter = () => {
                     <Route
                         path="/purchase/history"
                         element={
-                            <ProtectedRoute allowedRoles={['admin', 'ck_staff']}>
+                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef']}>
                                 <PurchaseHistory />
                             </ProtectedRoute>
                         }
@@ -216,7 +229,7 @@ const AppRouter = () => {
                     <Route
                         path="/production/start"
                         element={
-                            <ProtectedRoute allowedRoles={['admin', 'ck_staff']}>
+                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef']}>
                                 <StartProduction />
                             </ProtectedRoute>
                         }
@@ -224,7 +237,7 @@ const AppRouter = () => {
                     <Route
                         path="/production/in-progress"
                         element={
-                            <ProtectedRoute allowedRoles={['admin', 'ck_staff']}>
+                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef']}>
                                 <InProgress />
                             </ProtectedRoute>
                         }
@@ -232,7 +245,7 @@ const AppRouter = () => {
                     <Route
                         path="/production/history"
                         element={
-                            <ProtectedRoute allowedRoles={['admin', 'ck_staff']}>
+                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef']}>
                                 <ProductionHistory />
                             </ProtectedRoute>
                         }
@@ -240,7 +253,7 @@ const AppRouter = () => {
                     <Route
                         path="/production/invoices"
                         element={
-                            <ProtectedRoute allowedRoles={['admin', 'ck_staff']}>
+                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef']}>
                                 <ProductionInvoices />
                             </ProtectedRoute>
                         }
@@ -248,7 +261,7 @@ const AppRouter = () => {
                     <Route
                         path="/orders/today"
                         element={
-                            <ProtectedRoute allowedRoles={['admin', 'ck_staff']}>
+                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef']}>
                                 <TodaysOrders />
                             </ProtectedRoute>
                         }
@@ -256,7 +269,7 @@ const AppRouter = () => {
                     <Route
                         path="/orders/undelivered"
                         element={
-                            <ProtectedRoute allowedRoles={['admin', 'ck_staff']}>
+                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef']}>
                                 <UndeliveredOrders />
                             </ProtectedRoute>
                         }
@@ -264,7 +277,7 @@ const AppRouter = () => {
                     <Route
                         path="/orders/*"
                         element={
-                            <ProtectedRoute allowedRoles={['admin', 'ck_staff']}>
+                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef']}>
                                 <TodaysOrders />
                             </ProtectedRoute>
                         }
@@ -272,7 +285,7 @@ const AppRouter = () => {
                     <Route
                         path="/deliveries/manage"
                         element={
-                            <ProtectedRoute allowedRoles={['admin', 'ck_staff']}>
+                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef']}>
                                 <AdminDeliveryManagement />
                             </ProtectedRoute>
                         }
@@ -280,7 +293,7 @@ const AppRouter = () => {
                     <Route
                         path="/deliveries/analytics"
                         element={
-                            <ProtectedRoute allowedRoles={['admin', 'ck_staff']}>
+                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef']}>
                                 <DeliveryAnalytics />
                             </ProtectedRoute>
                         }
@@ -332,6 +345,14 @@ const AppRouter = () => {
                         }
                     />
                     <Route
+                        path="/reports/item-sales"
+                        element={
+                            <ProtectedRoute allowedRoles={['admin', 'ck_staff']}>
+                                <ItemSalesReport />
+                            </ProtectedRoute>
+                        }
+                    />
+                    <Route
                         path="/reports/*"
                         element={
                             <ProtectedRoute allowedRoles={['admin', 'ck_staff']}>
@@ -356,7 +377,7 @@ const AppRouter = () => {
                         path="/restaurant/dashboard"
                         element={
                             <ProtectedRoute allowedRoles={['restaurant_manager', 'restaurant_manager_non_managed']}>
-                                <RestaurantDashboard />
+                                <RestaurantDashboardGuard />
                             </ProtectedRoute>
                         }
                     />
@@ -384,10 +405,11 @@ const AppRouter = () => {
                             </ProtectedRoute>
                         }
                     />
+                    {/* Restaurant Invoices — BLOCKED for all restaurant roles per requirement */}
                     <Route
                         path="/restaurant/invoices/*"
                         element={
-                            <ProtectedRoute allowedRoles={['restaurant_manager', 'restaurant_manager_non_managed']}>
+                            <ProtectedRoute allowedRoles={['admin']}>
                                 <RestaurantInvoices />
                             </ProtectedRoute>
                         }

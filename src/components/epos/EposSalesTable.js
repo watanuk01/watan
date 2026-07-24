@@ -14,6 +14,24 @@ const MODEL_LABELS = {
 const fmt = (n, d = 2) => (Number(n) || 0).toFixed(d);
 const fmtQty = (n, unit) => `${fmt(n, 3).replace(/\.?0+$/, '')} ${unit || ''}`.trim();
 
+/**
+ * Format a quantity with dual-unit display when unit_conversion is available.
+ * e.g. "1.65 packs (50 units)" or just "5.5 kg" if no conversion.
+ */
+const fmtDualUnit = (quantity, row) => {
+    const q = Number(quantity) || 0;
+    const unit = row.unit || '';
+    const primary = fmtQty(q, unit);
+    if (!row.unit_conversion?.has_conversion || !row.base_unit) return primary;
+    const baseFactor = row.unit_conversion.base_factor || 1;
+    let rawBase = Math.round(q * baseFactor * 100) / 100;
+    let baseUnit = row.base_unit;
+    // Smart format: g→kg, ml→l when ≥1000
+    if (baseUnit === 'g' && Math.abs(rawBase) >= 1000) { rawBase = Math.round(rawBase / 10) / 100; baseUnit = 'kg'; }
+    if (baseUnit === 'ml' && Math.abs(rawBase) >= 1000) { rawBase = Math.round(rawBase / 10) / 100; baseUnit = 'l'; }
+    return `${primary} (${fmtQty(rawBase, baseUnit)})`;
+};
+
 // ── Pagination component ──────────────────────────────────────────────────────
 function Pagination({ total, page, pageSize, onPage, onPageSize }) {
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -405,11 +423,11 @@ export default function EposSalesTable({ eposEvents, menuItems, inventoryItems }
                                         <td style={tdStyle}><strong>{r.item_name}</strong></td>
                                         <td style={tdStyle}>{r.category_name}</td>
                                         <td style={tdStyle}>{r.item_type}</td>
-                                        <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmtQty(r.total_consumed, r.unit)}</td>
+                                        <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmtDualUnit(r.total_consumed, r)}</td>
                                         <td style={{ ...tdStyle, textAlign: 'right' }}>£{fmt(r.cost_price)}</td>
                                         <td style={{ ...tdStyle, textAlign: 'right' }}>£{fmt(r.selling_price)}</td>
                                         <td style={{ ...tdStyle, textAlign: 'right', color: '#f59e0b', fontWeight: 600 }}>£{fmt(r.consumption_value)}</td>
-                                        <td style={{ ...tdStyle, textAlign: 'right' }}>{fmtQty(r.current_stock, r.unit)}</td>
+                                        <td style={{ ...tdStyle, textAlign: 'right' }}>{fmtDualUnit(r.current_stock, r)}</td>
                                         <td style={{ ...tdStyle, textAlign: 'right', color: '#22c55e', fontWeight: 600 }}>£{fmt(r.stock_value)}</td>
                                         <td style={tdStyle}>{riskBadge(r.depletion_risk)}</td>
                                     </tr>

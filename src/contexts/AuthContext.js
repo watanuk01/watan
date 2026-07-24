@@ -80,6 +80,7 @@ export const AuthProvider = ({ children }) => {
 
     const isAdmin = () => hasRole('admin');
     const isCKStaff = () => hasRole(['admin', 'ck_staff']);
+    const isChef = () => hasRole('chef');
     const isRestaurantManager = () => hasRole(['restaurant_manager', 'restaurant_manager_non_managed']);
     const isDeliveryPartner = () => hasRole('delivery_partner');
 
@@ -93,6 +94,7 @@ export const AuthProvider = ({ children }) => {
         hasRole,
         isAdmin,
         isCKStaff,
+        isChef,
         isRestaurantManager,
         isDeliveryPartner,
     };

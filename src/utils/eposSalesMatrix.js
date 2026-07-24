@@ -134,6 +134,8 @@ export function buildEposSalesMatrix(filteredEvents, menuItems, inventoryItems) 
                         item_id: d.item_id,
                         item_name: d.item_name || inv?.item_name || '—',
                         unit: d.unit || inv?.unit || '',
+                        base_unit: inv?.base_unit || '',
+                        unit_conversion: inv?.unit_conversion || null,
                         category_name: d.category_name || inv?.category_name || '—',
                         item_type: d.item_type || inv?.item_type || '—',
                         cost_price: d.cost_price ?? inv?.cost_price ?? 0,

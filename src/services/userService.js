@@ -179,6 +179,7 @@ export const getUsersByRole = async (role) => {
 export const ROLE_OPTIONS = [
     { value: 'admin', label: 'Super Admin' },
     { value: 'ck_staff', label: 'Central Kitchen Staff' },
+    { value: 'chef', label: 'Chef' },
     { value: 'restaurant_manager', label: 'Restaurant Manager (Managed)' },
     { value: 'restaurant_manager_non_managed', label: 'Restaurant Manager (Non-Managed)' },
     { value: 'delivery_partner', label: 'Delivery Partner' },

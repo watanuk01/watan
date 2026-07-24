@@ -291,7 +291,7 @@ const AdminDashboard = () => {
     const loadCharts = useCallback(async (f, tLimit = 5) => {
         setChartsLoading(true);
         try {
-            const [inv, daily, items, rests, waste, trend, matrix] = await Promise.all([
+            const [inv, daily, itemsRes, rests, waste, trend, matrix] = await Promise.all([
                 fetchInventoryByCategory(),
                 fetchDailyOrderVolume(f),
                 fetchTopOrderedItems(10, f),
@@ -302,7 +302,7 @@ const AdminDashboard = () => {
             ]);
             setInvByCategory(inv);
             setDailyVolume(daily);
-            setTopItems(items);
+            setTopItems(itemsRes.items || itemsRes);
             setTopRestaurants(rests);
             setWasteByCat(waste);
             setItemTrend(trend);

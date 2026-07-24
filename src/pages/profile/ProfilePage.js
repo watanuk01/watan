@@ -111,7 +111,7 @@ const ProfilePage = () => {
                 {/* Profile Card */}
                 <div className="profile-card">
                     <div className="profile-card-avatar">
-                        {userProfile?.name?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || 'U'}
+                        {userProfile?.name ? userProfile.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : 'U'}
                     </div>
                     <h3 className="profile-card-name">{userProfile?.name}</h3>
                     <span className="badge badge-primary">{getRoleLabel(userProfile?.role)}</span>
