@@ -107,12 +107,15 @@ const RestaurantDashboard = () => {
             case 'today': from = businessTzDate(year, month, day); break;
             case 'yesterday': from = businessTzDate(year, month, day - 1); break;
             case '3days': from = new Date(now.getTime() - 3 * 86400000); break;
+            case '7d':
             case 'week': from = new Date(now.getTime() - 7 * 86400000); break;
+            case '15d': from = new Date(now.getTime() - 15 * 86400000); break;
+            case '30d':
             case 'month': from = new Date(now.getTime() - 30 * 86400000); break;
             case 'custom': from = customFrom ? businessTzDate(
                 ...customFrom.split('-').map((v, i) => i === 1 ? Number(v) - 1 : Number(v))
             ) : new Date(0); break;
-            default: from = new Date(0);
+            default: from = new Date(now.getTime() - 30 * 86400000);
         }
         let to;
         if (dateRange === 'yesterday') {
@@ -134,9 +137,43 @@ const RestaurantDashboard = () => {
         });
     }, [getDateRangeFilter]);
 
+    /* ─── independent EPOS date filter state (default: today) ─── */
+    const [eposDateRange, setEposDateRange] = useState('today');
+    const [eposCustomFrom, setEposCustomFrom] = useState('');
+    const [eposCustomTo, setEposCustomTo] = useState('');
+
+    const getEposDateRangeFilter = useCallback(() => {
+        const { year, month, day, now } = getNowInBusinessTz();
+        let from;
+        switch (eposDateRange) {
+            case 'today': from = businessTzDate(year, month, day); break;
+            case 'yesterday': from = businessTzDate(year, month, day - 1); break;
+            case '3days': from = new Date(now.getTime() - 3 * 86400000); break;
+            case '7d':
+            case 'week': from = new Date(now.getTime() - 7 * 86400000); break;
+            case '15d': from = new Date(now.getTime() - 15 * 86400000); break;
+            case '30d':
+            case 'month': from = new Date(now.getTime() - 30 * 86400000); break;
+            case 'custom': from = eposCustomFrom ? businessTzDate(
+                ...eposCustomFrom.split('-').map((v, i) => i === 1 ? Number(v) - 1 : Number(v))
+            ) : new Date(0); break;
+            default: from = businessTzDate(year, month, day);
+        }
+        let to;
+        if (eposDateRange === 'yesterday') {
+            to = businessTzDate(year, month, day - 1, 23, 59, 59, 999);
+        } else if (eposDateRange === 'custom' && eposCustomTo) {
+            const [cy, cm, cd] = eposCustomTo.split('-').map(Number);
+            to = businessTzDate(cy, cm - 1, cd, 23, 59, 59, 999);
+        } else {
+            to = now;
+        }
+        return { from, to };
+    }, [eposDateRange, eposCustomFrom, eposCustomTo, getNowInBusinessTz, businessTzDate]);
+
     /* ─── filtered EPOS events (uses order_date first — the business date of the sale) ─── */
     const filteredEposEvents = useMemo(() => {
-        const { from, to } = getDateRangeFilter();
+        const { from, to } = getEposDateRangeFilter();
         return eposEvents
             .filter(e => e.processing_status === 'processed' || e.processing_status === 'has_unmapped')
             .filter(e => {
@@ -146,7 +183,7 @@ const RestaurantDashboard = () => {
                         : null;
                 return d && d >= from && d <= to;
             });
-    }, [eposEvents, getDateRangeFilter]);
+    }, [eposEvents, getEposDateRangeFilter]);
 
     /* ═══════════════════════════════════════ FETCH ═══ */
     const fetchAll = useCallback(async () => {
@@ -1289,6 +1326,36 @@ const RestaurantDashboard = () => {
                     <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: -8 }}>
                         Revenue, top sellers, and sales trends from live EPOS data
                     </p>
+                </div>
+
+                {/* ═══ EPOS PERIOD FILTER BAR (Individual Restaurant Scope — independent state defaulting to Today) ═══ */}
+                <div className="dash-filter-bar" style={{ margin: 0 }}>
+                    <div className="dash-filter-section">
+                        <MdFilterList className="dash-filter-icon" />
+                        <span className="dash-filter-label">PERIOD:</span>
+                        <div className="dash-filter-presets">
+                            {[
+                                { key: 'today', label: 'Today' },
+                                { key: '7d', label: 'Last 7 Days' },
+                                { key: '15d', label: 'Last 15 Days' },
+                                { key: '30d', label: 'Last 30 Days' },
+                                { key: 'custom', label: 'Custom' },
+                            ].map(f => (
+                                <button key={f.key} className={`dash-filter-btn ${eposDateRange === f.key ? 'active' : ''}`}
+                                    onClick={() => setEposDateRange(f.key)}>
+                                    {f.key === 'custom' ? '📅 Custom' : f.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    {eposDateRange === 'custom' && (
+                        <div className="dash-filter-custom">
+                            <label>From: <input type="date" className="dash-date-input" value={eposCustomFrom}
+                                onChange={e => setEposCustomFrom(e.target.value)} /></label>
+                            <label>To: <input type="date" className="dash-date-input" value={eposCustomTo}
+                                onChange={e => setEposCustomTo(e.target.value)} /></label>
+                        </div>
+                    )}
                 </div>
 
                 {!eposData ? (

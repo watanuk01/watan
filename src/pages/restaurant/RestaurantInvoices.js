@@ -28,6 +28,7 @@ const RestaurantInvoices = () => {
     const [invoices, setInvoices] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
+    const [statusFilter, setStatusFilter] = useState('all');
     const [dateFrom, setDateFrom] = useState('');
     const [dateTo, setDateTo] = useState('');
     const [viewInvoice, setViewInvoice] = useState(null);
@@ -46,6 +47,7 @@ const RestaurantInvoices = () => {
             const filters = { restaurant_id: restaurantId };
             if (dateFrom) filters.date_from = dateFrom;
             if (dateTo) filters.date_to = dateTo;
+            if (statusFilter !== 'all') filters.status = statusFilter;
             const data = await getInvoices(filters);
             setInvoices(data);
             const sup = await getSupplierDetails();
@@ -56,23 +58,29 @@ const RestaurantInvoices = () => {
         } finally {
             setLoading(false);
         }
-    }, [restaurantId, dateFrom, dateTo]);
+    }, [restaurantId, dateFrom, dateTo, statusFilter]);
 
     useEffect(() => { fetchData(); }, [fetchData]);
 
     // ── Filtered ──
-    const filteredInvoices = searchQuery
-        ? invoices.filter(inv => {
+    const filteredInvoices = (() => {
+        let result = invoices;
+        if (statusFilter !== 'all') {
+            const targetStatus = statusFilter.toLowerCase();
+            result = result.filter(inv => (inv.status || 'issued').toLowerCase() === targetStatus);
+        }
+        if (searchQuery) {
             const q = searchQuery.toLowerCase();
-            return (
+            result = result.filter(inv =>
                 inv.invoice_number?.toLowerCase().includes(q) ||
                 inv.order_number?.toLowerCase().includes(q)
             );
-        })
-        : invoices;
+        }
+        return result;
+    })();
 
     // Reset page on filter change
-    useEffect(() => { setCurrentPage(1); }, [searchQuery, dateFrom, dateTo]);
+    useEffect(() => { setCurrentPage(1); }, [searchQuery, statusFilter, dateFrom, dateTo]);
 
     const paginatedInvoices = filteredInvoices.slice(
         (currentPage - 1) * itemsPerPage,
@@ -111,9 +119,13 @@ const RestaurantInvoices = () => {
 
     // ── Status badge ──
     const getStatusBadge = (status) => {
-        switch (status) {
+        const s = (status || 'issued').toLowerCase();
+        switch (s) {
             case 'issued': return <span className="badge badge-info"><MdCheckCircle /> Issued</span>;
             case 'paid': return <span className="badge badge-success"><MdCheckCircle /> Paid</span>;
+            case 'draft': return <span className="badge badge-warning">Draft</span>;
+            case 'cancelled':
+            case 'void': return <span className="badge badge-danger">Void</span>;
             default: return <span className="badge badge-muted">{status || '—'}</span>;
         }
     };
@@ -164,6 +176,17 @@ const RestaurantInvoices = () => {
                     )}
                 </div>
                 <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
+                    <select
+                        className="form-input"
+                        value={statusFilter}
+                        onChange={e => setStatusFilter(e.target.value)}
+                        style={{ width: 130, fontSize: 'var(--text-sm)' }}
+                    >
+                        <option value="all">All Status</option>
+                        <option value="issued">Issued</option>
+                        <option value="paid">Paid</option>
+                        <option value="draft">Draft</option>
+                    </select>
                     <input
                         type="date"
                         className="form-input"

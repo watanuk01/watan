@@ -58,8 +58,24 @@ export const getPresetDates = (presetId) => {
 let _orderCache = null;
 let _wasteCache = null;
 let _invoiceCache = null;
+let _eposCache = null;
+let _vendorCache = null;
+let _batchCache = null;
+let _inventoryItemsCache = null;
+let _restaurantListCache = null;
+let _productionCache = null;
 
-export const clearCache = () => { _orderCache = null; _wasteCache = null; _invoiceCache = null; };
+export const clearCache = () => {
+    _orderCache = null;
+    _wasteCache = null;
+    _invoiceCache = null;
+    _eposCache = null;
+    _vendorCache = null;
+    _batchCache = null;
+    _inventoryItemsCache = null;
+    _restaurantListCache = null;
+    _productionCache = null;
+};
 
 const getOrders = async () => {
     if (_orderCache) return _orderCache;
@@ -75,14 +91,90 @@ const getWaste = async () => {
     return _wasteCache;
 };
 
+const getEpos = async () => {
+    if (_eposCache) return _eposCache;
+    const snap = await getDocs(collection(db, 'epos_events'));
+    _eposCache = snap.docs.map(d => {
+        const data = d.data();
+        const dateVal = data.order_date || data.received_at || data.created_at || data.event_date || data.timestamp;
+        return {
+            id: d.id,
+            ...data,
+            received_at: toDate(dateVal),
+        };
+    });
+    return _eposCache;
+};
+
+const getPurchaseOrders = async () => {
+    if (_vendorCache) return _vendorCache;
+    const snap = await getDocs(collection(db, 'purchase_orders'));
+    _vendorCache = snap.docs.map(d => {
+        const data = d.data();
+        const dateVal = data.created_at || data.order_date || data.expected_delivery_date || data.received_at || data.date;
+        return {
+            id: d.id,
+            ...data,
+            created_at: toDate(dateVal),
+        };
+    });
+    return _vendorCache;
+};
+
+const getBatches = async () => {
+    if (_batchCache) return _batchCache;
+    const snap = await getDocs(collection(db, 'inventory_batches'));
+    _batchCache = snap.docs.map(d => {
+        const data = d.data();
+        const dateVal = data.created_at || data.received_at || data.production_date || data.date || data.expiry_date;
+        return {
+            id: d.id,
+            ...data,
+            created_at: toDate(dateVal),
+            expiry_date: toDate(data.expiry_date),
+        };
+    });
+    return _batchCache;
+};
+
+const getInventoryItems = async () => {
+    if (_inventoryItemsCache) return _inventoryItemsCache;
+    const snap = await getDocs(query(collection(db, 'inventory_items'), where('status', '==', 'active')));
+    _inventoryItemsCache = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    return _inventoryItemsCache;
+};
+
+const getProductions = async () => {
+    if (_productionCache) return _productionCache;
+    const snap = await getDocs(collection(db, 'productions'));
+    _productionCache = snap.docs.map(d => ({
+        id: d.id,
+        ...d.data(),
+        created_at: toDate(d.data().created_at),
+        completed_at: toDate(d.data().completed_at),
+    }));
+    return _productionCache;
+};
+
 // Apply filters to an array of records (must have created_at as Date)
 const applyFilters = (rows, { dateFrom, dateTo, restaurantId, restaurantName } = {}) =>
     rows.filter(r => {
         const ca = r.created_at;
         if (dateFrom && ca && ca < dateFrom) return false;
         if (dateTo && ca && ca > dateTo) return false;
-        if (restaurantId && r.restaurant_id && r.restaurant_id !== restaurantId) return false;
-        if (restaurantName && !restaurantId && r.restaurant_name && r.restaurant_name !== restaurantName) return false;
+
+        if (restaurantId || restaurantName) {
+            const rid = (r.restaurant_id || r.location_id || r.id || '').toLowerCase();
+            const rname = (r.restaurant_name || r.location_name || r.name || '').toLowerCase();
+            const targetId = (restaurantId || '').toLowerCase();
+            const targetName = (restaurantName || '').toLowerCase();
+
+            const matchesId = targetId && (rid === targetId || rname === targetId || rid.includes(targetId) || targetId.includes(rid));
+            const matchesName = targetName && (rname === targetName || rid === targetName || rname.includes(targetName) || targetName.includes(rname));
+
+            if (!matchesId && !matchesName) return false;
+        }
+
         return true;
     });
 
@@ -107,10 +199,10 @@ const getInvoices = async () => {
 
 export const fetchDashboardMetrics = async (filters = {}) => {
     const [items, orders, waste, batches, invoices] = await Promise.all([
-        getDocs(query(collection(db, 'inventory_items'), where('status', '==', 'active'))),
+        getInventoryItems(),
         getOrders(),
         getWaste(),
-        getDocs(collection(db, 'inventory_batches')),
+        getBatches(),
         getInvoices(),
     ]);
 
@@ -125,8 +217,7 @@ export const fetchDashboardMetrics = async (filters = {}) => {
 
     // ─── Inventory (never filtered by restaurant — CK-level) ───
     let inventoryValue = 0, lowStockCount = 0;
-    items.docs.forEach(d => {
-        const item = d.data();
+    items.forEach(item => {
         inventoryValue += (item.current_stock || 0) * (item.cost_price || 0);
         if (item.current_stock <= (item.low_stock_threshold || item.min_stock || 0)) lowStockCount++;
     });
@@ -156,8 +247,7 @@ export const fetchDashboardMetrics = async (filters = {}) => {
     filteredWaste.forEach(w => { wasteInRange += w.total_value || w.estimated_value || 0; });
 
     // ─── Near-expiry batches ───
-    const nearExpiryBatches = batches.docs
-        .map(d => ({ id: d.id, ...d.data(), expiry_date: toDate(d.data().expiry_date) }))
+    const nearExpiryBatches = batches
         .filter(b => b.status === 'active' && b.expiry_date && b.expiry_date > now && b.expiry_date <= in48h)
         .sort((a, b) => a.expiry_date - b.expiry_date)
         .slice(0, 8);
@@ -256,10 +346,9 @@ export const fetchDashboardMetrics = async (filters = {}) => {
 
 /** Inventory value grouped by category (pie) — not filterable by date */
 export const fetchInventoryByCategory = async () => {
-    const snap = await getDocs(query(collection(db, 'inventory_items'), where('status', '==', 'active')));
+    const items = await getInventoryItems();
     const map = {};
-    snap.docs.forEach(d => {
-        const item = d.data();
+    items.forEach(item => {
         const cat = item.category_name || 'Uncategorised';
         const val = (item.current_stock || 0) * (item.cost_price || 0);
         map[cat] = (map[cat] || 0) + val;
@@ -298,30 +387,7 @@ export const fetchDailyOrderVolume = async (filters = {}) => {
     return Object.values(dayMap);
 };
 
-/** Top N ordered items — respects filters */
-export const fetchTopOrderedItems = async (limit = 10, filters = {}) => {
-    const allOrders = await getOrders();
-    const filtered = applyFilters(allOrders, filters);
-    const map = {};
-    const categorySet = new Set();
-    filtered.forEach(o => {
-        (o.items || []).forEach(item => {
-            const cat = item.category_name || 'Uncategorised';
-            categorySet.add(cat);
-            if (!map[item.item_name]) map[item.item_name] = { name: item.item_name, quantity: 0, value: 0, unit: item.unit || 'units', category: cat };
-            map[item.item_name].quantity += item.quantity || 0;
-            map[item.item_name].value += item.line_total || 0;
-            // Keep updating unit/category from latest occurrence
-            if (item.unit) map[item.item_name].unit = item.unit;
-            if (item.category_name) map[item.item_name].category = item.category_name;
-        });
-    });
-    const items = Object.values(map)
-        .sort((a, b) => b.quantity - a.quantity)
-        .slice(0, limit)
-        .map(i => ({ ...i, quantity: Math.round(i.quantity * 10) / 10, value: Math.round(i.value * 100) / 100 }));
-    return { items, categories: [...categorySet].sort() };
-};
+
 
 /**
  * Item Daily Trend — top N items' daily quantities over the date range.
@@ -467,11 +533,25 @@ export const fetchWasteByCategory = async (filters = {}) => {
 // ════════════════════════════════════════════════════════
 
 export const fetchRestaurantComparison = async (filters = {}) => {
-    const [allOrders, allWaste] = await Promise.all([getOrders(), getWaste()]);
+    const [allOrders, allWaste, allEpos, restaurantList] = await Promise.all([
+        getOrders(),
+        getWaste(),
+        getEpos(),
+        fetchRestaurantList(),
+    ]);
+
     const { restaurantId, restaurantName, ...dateFilters } = filters;
     const filteredOrders = applyFilters(allOrders, dateFilters);
     const filteredWaste = applyFilters(allWaste, dateFilters);
     const map = {};
+
+    // Initialize map with all active restaurants so table always lists all branches
+    restaurantList.forEach(r => {
+        const name = r.restaurant_name || r.name;
+        if (name && !map[name]) {
+            map[name] = { name, orders: 0, orderValue: 0, wasteValue: 0, itemsOrdered: {}, wasteItems: {} };
+        }
+    });
 
     filteredOrders.forEach(o => {
         const name = o.restaurant_name || 'Unknown';
@@ -480,6 +560,7 @@ export const fetchRestaurantComparison = async (filters = {}) => {
         map[name].orderValue += o.total || 0;
         (o.items || []).forEach(item => {
             const iname = item.item_name;
+            if (!iname) return;
             if (!map[name].itemsOrdered[iname]) map[name].itemsOrdered[iname] = { name: iname, quantity: 0, value: 0 };
             map[name].itemsOrdered[iname].quantity += item.quantity || 0;
             map[name].itemsOrdered[iname].value += item.line_total || 0;
@@ -487,14 +568,12 @@ export const fetchRestaurantComparison = async (filters = {}) => {
     });
 
     filteredWaste.forEach(w => {
-        // Match waste to restaurant: by location_type='restaurant' OR by location_name matching a known restaurant
         const name = w.location_name || 'Unknown';
         const isRestaurantWaste = w.location_type === 'restaurant' || map[name];
         if (!isRestaurantWaste) return;
         if (!map[name]) map[name] = { name, orders: 0, orderValue: 0, wasteValue: 0, itemsOrdered: {}, wasteItems: {} };
         const val = w.total_value || w.estimated_value || 0;
         map[name].wasteValue += val;
-        // Track waste items per restaurant
         const wname = w.item_name || w.category || 'Unknown';
         if (!map[name].wasteItems[wname]) map[name].wasteItems[wname] = { name: wname, value: 0, quantity: 0 };
         map[name].wasteItems[wname].value += val;
@@ -502,36 +581,68 @@ export const fetchRestaurantComparison = async (filters = {}) => {
     });
 
     // Fetch EPOS events for all restaurants (cross-restaurant aggregation)
+    // Apply date filters to EPOS events using converted Date objects
     let eposMap = {};
-    try {
-        const eposSnap = await getDocs(collection(db, 'epos_events'));
-        eposSnap.docs.forEach(d => {
-            const data = d.data();
-            const restId = data.restaurant_id || 'unknown';
-            const restName = data.restaurant_name || restId;
-            if (!eposMap[restName]) eposMap[restName] = 0;
-            // Sum revenue from processing results
-            const results = data.processing_result?.results || [];
-            results.forEach(r => {
-                if (r.status === 'processed') {
-                    const price = r.portion_selling_price || 0;
-                    const qty = r.quantity_sold || 0;
-                    eposMap[restName] += price * qty;
-                }
-            });
-            // Also check line_items total as fallback
-            if (results.length === 0 && data.line_items) {
-                data.line_items.forEach(li => {
-                    eposMap[restName] += (li.total || li.price || 0) * (li.quantity || 1);
-                });
+    allEpos.forEach(data => {
+        // Date-filter EPOS events
+        const ed = data.received_at ? toDate(data.received_at)
+            : data.order_date ? toDate(data.order_date)
+            : data.created_at ? toDate(data.created_at)
+            : null;
+        if (!ed || isNaN(ed.getTime())) return;
+        if (dateFilters.dateFrom && ed < dateFilters.dateFrom) return;
+        if (dateFilters.dateTo && ed > dateFilters.dateTo) return;
+
+        let saleValue = 0;
+        const results = data.processing_result?.results || [];
+        results.forEach(r => {
+            if (r.status === 'processed') {
+                const price = Number(r.portion_selling_price || r.price) || 0;
+                const qty = Number(r.quantity_sold || r.quantity) || 0;
+                saleValue += price * qty;
             }
         });
-    } catch (e) {
-        console.warn('Could not fetch EPOS events for comparison:', e.message);
+        // Fallback for events without processing_result
+        if (saleValue === 0) {
+            saleValue = Number(data.total_amount || data.grand_total || data.total || data.order_total) || 0;
+        }
+        if (saleValue === 0 && data.line_items) {
+            (data.line_items || []).forEach(li => {
+                saleValue += (Number(li.total || li.price) || 0) * (Number(li.quantity) || 1);
+            });
+        }
+
+        const rId = (data.restaurant_id || data._restaurant_id || '').toLowerCase().trim();
+        const rName = (data.restaurant_name || data.location_name || rId).toLowerCase().trim();
+
+        if (rName) eposMap[rName] = (eposMap[rName] || 0) + saleValue;
+        if (rId && rId !== rName) eposMap[rId] = (eposMap[rId] || 0) + saleValue;
+    });
+
+    let resultList = Object.values(map);
+
+    // If a specific restaurant is selected in the filter dropdown, filter to only that restaurant
+    if (restaurantId || restaurantName) {
+        resultList = resultList.filter(r => {
+            if (restaurantName && r.name === restaurantName) return true;
+            const found = restaurantList.find(rl => rl.restaurant_name === r.name);
+            if (found && restaurantId && (found.restaurant_id === restaurantId || found.id === restaurantId)) return true;
+            return false;
+        });
     }
 
-    return Object.values(map).map(r => {
-        const eposSaleValue = Math.round((eposMap[r.name] || 0) * 100) / 100;
+    return resultList.map(r => {
+        const nameKey = (r.name || '').toLowerCase().trim();
+        const idKey = (r.restaurant_id || r.id || '').toLowerCase().trim();
+        let rawEposSale = eposMap[nameKey] ?? eposMap[idKey] ?? 0;
+        if (!rawEposSale && nameKey) {
+            Object.keys(eposMap).forEach(key => {
+                if (key && (key.includes(nameKey) || nameKey.includes(key))) {
+                    rawEposSale += eposMap[key];
+                }
+            });
+        }
+        const eposSaleValue = Math.round(rawEposSale * 100) / 100;
         const topItemsList = Object.values(r.itemsOrdered)
             .sort((a, b) => b.quantity - a.quantity)
             .slice(0, 10);
@@ -539,7 +650,8 @@ export const fetchRestaurantComparison = async (filters = {}) => {
             .sort((a, b) => b.value - a.value)
             .slice(0, 5);
         return {
-            name: r.name, orders: r.orders,
+            name: r.name,
+            orders: r.orders,
             orderValue: Math.round(r.orderValue * 100) / 100,
             avgOrderValue: r.orders > 0 ? Math.round((r.orderValue / r.orders) * 100) / 100 : 0,
             wasteValue: Math.round(r.wasteValue * 100) / 100,
@@ -553,33 +665,92 @@ export const fetchRestaurantComparison = async (filters = {}) => {
     }).sort((a, b) => b.orderValue - a.orderValue);
 };
 
-export const fetchVendorAnalysis = async () => {
-    const snap = await getDocs(collection(db, 'purchase_orders'));
+/** Top N ordered items — respects filters */
+export const fetchTopOrderedItems = async (limit = 10, filters = {}) => {
+    const allOrders = await getOrders();
+    const filtered = applyFilters(allOrders, filters);
     const map = {};
-    snap.docs.forEach(d => {
-        const data = d.data();
-        const vendor = data.vendor || data.vendor_name || data.supplier_name || 'Unknown';
+    const categorySet = new Set();
+
+    filtered.forEach(o => {
+        (o.items || []).forEach(item => {
+            const iname = item.item_name || item.name || item.title || item.product_name;
+            if (!iname) return;
+            const cat = item.category_name || item.category || 'Uncategorised';
+            categorySet.add(cat);
+
+            if (!map[iname]) {
+                map[iname] = {
+                    name: iname,
+                    quantity: 0,
+                    value: 0,
+                    unit: item.unit || item.base_unit || 'units',
+                    category: cat,
+                };
+            }
+
+            const qty = Number(item.quantity || item.qty || 1);
+            const val = Number(item.line_total ?? item.total ?? ((item.selling_price || item.price || item.cost_price || 0) * qty));
+
+            map[iname].quantity += qty;
+            map[iname].value += val;
+
+            if (item.unit) map[iname].unit = item.unit;
+            if (cat && cat !== 'Uncategorised') map[iname].category = cat;
+        });
+    });
+
+    const items = Object.values(map)
+        .sort((a, b) => b.quantity - a.quantity)
+        .slice(0, limit)
+        .map(i => ({
+            ...i,
+            quantity: Math.round(i.quantity * 100) / 100,
+            value: Math.round(i.value * 100) / 100,
+        }));
+
+    return { items, categories: [...categorySet].sort() };
+};
+
+export const fetchVendorAnalysis = async (filters = {}) => {
+    const orders = await getPurchaseOrders();
+
+    // 1. Try filtering by date range (POs are Central Kitchen level, so ignore branch restaurant filter)
+    const dateFiltersOnly = { dateFrom: filters.dateFrom, dateTo: filters.dateTo };
+    let filtered = applyFilters(orders, dateFiltersOnly);
+
+    // 2. If no purchase orders match the narrow date window (e.g. Today), fallback to all purchase orders
+    if (!filtered || filtered.length === 0) {
+        filtered = orders;
+    }
+
+    const map = {};
+    filtered.forEach(data => {
+        const vendor = data.vendor || data.vendor_name || data.supplier_name || 'Unknown Vendor';
         if (!map[vendor]) map[vendor] = { name: vendor, orders: 0, value: 0, items: 0 };
         map[vendor].orders++;
-        map[vendor].value += data.total_amount || data.total || 0;
+        map[vendor].value += Number(data.total_amount || data.total || 0);
         map[vendor].items += (data.items || []).length;
     });
+
     return Object.values(map)
         .sort((a, b) => b.value - a.value)
         .map(v => ({ ...v, value: Math.round(v.value * 100) / 100 }));
 };
 
-export const fetchBatchAnalytics = async () => {
-    const snap = await getDocs(collection(db, 'inventory_batches'));
+export const fetchBatchAnalytics = async (filters = {}) => {
+    const allBatches = await getBatches();
+    const filteredBatches = applyFilters(allBatches, filters);
+
     const now = new Date();
     const weekStart = startOfWeek();
+    const todayStart = startOfDay();
     let totalBatches = 0, activeBatches = 0, expiredBatches = 0;
     let expiredValue = 0, totalUsed = 0, totalReceived = 0;
     let doneToday = 0, doneWeek = 0;
     const expiredList = [];
 
-    snap.docs.forEach(d => {
-        const b = { id: d.id, ...d.data(), expiry_date: toDate(d.data().expiry_date), created_at: toDate(d.data().created_at) };
+    filteredBatches.forEach(b => {
         totalBatches++;
         if (b.status === 'active') activeBatches++;
         if (b.expiry_date && b.expiry_date < now && b.status !== 'active') {
@@ -587,14 +758,14 @@ export const fetchBatchAnalytics = async () => {
             const remaining = b.current_quantity || 0;
             const cost = remaining * (b.cost_price || 0);
             expiredValue += cost;
-            if (cost > 0) expiredList.push({ id: b.id, item_name: b.item_name, batch_number: b.batch_number, quantity: remaining, unit: b.unit, value: cost, expiry_date: b.expiry_date });
+            if (cost > 0) expiredList.push({ id: b.id, item_name: b.item_name || b.name || 'Unknown Item', batch_number: b.batch_number || '—', quantity: remaining, unit: b.unit || 'units', value: cost, expiry_date: b.expiry_date });
         }
         if (b.initial_quantity > 0) {
             totalReceived += b.initial_quantity;
             totalUsed += (b.initial_quantity - (b.current_quantity || 0));
         }
         if (b.created_at && b.item_type === 'cooked_meat') {
-            if (b.created_at >= startOfDay()) doneToday++;
+            if (b.created_at >= todayStart) doneToday++;
             if (b.created_at >= weekStart) doneWeek++;
         }
     });
@@ -654,20 +825,91 @@ export const fetchRestaurantDirectory = async () => {
 
 /**
  * Fetch restaurant list for filter dropdowns.
+ * Extracts unique restaurants across users, orders, waste, and EPOS.
  * Returns [{ id, name, restaurant_name, restaurant_id }]
  */
 export const fetchRestaurantList = async () => {
-    const snap = await getDocs(query(
-        collection(db, 'users'),
-        where('role', 'in', ['restaurant_manager', 'restaurant_manager_non_managed'])
-    ));
-    return snap.docs.map(d => {
-        const data = d.data();
-        return {
-            id: d.id,
-            name: data.name,
-            restaurant_name: data.restaurant_name || data.name,
-            restaurant_id: data.restaurant_id || d.id,
-        };
-    }).sort((a, b) => (a.restaurant_name || '').localeCompare(b.restaurant_name || ''));
+    if (_restaurantListCache) return _restaurantListCache;
+
+    try {
+        const [usersSnap, allOrders, allWaste, allEpos] = await Promise.all([
+            getDocs(collection(db, 'users')),
+            getOrders(),
+            getWaste(),
+            getEpos(),
+        ]);
+
+        const restMap = new Map();
+
+        // 1. Users
+        usersSnap.docs.forEach(d => {
+            const u = d.data();
+            const rName = u.restaurant_name || (u.role?.includes('restaurant') ? u.name : null);
+            if (rName) {
+                const key = rName.trim().toLowerCase();
+                restMap.set(key, {
+                    id: d.id,
+                    name: u.name || rName.trim(),
+                    restaurant_name: rName.trim(),
+                    restaurant_id: u.restaurant_id || d.id,
+                });
+            }
+        });
+
+        // 2. Orders
+        allOrders.forEach(o => {
+            const rName = o.restaurant_name;
+            if (rName) {
+                const key = rName.trim().toLowerCase();
+                if (!restMap.has(key)) {
+                    restMap.set(key, {
+                        id: o.restaurant_id || key,
+                        name: rName.trim(),
+                        restaurant_name: rName.trim(),
+                        restaurant_id: o.restaurant_id || key,
+                    });
+                }
+            }
+        });
+
+        // 3. Waste
+        allWaste.forEach(w => {
+            const rName = w.location_name;
+            if (rName && w.location_type === 'restaurant') {
+                const key = rName.trim().toLowerCase();
+                if (!restMap.has(key)) {
+                    restMap.set(key, {
+                        id: w.location_id || key,
+                        name: rName.trim(),
+                        restaurant_name: rName.trim(),
+                        restaurant_id: w.location_id || key,
+                    });
+                }
+            }
+        });
+
+        // 4. EPOS
+        allEpos.forEach(e => {
+            const rName = e.restaurant_name;
+            if (rName) {
+                const key = rName.trim().toLowerCase();
+                if (!restMap.has(key)) {
+                    restMap.set(key, {
+                        id: e.restaurant_id || key,
+                        name: rName.trim(),
+                        restaurant_name: rName.trim(),
+                        restaurant_id: e.restaurant_id || key,
+                    });
+                }
+            }
+        });
+
+        _restaurantListCache = Array.from(restMap.values())
+            .sort((a, b) => (a.restaurant_name || '').localeCompare(b.restaurant_name || ''));
+
+        return _restaurantListCache;
+    } catch (err) {
+        console.warn('fetchRestaurantList error, fallback to empty array:', err);
+        return [];
+    }
 };

@@ -22,6 +22,8 @@ import {
     endOfDay,
 } from '../../services/analyticsService';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import toast from 'react-hot-toast';
 import '../dashboard/Dashboard.css';
 
@@ -171,32 +173,32 @@ const RestaurantComparison = ({ data }) => {
             <div className="kpi-row" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
                 <KpiCard
                     label="Highest Order Value"
-                    value={highestOrder ? formatCurrency(highestOrder.orderValue) : '—'}
-                    sub={highestOrder?.name || ''}
+                    value={highestOrder && highestOrder.orderValue > 0 ? formatCurrency(highestOrder.orderValue) : '£0.00'}
+                    sub={highestOrder && highestOrder.orderValue > 0 ? highestOrder.name : 'No orders in period'}
                     color="#22c55e"
                 />
                 <KpiCard
                     label="Lowest Order Value"
-                    value={lowestOrder ? formatCurrency(lowestOrder.orderValue) : '—'}
-                    sub={lowestOrder?.name || ''}
+                    value={lowestOrder && lowestOrder.orderValue > 0 ? formatCurrency(lowestOrder.orderValue) : '£0.00'}
+                    sub={lowestOrder && lowestOrder.orderValue > 0 ? lowestOrder.name : 'No orders in period'}
                     color="#f59e0b"
                 />
                 <KpiCard
                     label="Highest EPOS Sale"
-                    value={highestEpos && highestEpos.eposSaleValue > 0 ? formatCurrency(highestEpos.eposSaleValue) : '—'}
-                    sub={highestEpos?.eposSaleValue > 0 ? highestEpos.name : 'No EPOS data'}
+                    value={highestEpos && highestEpos.eposSaleValue > 0 ? formatCurrency(highestEpos.eposSaleValue) : '£0.00'}
+                    sub={highestEpos && highestEpos.eposSaleValue > 0 ? highestEpos.name : 'No EPOS data'}
                     color="#3b82f6"
                 />
                 <KpiCard
                     label="Lowest EPOS Sale"
-                    value={lowestEpos ? formatCurrency(lowestEpos.eposSaleValue) : '—'}
-                    sub={lowestEpos?.name || 'No EPOS data'}
+                    value={lowestEpos && lowestEpos.eposSaleValue > 0 ? formatCurrency(lowestEpos.eposSaleValue) : '£0.00'}
+                    sub={lowestEpos && lowestEpos.eposSaleValue > 0 ? lowestEpos.name : 'No EPOS data'}
                     color="#8b5cf6"
                 />
                 <KpiCard
                     label="Highest Wastage"
-                    value={highestWaste && highestWaste.wasteValue > 0 ? formatCurrency(highestWaste.wasteValue) : '—'}
-                    sub={highestWaste?.wasteValue > 0 ? highestWaste.name : 'No waste data'}
+                    value={highestWaste && highestWaste.wasteValue > 0 ? formatCurrency(highestWaste.wasteValue) : '£0.00'}
+                    sub={highestWaste && highestWaste.wasteValue > 0 ? highestWaste.name : 'No waste data'}
                     color="#ef4444"
                 />
             </div>
@@ -628,7 +630,7 @@ const ReportsPage = () => {
     const [batches, setBatches] = useState(null);
 
     // Filter state
-    const [datePreset, setDatePreset] = useState('this_month');
+    const [datePreset, setDatePreset] = useState('today');
     const [customFrom, setCustomFrom] = useState('');
     const [customTo, setCustomTo] = useState('');
     const [appliedCustomFrom, setAppliedCustomFrom] = useState('');
@@ -660,10 +662,12 @@ const ReportsPage = () => {
             if (dateTo) filters.dateTo = dateTo;
         }
         if (selectedRestaurant) {
-            const found = restaurantOptions.find(r => r.restaurant_id === selectedRestaurant);
+            const found = restaurantOptions.find(r => r.restaurant_id === selectedRestaurant || r.id === selectedRestaurant);
             if (found) {
-                filters.restaurantId = found.restaurant_id;
-                filters.restaurantName = found.restaurant_name;
+                filters.restaurantId = found.restaurant_id || found.id;
+                filters.restaurantName = found.restaurant_name || found.name;
+            } else {
+                filters.restaurantId = selectedRestaurant;
             }
         }
         return filters;
@@ -679,10 +683,10 @@ const ReportsPage = () => {
                 const result = await fetchTopOrderedItems(50, filters);
                 setItems(result.items);
                 setItemCategories(result.categories);
-            } else if (t === 'vendors' && !vendors) {
-                setVendors(await fetchVendorAnalysis());
-            } else if (t === 'batches' && !batches) {
-                setBatches(await fetchBatchAnalytics());
+            } else if (t === 'vendors') {
+                setVendors(await fetchVendorAnalysis(filters));
+            } else if (t === 'batches') {
+                setBatches(await fetchBatchAnalytics(filters));
             }
         } catch (e) {
             toast.error('Failed to load analytics data');
@@ -690,12 +694,12 @@ const ReportsPage = () => {
         } finally {
             setLoading(false);
         }
-    }, [getFilters, vendors, batches]);
+    }, [getFilters]);
 
     // Reload on tab change or filter change
     useEffect(() => {
         loadTab(tab);
-    }, [tab, datePreset, appliedCustomFrom, appliedCustomTo, selectedRestaurant]); // eslint-disable-line
+    }, [tab, loadTab]);
 
     const handleRefresh = () => {
         clearCache();
@@ -706,40 +710,455 @@ const ReportsPage = () => {
         setTimeout(() => loadTab(tab), 50);
     };
 
-    // PDF Export
-    const handlePdfExport = async () => {
-        const el = reportRef.current;
-        if (!el) return;
+    // PDF Export — jsPDF + autoTable structured export covering ALL fields on the page
+    const handlePdfExport = () => {
         toast.loading('Generating PDF…', { id: 'pdf' });
         try {
-            const html2pdf = (await import('html2pdf.js')).default;
-            await html2pdf().set({
-                margin: [10, 10, 10, 10],
-                filename: `watan_report_${new Date().toISOString().slice(0, 10)}.pdf`,
-                image: { type: 'jpeg', quality: 0.95 },
-                html2canvas: { scale: 2, useCORS: true, backgroundColor: '#121218' },
-                jsPDF: { unit: 'mm', format: 'a3', orientation: 'landscape' },
-            }).from(el).save();
-            toast.success('PDF downloaded', { id: 'pdf' });
+            const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+            const gold = [201, 169, 110];
+            const dark = [30, 30, 46];
+            const pageW = doc.internal.pageSize.getWidth();
+
+            // ─ Header ─
+            doc.setFillColor(...dark);
+            doc.rect(0, 0, pageW, 20, 'F');
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(14);
+            doc.setTextColor(...gold);
+            doc.text('Watan CK — Reports & Analytics', 14, 13);
+            doc.setFontSize(10);
+            doc.setTextColor(220, 220, 220);
+            const tabLabel = TABS.find(t => t.id === tab)?.label || tab;
+            doc.text(tabLabel, pageW - 14, 13, { align: 'right' });
+
+            // ─ Filter context bar ─
+            doc.setFillColor(245, 247, 250);
+            doc.rect(0, 20, pageW, 10, 'F');
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9);
+            doc.setTextColor(80, 80, 90);
+            const dateStr = datePreset === 'custom'
+                ? `${appliedCustomFrom || '—'} to ${appliedCustomTo || '—'}`
+                : REPORT_PRESETS.find(p => p.id === datePreset)?.label || datePreset;
+            const restStr = selectedRestaurant
+                ? restaurantOptions.find(r => r.restaurant_id === selectedRestaurant || r.id === selectedRestaurant)?.restaurant_name || selectedRestaurant
+                : 'All Restaurants';
+            doc.text(`Period: ${dateStr}   |   Restaurant Filter: ${restStr}   |   Generated: ${new Date().toLocaleString('en-GB')}`, 14, 26);
+
+            let startY = 34;
+            const headStyles = { fillColor: gold, textColor: [30, 30, 30], fontStyle: 'bold', fontSize: 8 };
+            const bodyStyles = { fontSize: 8, textColor: [60, 60, 60] };
+
+            if (tab === 'restaurants' && restaurants?.length) {
+                const totalOrders = restaurants.reduce((s, r) => s + r.orders, 0);
+                const totalValue = restaurants.reduce((s, r) => s + r.orderValue, 0);
+                const totalWaste = restaurants.reduce((s, r) => s + r.wasteValue, 0);
+                const totalEpos = restaurants.reduce((s, r) => s + (r.eposSaleValue || 0), 0);
+
+                // 1. Aggregate Overview Bar
+                doc.setFontSize(9.5);
+                doc.setFont('helvetica', 'bold');
+                doc.setTextColor(30, 30, 46);
+                doc.text(`Aggregate Overview: ${restaurants.length} Restaurants  |  ${totalOrders} Total Orders  |  Order Value: ${formatCurrency(totalValue)}  |  EPOS Sale: ${formatCurrency(totalEpos)}  |  Waste: ${formatCurrency(totalWaste)}`, 14, startY);
+                startY += 6;
+
+                // 2. Comparison KPI Highlights
+                const sortedByOrder = [...restaurants].sort((a, b) => b.orderValue - a.orderValue);
+                const highestOrder = sortedByOrder[0];
+                const lowestOrder = [...restaurants].filter(r => r.orders > 0).sort((a, b) => a.orderValue - b.orderValue)[0];
+                const highestEpos = [...restaurants].sort((a, b) => (b.eposSaleValue || 0) - (a.eposSaleValue || 0))[0];
+                const lowestEpos = [...restaurants].filter(r => (r.eposSaleValue || 0) > 0).sort((a, b) => (a.eposSaleValue || 0) - (b.eposSaleValue || 0))[0];
+                const highestWaste = [...restaurants].sort((a, b) => b.wasteValue - a.wasteValue)[0];
+
+                doc.setFontSize(9.5);
+                doc.setFont('helvetica', 'bold');
+                doc.setTextColor(30, 30, 46);
+                doc.text('Key Performance Highlights & Extremes', 14, startY);
+                startY += 4;
+
+                autoTable(doc, {
+                    startY,
+                    head: [['Metric Highlight', 'Value', 'Restaurant / Branch']],
+                    body: [
+                        ['Highest Order Value', highestOrder && highestOrder.orderValue > 0 ? formatCurrency(highestOrder.orderValue) : '£0.00', highestOrder && highestOrder.orderValue > 0 ? highestOrder.name : 'No orders in period'],
+                        ['Lowest Order Value', lowestOrder && lowestOrder.orderValue > 0 ? formatCurrency(lowestOrder.orderValue) : '£0.00', lowestOrder && lowestOrder.orderValue > 0 ? lowestOrder.name : 'No orders in period'],
+                        ['Highest EPOS Sale', highestEpos && highestEpos.eposSaleValue > 0 ? formatCurrency(highestEpos.eposSaleValue) : '£0.00', highestEpos && highestEpos.eposSaleValue > 0 ? highestEpos.name : 'No EPOS data'],
+                        ['Lowest EPOS Sale', lowestEpos && lowestEpos.eposSaleValue > 0 ? formatCurrency(lowestEpos.eposSaleValue) : '£0.00', lowestEpos && lowestEpos.eposSaleValue > 0 ? lowestEpos.name : 'No EPOS data'],
+                        ['Highest Wastage', highestWaste && highestWaste.wasteValue > 0 ? formatCurrency(highestWaste.wasteValue) : '£0.00', highestWaste && highestWaste.wasteValue > 0 ? highestWaste.name : 'No waste data'],
+                    ],
+                    headStyles: { fillColor: [30, 30, 46], textColor: [201, 169, 110], fontStyle: 'bold', fontSize: 8 },
+                    bodyStyles,
+                    styles: { cellPadding: 2 },
+                });
+                startY = doc.lastAutoTable.finalY + 6;
+
+                // 3. Order Value by Restaurant Breakdown Table
+                doc.setFontSize(9.5);
+                doc.setFont('helvetica', 'bold');
+                doc.setTextColor(30, 30, 46);
+                doc.text('Order Value by Restaurant (Revenue Breakdown)', 14, startY);
+                startY += 4;
+
+                autoTable(doc, {
+                    startY,
+                    head: [['Rank', 'Restaurant Name', 'Total Order Value', '% of Total Revenue']],
+                    body: sortedByOrder.map((r, i) => [
+                        i + 1, r.name, formatCurrency(r.orderValue),
+                        `${totalValue > 0 ? Math.round(r.orderValue / totalValue * 100) : 0}%`
+                    ]),
+                    headStyles, bodyStyles,
+                    styles: { cellPadding: 2 },
+                });
+                startY = doc.lastAutoTable.finalY + 6;
+
+                // 4. Comprehensive Restaurant Summary Table
+                doc.setFontSize(9.5);
+                doc.setFont('helvetica', 'bold');
+                doc.setTextColor(30, 30, 46);
+                doc.text('Restaurant Performance Summary Table', 14, startY);
+                startY += 4;
+
+                autoTable(doc, {
+                    startY,
+                    head: [['#', 'Restaurant', 'Orders', 'Order Value', 'EPOS Sale', 'Difference', 'Avg Order', 'Waste Value', 'Waste %', 'Top Item']],
+                    body: restaurants.map((r, i) => [
+                        i + 1, r.name, r.orders,
+                        formatCurrency(r.orderValue), formatCurrency(r.eposSaleValue || 0),
+                        `${(r.difference || 0) >= 0 ? '+' : ''}${formatCurrency(r.difference || 0)}`,
+                        formatCurrency(r.avgOrderValue), formatCurrency(r.wasteValue),
+                        `${r.wastePercent}%`, r.topItem || '—',
+                    ]),
+                    headStyles, bodyStyles,
+                    styles: { cellPadding: 2.5 },
+                });
+            } else if (tab === 'items' && items?.length) {
+                const sorted = [...items].sort((a, b) => b.value - a.value);
+                const totalVal = sorted.reduce((s, it) => s + it.value, 0);
+                const totalQty = sorted.reduce((s, it) => s + it.quantity, 0);
+
+                doc.setFontSize(9.5);
+                doc.setFont('helvetica', 'bold');
+                doc.setTextColor(30, 30, 46);
+                doc.text(`Item Analytics Summary: ${sorted.length} Tracked Items  |  ${itemCategories?.length || 0} Categories  |  Total Qty: ${totalQty.toFixed(2)}  |  Total Revenue: ${formatCurrency(totalVal)}`, 14, startY);
+                startY += 6;
+
+                autoTable(doc, {
+                    startY,
+                    head: [['#', 'Item Name', 'Category', 'Quantity Sold', 'Total Revenue', '% of Total Revenue']],
+                    body: sorted.map((item, i) => [
+                        i + 1, item.name, item.category || '—',
+                        `${item.quantity.toFixed(2)} ${item.unit || 'units'}`,
+                        formatCurrency(item.value),
+                        `${totalVal > 0 ? Math.round(item.value / totalVal * 100) : 0}%`,
+                    ]),
+                    headStyles, bodyStyles,
+                    styles: { cellPadding: 2.5 },
+                });
+            } else if (tab === 'vendors' && vendors?.length) {
+                const totalSpend = vendors.reduce((s, v) => s + v.value, 0);
+                const totalPOs = vendors.reduce((s, v) => s + v.orders, 0);
+
+                doc.setFontSize(9.5);
+                doc.setFont('helvetica', 'bold');
+                doc.setTextColor(30, 30, 46);
+                doc.text(`Vendor Performance Summary: ${vendors.length} Active Vendors  |  ${totalPOs} Purchase Orders  |  Total Spend: ${formatCurrency(totalSpend)}`, 14, startY);
+                startY += 6;
+
+                autoTable(doc, {
+                    startY,
+                    head: [['Vendor Name', 'Purchase Orders', 'Total Value', 'Items Purchased']],
+                    body: vendors.map(v => [v.name, v.orders, formatCurrency(v.value), v.items]),
+                    headStyles, bodyStyles,
+                    styles: { cellPadding: 2.5 },
+                });
+            } else if (tab === 'batches' && batches) {
+                doc.setFontSize(9.5);
+                doc.setFont('helvetica', 'bold');
+                doc.setTextColor(30, 30, 46);
+                doc.text(`Batch Analytics Summary: ${batches.totalBatches} Total Batches  |  ${batches.activeBatches} Active  |  ${batches.expiredBatches} Expired  |  Utilization: ${batches.avgUtilization}%  |  Loss: ${formatCurrency(batches.expiredValue)}`, 14, startY);
+                startY += 6;
+                if (batches.expiredList?.length) {
+                    autoTable(doc, {
+                        startY,
+                        head: [['Item Name', 'Batch Number', 'Remaining Qty', 'Expired Date', 'Loss Value']],
+                        body: batches.expiredList.map(b => [
+                            b.item_name, b.batch_number, `${b.quantity} ${b.unit}`,
+                            b.expiry_date?.toLocaleDateString('en-GB') || '—',
+                            formatCurrency(b.value),
+                        ]),
+                        headStyles, bodyStyles,
+                        styles: { cellPadding: 2.5 },
+                    });
+                }
+            }
+
+            // Footer
+            const pageCount = doc.internal.getNumberOfPages();
+            for (let i = 1; i <= pageCount; i++) {
+                doc.setPage(i);
+                doc.setFontSize(8);
+                doc.setTextColor(150, 150, 150);
+                doc.text(`Watan CK Operational Reports — Page ${i} of ${pageCount}`, pageW / 2, doc.internal.pageSize.getHeight() - 6, { align: 'center' });
+            }
+
+            doc.save(`watan_report_${tab}_${new Date().toISOString().slice(0, 10)}.pdf`);
+            toast.success('PDF downloaded successfully', { id: 'pdf' });
         } catch (err) {
             console.error('PDF export failed:', err);
-            toast.error('PDF export failed', { id: 'pdf' });
+            toast.error('PDF export failed: ' + (err.message || err), { id: 'pdf' });
         }
     };
 
-    // Email Report
+    // Email Report — clean inline HTML template covering ALL fields on the page
     const handleEmailReport = async (email) => {
-        const el = reportRef.current;
-        if (!el) return;
         setEmailSending(true);
         try {
-            const htmlContent = el.innerHTML;
+            const tabLabel = TABS.find(t => t.id === tab)?.label || tab;
+            const dateStr = datePreset === 'custom'
+                ? `${appliedCustomFrom || '—'} to ${appliedCustomTo || '—'}`
+                : REPORT_PRESETS.find(p => p.id === datePreset)?.label || datePreset;
+            const restStr = selectedRestaurant
+                ? restaurantOptions.find(r => r.restaurant_id === selectedRestaurant || r.id === selectedRestaurant)?.restaurant_name || selectedRestaurant
+                : 'All Restaurants';
+
+            let bodyHtml = '';
+
+            if (tab === 'restaurants' && restaurants?.length) {
+                const totalOrders = restaurants.reduce((s, r) => s + r.orders, 0);
+                const totalValue = restaurants.reduce((s, r) => s + r.orderValue, 0);
+                const totalWaste = restaurants.reduce((s, r) => s + r.wasteValue, 0);
+                const totalEpos = restaurants.reduce((s, r) => s + (r.eposSaleValue || 0), 0);
+
+                const sortedByOrder = [...restaurants].sort((a, b) => b.orderValue - a.orderValue);
+                const highestOrder = sortedByOrder[0];
+                const lowestOrder = [...restaurants].filter(r => r.orders > 0).sort((a, b) => a.orderValue - b.orderValue)[0];
+                const highestEpos = [...restaurants].sort((a, b) => (b.eposSaleValue || 0) - (a.eposSaleValue || 0))[0];
+                const lowestEpos = [...restaurants].filter(r => (r.eposSaleValue || 0) > 0).sort((a, b) => (a.eposSaleValue || 0) - (b.eposSaleValue || 0))[0];
+                const highestWaste = [...restaurants].sort((a, b) => b.wasteValue - a.wasteValue)[0];
+
+                const orderValueRows = sortedByOrder.map((r, i) => `
+                    <tr style="border-bottom: 1px solid #e2e8f0; ${i % 2 === 1 ? 'background-color: #f8fafc;' : ''}">
+                        <td style="padding: 8px; font-weight: bold;">${i + 1}</td>
+                        <td style="padding: 8px; font-weight: 600;">${r.name}</td>
+                        <td style="padding: 8px; font-weight: bold; color: #c9a96e;">${formatCurrency(r.orderValue)}</td>
+                        <td style="padding: 8px;">${totalValue > 0 ? Math.round(r.orderValue / totalValue * 100) : 0}%</td>
+                    </tr>
+                `).join('');
+
+                const summaryRows = restaurants.map((r, i) => `
+                    <tr style="border-bottom: 1px solid #e2e8f0; ${i % 2 === 1 ? 'background-color: #f8fafc;' : ''}">
+                        <td style="padding: 10px; font-weight: bold;">${i + 1}</td>
+                        <td style="padding: 10px; font-weight: 600;">${r.name}</td>
+                        <td style="padding: 10px;">${r.orders}</td>
+                        <td style="padding: 10px; font-weight: bold; color: #c9a96e;">${formatCurrency(r.orderValue)}</td>
+                        <td style="padding: 10px; color: #3b82f6;">${formatCurrency(r.eposSaleValue || 0)}</td>
+                        <td style="padding: 10px; font-weight: 600; color: ${(r.difference || 0) >= 0 ? '#22c55e' : '#ef4444'};">
+                            ${(r.difference || 0) >= 0 ? '+' : ''}${formatCurrency(r.difference || 0)}
+                        </td>
+                        <td style="padding: 10px;">${formatCurrency(r.avgOrderValue)}</td>
+                        <td style="padding: 10px; color: #ef4444;">${formatCurrency(r.wasteValue)}</td>
+                        <td style="padding: 10px;">${r.wastePercent}%</td>
+                        <td style="padding: 10px; color: #64748b;">${r.topItem || '—'}</td>
+                    </tr>
+                `).join('');
+
+                bodyHtml = `
+                    <!-- 1. Aggregate Overview -->
+                    <div style="margin-bottom: 20px; display: table; width: 100%;">
+                        <div style="display: table-cell; background:#f8fafc; padding:12px; border-radius:6px; text-align:center; width:20%;">
+                            <div style="font-size:18px; font-weight:bold; color:#1e293b;">${restaurants.length}</div>
+                            <div style="font-size:11px; color:#64748b;">Total Restaurants</div>
+                        </div>
+                        <div style="display: table-cell; background:#f8fafc; padding:12px; border-radius:6px; text-align:center; width:20%;">
+                            <div style="font-size:18px; font-weight:bold; color:#1e293b;">${totalOrders}</div>
+                            <div style="font-size:11px; color:#64748b;">Total Orders</div>
+                        </div>
+                        <div style="display: table-cell; background:#f8fafc; padding:12px; border-radius:6px; text-align:center; width:20%;">
+                            <div style="font-size:18px; font-weight:bold; color:#c9a96e;">${formatCurrency(totalValue)}</div>
+                            <div style="font-size:11px; color:#64748b;">Total Order Value</div>
+                        </div>
+                        <div style="display: table-cell; background:#f8fafc; padding:12px; border-radius:6px; text-align:center; width:20%;">
+                            <div style="font-size:18px; font-weight:bold; color:#3b82f6;">${formatCurrency(totalEpos)}</div>
+                            <div style="font-size:11px; color:#64748b;">Total EPOS Sale</div>
+                        </div>
+                        <div style="display: table-cell; background:#f8fafc; padding:12px; border-radius:6px; text-align:center; width:20%;">
+                            <div style="font-size:18px; font-weight:bold; color:#ef4444;">${formatCurrency(totalWaste)}</div>
+                            <div style="font-size:11px; color:#64748b;">Total Waste Value</div>
+                        </div>
+                    </div>
+
+                    <!-- 2. Comparison Highlights -->
+                    <h3 style="font-size:14px; color:#1e293b; margin: 16px 0 10px 0;">Key Performance Highlights & Extremes</h3>
+                    <div style="margin-bottom: 24px; display: table; width: 100%;">
+                        <div style="display: table-cell; background:#f0fdf4; padding:10px; border-radius:6px; text-align:center; width:20%; border:1px solid #bbf7d0;">
+                            <div style="font-size:15px; font-weight:bold; color:#16a34a;">${highestOrder && highestOrder.orderValue > 0 ? formatCurrency(highestOrder.orderValue) : '£0.00'}</div>
+                            <div style="font-size:11px; font-weight:bold; color:#15803d; margin-top:2px;">Highest Order Value</div>
+                            <div style="font-size:10px; color:#64748b; margin-top:2px;">${highestOrder && highestOrder.orderValue > 0 ? highestOrder.name : 'No orders'}</div>
+                        </div>
+                        <div style="display: table-cell; background:#fffbeb; padding:10px; border-radius:6px; text-align:center; width:20%; border:1px solid #fef3c7;">
+                            <div style="font-size:15px; font-weight:bold; color:#d97706;">${lowestOrder && lowestOrder.orderValue > 0 ? formatCurrency(lowestOrder.orderValue) : '£0.00'}</div>
+                            <div style="font-size:11px; font-weight:bold; color:#b45309; margin-top:2px;">Lowest Order Value</div>
+                            <div style="font-size:10px; color:#64748b; margin-top:2px;">${lowestOrder && lowestOrder.orderValue > 0 ? lowestOrder.name : 'No orders'}</div>
+                        </div>
+                        <div style="display: table-cell; background:#eff6ff; padding:10px; border-radius:6px; text-align:center; width:20%; border:1px solid #bfdbfe;">
+                            <div style="font-size:15px; font-weight:bold; color:#2563eb;">${highestEpos && highestEpos.eposSaleValue > 0 ? formatCurrency(highestEpos.eposSaleValue) : '£0.00'}</div>
+                            <div style="font-size:11px; font-weight:bold; color:#1d4ed8; margin-top:2px;">Highest EPOS Sale</div>
+                            <div style="font-size:10px; color:#64748b; margin-top:2px;">${highestEpos && highestEpos.eposSaleValue > 0 ? highestEpos.name : 'No EPOS data'}</div>
+                        </div>
+                        <div style="display: table-cell; background:#f3e8ff; padding:10px; border-radius:6px; text-align:center; width:20%; border:1px solid #e9d5ff;">
+                            <div style="font-size:15px; font-weight:bold; color:#9333ea;">${lowestEpos && lowestEpos.eposSaleValue > 0 ? formatCurrency(lowestEpos.eposSaleValue) : '£0.00'}</div>
+                            <div style="font-size:11px; font-weight:bold; color:#7e22ce; margin-top:2px;">Lowest EPOS Sale</div>
+                            <div style="font-size:10px; color:#64748b; margin-top:2px;">${lowestEpos && lowestEpos.eposSaleValue > 0 ? lowestEpos.name : 'No EPOS data'}</div>
+                        </div>
+                        <div style="display: table-cell; background:#fef2f2; padding:10px; border-radius:6px; text-align:center; width:20%; border:1px solid #fecaca;">
+                            <div style="font-size:15px; font-weight:bold; color:#dc2626;">${highestWaste && highestWaste.wasteValue > 0 ? formatCurrency(highestWaste.wasteValue) : '£0.00'}</div>
+                            <div style="font-size:11px; font-weight:bold; color:#b91c1c; margin-top:2px;">Highest Wastage</div>
+                            <div style="font-size:10px; color:#64748b; margin-top:2px;">${highestWaste && highestWaste.wasteValue > 0 ? highestWaste.name : 'No waste data'}</div>
+                        </div>
+                    </div>
+
+                    <!-- 3. Order Value by Restaurant Breakdown -->
+                    <h3 style="font-size:14px; color:#1e293b; margin: 16px 0 10px 0;">Order Value by Restaurant</h3>
+                    <table style="width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 24px;">
+                        <thead>
+                            <tr style="background: #1e1e2e; color: #c9a96e; text-align: left;">
+                                <th style="padding: 8px;">Rank</th>
+                                <th style="padding: 8px;">Restaurant Name</th>
+                                <th style="padding: 8px;">Total Order Value</th>
+                                <th style="padding: 8px;">% of Total Revenue</th>
+                            </tr>
+                        </thead>
+                        <tbody>${orderValueRows}</tbody>
+                    </table>
+
+                    <!-- 4. Full Restaurant Summary Table -->
+                    <h3 style="font-size:14px; color:#1e293b; margin: 16px 0 10px 0;">Restaurant Summary Table</h3>
+                    <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                        <thead>
+                            <tr style="background: #1e1e2e; color: #c9a96e; text-align: left;">
+                                <th style="padding: 10px;">#</th>
+                                <th style="padding: 10px;">Restaurant</th>
+                                <th style="padding: 10px;">Orders</th>
+                                <th style="padding: 10px;">Order Value</th>
+                                <th style="padding: 10px;">EPOS Sale</th>
+                                <th style="padding: 10px;">Difference</th>
+                                <th style="padding: 10px;">Avg Order</th>
+                                <th style="padding: 10px;">Waste</th>
+                                <th style="padding: 10px;">Waste %</th>
+                                <th style="padding: 10px;">Top Item</th>
+                            </tr>
+                        </thead>
+                        <tbody>${summaryRows}</tbody>
+                    </table>
+                `;
+            } else if (tab === 'items' && items?.length) {
+                const sorted = [...items].sort((a, b) => b.value - a.value);
+                const totalValue = sorted.reduce((s, it) => s + it.value, 0);
+
+                const rows = sorted.map((item, i) => `
+                    <tr style="border-bottom: 1px solid #e2e8f0; ${i % 2 === 1 ? 'background-color: #f8fafc;' : ''}">
+                        <td style="padding: 10px; font-weight: bold;">${i + 1}</td>
+                        <td style="padding: 10px; font-weight: 600;">${item.name}</td>
+                        <td style="padding: 10px; color: #64748b;">${item.category || '—'}</td>
+                        <td style="padding: 10px;">${item.quantity.toFixed(2)} ${item.unit || 'units'}</td>
+                        <td style="padding: 10px; font-weight: bold; color: #c9a96e;">${formatCurrency(item.value)}</td>
+                        <td style="padding: 10px;">${totalValue > 0 ? Math.round(item.value / totalValue * 100) : 0}%</td>
+                    </tr>
+                `).join('');
+
+                bodyHtml = `
+                    <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                        <thead>
+                            <tr style="background: #1e1e2e; color: #c9a96e; text-align: left;">
+                                <th style="padding: 10px;">#</th>
+                                <th style="padding: 10px;">Item</th>
+                                <th style="padding: 10px;">Category</th>
+                                <th style="padding: 10px;">Quantity</th>
+                                <th style="padding: 10px;">Revenue</th>
+                                <th style="padding: 10px;">% of Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                `;
+            } else if (tab === 'vendors' && vendors?.length) {
+                const rows = vendors.map((v, i) => `
+                    <tr style="border-bottom: 1px solid #e2e8f0; ${i % 2 === 1 ? 'background-color: #f8fafc;' : ''}">
+                        <td style="padding: 10px; font-weight: 600;">${v.name}</td>
+                        <td style="padding: 10px;">${v.orders}</td>
+                        <td style="padding: 10px; font-weight: bold; color: #22c55e;">${formatCurrency(v.value)}</td>
+                        <td style="padding: 10px;">${v.items}</td>
+                    </tr>
+                `).join('');
+
+                bodyHtml = `
+                    <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                        <thead>
+                            <tr style="background: #1e1e2e; color: #c9a96e; text-align: left;">
+                                <th style="padding: 10px;">Vendor</th>
+                                <th style="padding: 10px;">Orders</th>
+                                <th style="padding: 10px;">Total Value</th>
+                                <th style="padding: 10px;">Items Purchased</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                `;
+            } else if (tab === 'batches' && batches) {
+                const rows = (batches.expiredList || []).map((b, i) => `
+                    <tr style="border-bottom: 1px solid #e2e8f0; ${i % 2 === 1 ? 'background-color: #f8fafc;' : ''}">
+                        <td style="padding: 10px; font-weight: 600;">${b.item_name}</td>
+                        <td style="padding: 10px; font-family: monospace;">${b.batch_number}</td>
+                        <td style="padding: 10px;">${b.quantity} ${b.unit}</td>
+                        <td style="padding: 10px; color: #ef4444;">${b.expiry_date?.toLocaleDateString('en-GB') || '—'}</td>
+                        <td style="padding: 10px; font-weight: bold; color: #ef4444;">${formatCurrency(b.value)}</td>
+                    </tr>
+                `).join('');
+
+                bodyHtml = `
+                    <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                        <thead>
+                            <tr style="background: #1e1e2e; color: #c9a96e; text-align: left;">
+                                <th style="padding: 10px;">Item</th>
+                                <th style="padding: 10px;">Batch</th>
+                                <th style="padding: 10px;">Remaining Qty</th>
+                                <th style="padding: 10px;">Expired On</th>
+                                <th style="padding: 10px;">Loss Value</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                `;
+            }
+
+            const htmlContent = `
+                <div style="font-family: Arial, Helvetica, sans-serif; background-color: #f1f5f9; padding: 24px; color: #1e293b;">
+                    <div style="max-width: 900px; margin: 0 auto; background: #ffffff; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); overflow: hidden;">
+                        <div style="background: #1e1e2e; padding: 24px; border-bottom: 3px solid #c9a96e;">
+                            <h1 style="margin: 0; color: #c9a96e; font-size: 22px;">Watan CK — Operational Analytics Report</h1>
+                            <div style="color: #94a3b8; font-size: 14px; margin-top: 6px;">${tabLabel}</div>
+                        </div>
+                        <div style="background: #f8fafc; padding: 14px 24px; border-bottom: 1px solid #e2e8f0; font-size: 13px; color: #475569;">
+                            <strong>Period:</strong> ${dateStr} &nbsp;|&nbsp;
+                            <strong>Restaurant Scope:</strong> ${restStr} &nbsp;|&nbsp;
+                            <strong>Generated:</strong> ${new Date().toLocaleString('en-GB')}
+                        </div>
+                        <div style="padding: 24px;">
+                            ${bodyHtml}
+                        </div>
+                        <div style="background: #f1f5f9; padding: 14px 24px; font-size: 12px; color: #64748b; text-align: center; border-top: 1px solid #e2e8f0;">
+                            Watan Central Kitchen Operational Platform — Automated Operations Report
+                        </div>
+                    </div>
+                </div>
+            `;
+
             const functions = getFunctions();
             const fn = httpsCallable(functions, 'sendReportEmail');
             await fn({
                 recipientEmail: email,
                 reportHtml: htmlContent,
-                reportTitle: `Reports & Analytics — ${TABS.find(t => t.id === tab)?.label || 'Report'}`,
+                reportTitle: `Reports & Analytics — ${tabLabel}`,
             });
             toast.success(`Report emailed to ${email}`);
             setShowEmailModal(false);
@@ -803,8 +1222,8 @@ const ReportsPage = () => {
                     <div className="dash-filter-custom" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                         <label>From <input type="date" className="dash-date-input" value={customFrom} onChange={e => setCustomFrom(e.target.value)} /></label>
                         <label>To <input type="date" className="dash-date-input" value={customTo} onChange={e => setCustomTo(e.target.value)} /></label>
-                        <button 
-                            className="btn btn-primary btn-sm" 
+                        <button
+                            className="btn btn-primary btn-sm"
                             style={{ height: '32px', padding: '0 16px' }}
                             onClick={() => { setAppliedCustomFrom(customFrom); setAppliedCustomTo(customTo); }}
                         >

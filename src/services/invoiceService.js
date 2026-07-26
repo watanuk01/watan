@@ -620,7 +620,8 @@ export const getInvoices = async (filters = {}) => {
         invoices = invoices.filter(inv => inv.invoice_date && inv.invoice_date <= to);
     }
     if (filters.status) {
-        invoices = invoices.filter(inv => inv.status === filters.status);
+        const targetStatus = filters.status.toLowerCase();
+        invoices = invoices.filter(inv => (inv.status || 'issued').toLowerCase() === targetStatus);
     }
 
     // Sort newest first
