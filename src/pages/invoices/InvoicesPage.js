@@ -147,7 +147,16 @@ const InvoicesPage = () => {
                 getProductionInvoices({ ...(filters.dateFrom && { dateFrom: filters.dateFrom }), ...(filters.dateTo && { dateTo: filters.dateTo }) }),
             ]);
             setInvoices(orderInvs);
-            setProductionInvoices(prodInvs.map(pi => ({ ...pi, type: 'production', invoice_date: pi.production_date, customer: { name: 'Internal Production', restaurant_name: 'Internal Production' }, grand_total: pi.total_with_vat || 0, total_vat: pi.vat_amount || 0, subtotal: pi.total_ingredient_cost || 0 })));
+            setProductionInvoices(prodInvs.map(pi => ({
+                ...pi,
+                type: 'production',
+                status: pi.status || 'issued',
+                invoice_date: pi.production_date,
+                customer: { name: 'Internal Production', restaurant_name: 'Internal Production' },
+                grand_total: pi.total_with_vat || 0,
+                total_vat: pi.vat_amount || 0,
+                subtotal: pi.total_ingredient_cost || 0,
+            })));
             const sup = await getSupplierDetails();
             setSupplierDetails(sup);
         } catch (err) { toast.error('Failed to load invoices'); console.error(err); }
@@ -166,7 +175,7 @@ const InvoicesPage = () => {
                 setAllOrderInvoices(data.invoices || []);
             } else {
                 const prodInvs = await getProductionInvoices({});
-                setAllProdInvoices(prodInvs.map(inv => ({ ...inv, type: 'production', invoice_date: inv.production_date, subtotal: inv.total_ingredient_cost || 0, total_vat: inv.vat_amount || 0, grand_total: inv.total_with_vat || 0 })));
+                setAllProdInvoices(prodInvs.map(inv => ({ ...inv, type: 'production', status: inv.status || 'issued', invoice_date: inv.production_date, subtotal: inv.total_ingredient_cost || 0, total_vat: inv.vat_amount || 0, grand_total: inv.total_with_vat || 0 })));
             }
             if (!supplierDetails) { const sup = await getSupplierDetails(); setSupplierDetails(sup); }
         } catch (err) { toast.error('Failed to load consolidated data'); console.error(err); }
@@ -180,6 +189,10 @@ const InvoicesPage = () => {
         if (typeFilter === 'order') combined = combined.filter(i => i.type === 'order');
         else if (typeFilter === 'production') combined = combined.filter(i => i.type === 'production');
         if (filters.restaurant_id) combined = combined.filter(i => i.customer?.restaurant_id === filters.restaurant_id);
+        if (filters.status) {
+            const targetStatus = filters.status.toLowerCase();
+            combined = combined.filter(i => (i.status || 'issued').toLowerCase() === targetStatus);
+        }
         if (searchQuery) {
             const q = searchQuery.toLowerCase();
             combined = combined.filter(inv => inv.invoice_number?.toLowerCase().includes(q) || inv.order_number?.toLowerCase().includes(q) || inv.customer?.name?.toLowerCase().includes(q) || inv.customer?.restaurant_name?.toLowerCase().includes(q) || inv.item_name?.toLowerCase().includes(q) || inv.production_number?.toLowerCase().includes(q));
@@ -210,7 +223,15 @@ const InvoicesPage = () => {
     // ─── BADGES ───
     const getTypeBadge = (type) => type === 'order' ? <span className="inv-type-badge inv-type-order">📦 Order</span> : type === 'production' ? <span className="inv-type-badge inv-type-production">🍳 Production</span> : <span className="inv-type-badge">{type}</span>;
     const getStatusBadge = (status) => {
-        switch (status) { case 'issued': return <span className="badge badge-info"><MdCheckCircle /> Issued</span>; case 'paid': return <span className="badge badge-success"><MdCheckCircle /> Paid</span>; default: return <span className="badge badge-muted">{status || '—'}</span>; }
+        const s = (status || 'issued').toLowerCase();
+        switch (s) {
+            case 'issued': return <span className="badge badge-info"><MdCheckCircle /> Issued</span>;
+            case 'paid': return <span className="badge badge-success"><MdCheckCircle /> Paid</span>;
+            case 'draft': return <span className="badge badge-warning"><MdWarning /> Draft</span>;
+            case 'cancelled':
+            case 'void': return <span className="badge badge-danger"><MdClose /> Void</span>;
+            default: return <span className="badge badge-muted">{status || '—'}</span>;
+        }
     };
     const getDiscountBadge = (inv) => (!inv.discount_amount || inv.discount_amount <= 0) ? null : inv.discount_type === 'percentage' ? <span className="inv-discount-badge">🏷️ {inv.discount_value}% off</span> : <span className="inv-discount-badge">🏷️ £{inv.discount_amount.toFixed(2)} off</span>;
 

@@ -67,6 +67,7 @@ const OrderHistory = () => {
                 o.order_number?.toLowerCase().includes(q)
             );
         }
+        return result;
     }, [orders, statusFilter, searchQuery]);
 
     const paginatedOrders = useMemo(() => {

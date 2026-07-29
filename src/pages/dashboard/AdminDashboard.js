@@ -235,6 +235,24 @@ const AdminDashboard = () => {
     const [eposAdminLoaded, setEposAdminLoaded] = useState(false);
     // Filter — empty string = All Restaurants
     const [eposRestaurantFilter, setEposRestaurantFilter] = useState('');
+    // Independent EPOS Filter State (default preset = 'today')
+    const [eposPreset, setEposPreset] = useState('today');
+    const [eposDateFrom, setEposDateFrom] = useState(() => startOfDay(new Date()));
+    const [eposDateTo, setEposDateTo] = useState(() => endOfDay(new Date()));
+    const [eposShowCustom, setEposShowCustom] = useState(false);
+    const [eposCustomFrom, setEposCustomFrom] = useState('');
+    const [eposCustomTo, setEposCustomTo] = useState('');
+
+    const applyEposCustom = () => {
+        if (!eposCustomFrom || !eposCustomTo) { toast.error('Please select both dates'); return; }
+        const df = startOfDay(new Date(eposCustomFrom));
+        const dt = endOfDay(new Date(eposCustomTo));
+        if (df > dt) { toast.error('Start date must be before end date'); return; }
+        setEposPreset('custom');
+        setEposDateFrom(df);
+        setEposDateTo(dt);
+        setEposShowCustom(false);
+    };
 
     // Load EPOS data for ALL restaurants in parallel — NO Firestore date filter.
     // We fetch up to 2000 events per restaurant once, then the render IIFE
@@ -760,25 +778,89 @@ const AdminDashboard = () => {
                             {eposAllEvents.length > 0 && ` • ${eposAllEvents.length} EPOS events loaded`}
                         </p>
                     </div>
-                    <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                        {/* Restaurant filter — client-side only, no re-fetch */}
+                </div>
+
+                {/* ═══ EPOS FILTER BAR (Admin Scope — with PERIOD and RESTAURANT dropdown) ═══ */}
+                <div className="dash-filter-bar" style={{ marginBottom: 16 }}>
+                    <div className="dash-filter-section">
+                        <MdFilterList className="dash-filter-icon" />
+                        <span className="dash-filter-label">PERIOD:</span>
+                        <div className="dash-filter-presets">
+                            {[
+                                { id: 'today', label: 'Today' },
+                                { id: '7d', label: 'Last 7 Days' },
+                                { id: '15d', label: 'Last 15 Days' },
+                                { id: '30d', label: 'Last 30 Days' },
+                                { id: 'custom', label: 'Custom' },
+                            ].map(p => (
+                                <button
+                                    key={p.id}
+                                    className={`dash-filter-btn ${eposPreset === p.id ? 'active' : ''}`}
+                                    onClick={() => {
+                                        if (p.id === 'custom') {
+                                            setEposShowCustom(v => !v);
+                                        } else {
+                                            setEposShowCustom(false);
+                                            const { dateFrom, dateTo } = getPresetDates(p.id);
+                                            setEposPreset(p.id);
+                                            setEposDateFrom(dateFrom);
+                                            setEposDateTo(dateTo);
+                                        }
+                                    }}
+                                >
+                                    {p.id === 'custom' ? '📅 Custom' : p.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="dash-filter-section">
+                        <MdStore className="dash-filter-icon" />
+                        <span className="dash-filter-label">RESTAURANT:</span>
                         <select
+                            className="dash-filter-select"
                             value={eposRestaurantFilter}
                             onChange={e => setEposRestaurantFilter(e.target.value)}
-                            style={{ padding: '8px 14px', borderRadius: 8, fontSize: 13, minWidth: 220, background: 'var(--color-surface, rgba(255,255,255,0.06))', border: '1px solid var(--color-border, rgba(255,255,255,0.12))', color: 'var(--color-text)', outline: 'none' }}
                         >
                             <option value="">All Restaurants</option>
-                            {restaurants.map(r => <option key={r.id} value={r.id}>{r.restaurant_name}</option>)}
+                            {restaurants.map(r => (
+                                <option key={r.id} value={r.id}>{r.restaurant_name}</option>
+                            ))}
                         </select>
-                        <button
-                            onClick={() => loadEposAllData(restaurants)}
-                            disabled={eposAdminLoading}
-                            style={{ padding: '8px 14px', borderRadius: 8, fontSize: 13, cursor: 'pointer', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: 'var(--color-text)' }}
-                            title="Refresh EPOS data"
-                        >
-                            {eposAdminLoading ? '⏳' : '🔄'} Refresh
-                        </button>
                     </div>
+
+                    <button
+                        onClick={() => loadEposAllData(restaurants)}
+                        disabled={eposAdminLoading}
+                        className="dash-filter-btn"
+                        style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}
+                        title="Refresh EPOS data"
+                    >
+                        <MdRefresh style={{ fontSize: 16 }} /> {eposAdminLoading ? 'Loading...' : 'Refresh'}
+                    </button>
+
+                    {eposShowCustom && (
+                        <div className="dash-filter-custom" style={{ width: '100%', marginTop: 8 }}>
+                            <label>From:
+                                <input
+                                    type="date"
+                                    className="dash-date-input"
+                                    value={eposCustomFrom}
+                                    onChange={e => setEposCustomFrom(e.target.value)}
+                                />
+                            </label>
+                            <label>To:
+                                <input
+                                    type="date"
+                                    className="dash-date-input"
+                                    value={eposCustomTo}
+                                    onChange={e => setEposCustomTo(e.target.value)}
+                                />
+                            </label>
+                            <button className="btn btn-primary btn-sm" onClick={applyEposCustom}>Apply</button>
+                            <button className="btn btn-ghost btn-sm" onClick={() => setEposShowCustom(false)}>Cancel</button>
+                        </div>
+                    )}
                 </div>
 
                 {eposAdminLoading ? (
@@ -850,8 +932,8 @@ const AdminDashboard = () => {
                         if (eposRestaurantFilter && e._restaurant_id !== eposRestaurantFilter) return false;
                         const d = parseEposDate(e);
                         if (!d) return false;
-                        if (filters.dateFrom && d < filters.dateFrom) return false;
-                        if (filters.dateTo && d > filters.dateTo) return false;
+                        if (eposDateFrom && d < eposDateFrom) return false;
+                        if (eposDateTo && d > eposDateTo) return false;
                         return true;
                     });
                     // Filter menu items and inventory by restaurant if needed
