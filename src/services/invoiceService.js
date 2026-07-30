@@ -423,7 +423,7 @@ export const regenerateAllInvoiceVat = async () => {
  * @param {Object} updates — { line_items, discount_type, discount_value, notes }
  */
 export const updateInvoice = async (invoiceId, updates) => {
-    const { line_items, discount_type, discount_value, notes } = updates;
+    const { line_items, discount_type, discount_value, notes, status } = updates;
 
     // Recalculate line item amounts
     const recalculatedItems = (line_items || []).map(item => {
@@ -453,6 +453,9 @@ export const updateInvoice = async (invoiceId, updates) => {
 
     if (notes !== undefined) {
         updateData.notes = notes;
+    }
+    if (status !== undefined) {
+        updateData.status = status;
     }
 
     await updateDoc(doc(db, INVOICES, invoiceId), updateData);
@@ -650,12 +653,56 @@ export const getInvoiceById = async (invoiceId) => {
 
 /**
  * Update invoice status (e.g., paid, void).
+ * Supports both order invoices ('invoices') and production invoices ('production_invoices').
  */
 export const updateInvoiceStatus = async (invoiceId, status) => {
-    await updateDoc(doc(db, INVOICES, invoiceId), {
-        status,
-        updated_at: serverTimestamp(),
-    });
+    if (!invoiceId) throw new Error('Missing invoiceId');
+    const cleanStatus = (status || 'issued').toLowerCase();
+
+    // 1. Try order invoices collection
+    try {
+        const invRef = doc(db, 'invoices', invoiceId);
+        const snap = await getDoc(invRef);
+        if (snap.exists()) {
+            await updateDoc(invRef, {
+                status: cleanStatus,
+                updated_at: serverTimestamp(),
+            });
+            return { id: invoiceId, status: cleanStatus };
+        }
+    } catch (err) {
+        console.warn('Check in invoices failed:', err);
+    }
+
+    // 2. Try production invoices collection
+    try {
+        const prodRef = doc(db, 'production_invoices', invoiceId);
+        const prodSnap = await getDoc(prodRef);
+        if (prodSnap.exists()) {
+            await updateDoc(prodRef, {
+                status: cleanStatus,
+                updated_at: serverTimestamp(),
+            });
+            return { id: invoiceId, status: cleanStatus };
+        }
+    } catch (err) {
+        console.warn('Check in production_invoices failed:', err);
+    }
+
+    // 3. Fallback direct updates if snap check failed
+    try {
+        await updateDoc(doc(db, 'invoices', invoiceId), {
+            status: cleanStatus,
+            updated_at: serverTimestamp(),
+        });
+    } catch (err) {
+        await updateDoc(doc(db, 'production_invoices', invoiceId), {
+            status: cleanStatus,
+            updated_at: serverTimestamp(),
+        });
+    }
+
+    return { id: invoiceId, status: cleanStatus };
 };
 
 // ═══════════════════════════════════════════════════════

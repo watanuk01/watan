@@ -1,9 +1,10 @@
 import React, { useState, useRef } from 'react';
 import {
     MdClose, MdVisibility, MdPictureAsPdf, MdFileDownload, MdEmail, MdEdit,
-    MdCheckCircle,
+    MdCheckCircle, MdSave,
 } from 'react-icons/md';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import { updateInvoiceStatus } from '../../services/invoiceService';
 import InvoiceDetail from './InvoiceDetail';
 import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
@@ -32,9 +33,34 @@ const ConsolidatedDetailModal = ({
 }) => {
     const [viewInvoice, setViewInvoice] = useState(null);
     const [sendingEmail, setSendingEmail] = useState(false);
-    const pdfRef = useRef();
     const isProduction = type === 'production';
     const invoices = group.invoices || [];
+    const [tableStatuses, setTableStatuses] = useState(() => {
+        const map = {};
+        invoices.forEach(inv => {
+            map[inv.id] = inv.status || 'issued';
+        });
+        return map;
+    });
+    const [savingStatus, setSavingStatus] = useState(false);
+    const pdfRef = useRef();
+
+    const handleSaveStatus = async () => {
+        setSavingStatus(true);
+        try {
+            const updates = Object.entries(tableStatuses).map(([invId, st]) => updateInvoiceStatus(invId, st));
+            if (updates.length > 0) {
+                await Promise.all(updates);
+                toast.success('Invoice statuses updated successfully');
+                if (onInvoiceUpdated) onInvoiceUpdated();
+            }
+        } catch (err) {
+            console.error('Failed to save status:', err);
+            toast.error('Failed to update invoice statuses');
+        } finally {
+            setSavingStatus(false);
+        }
+    };
     const supplier = supplierDetails || { name: 'Watan Central Kitchen', address: '', email: '', phone: '', vat_number: '' };
     const customer = !isProduction
         ? { name: restaurantName, email: restaurantEmail, address: restaurantAddress || '', phone: restaurantPhone || '' }
@@ -332,6 +358,7 @@ const ConsolidatedDetailModal = ({
                                 <thead><tr>
                                     <th>DATE</th>
                                     <th>INVOICE #</th>
+                                    <th>STATUS</th>
                                     <th>{isProduction ? 'ITEM' : 'ORDER #'}</th>
                                     {isProduction && <th style={{ textAlign: 'right' }}>QTY</th>}
                                     {isProduction && <th>EXPIRY</th>}
@@ -342,35 +369,67 @@ const ConsolidatedDetailModal = ({
                                     <th className="pdf-hide">ACTIONS</th>
                                 </tr></thead>
                                 <tbody>
-                                    {invoices.map((inv, idx) => (
-                                        <tr key={inv.id || idx} style={{ cursor: 'pointer' }} onClick={() => setViewInvoice(inv)}>
-                                            <td>{formatDate(inv.invoice_date)}</td>
-                                            <td>
-                                                <span style={{ fontFamily: 'var(--font-mono, monospace)', fontWeight: 700, color: 'var(--color-primary)', fontSize: 'var(--text-xs)' }}>
-                                                    {inv.invoice_number || inv.production_number || '—'}
-                                                </span>
-                                            </td>
-                                            <td style={{ fontWeight: 500 }}>
-                                                {isProduction ? (inv.item_name || '—') : (inv.order_number || '—')}
-                                            </td>
-                                            {isProduction && <td style={{ textAlign: 'right' }}>{inv.quantity_produced || '—'} {inv.item_unit || ''}</td>}
-                                            {isProduction && <td style={{ fontSize: 'var(--text-xs)' }}>{formatDate(inv.expiry_date)}</td>}
-                                            <td style={{ textAlign: 'right', fontWeight: 500 }}>{formatCurrency(inv.subtotal)}</td>
-                                            <td style={{ textAlign: 'right', color: 'var(--color-text-muted)' }}>{formatCurrency(inv.total_vat)}</td>
-                                            {!isProduction && <td style={{ textAlign: 'right', color: (inv.discount_amount || 0) > 0 ? '#16a34a' : 'var(--color-text-muted)' }}>
-                                                {(inv.discount_amount || 0) > 0 ? `-${formatCurrency(inv.discount_amount)}` : '—'}
-                                            </td>}
-                                            <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--color-primary)' }}>{formatCurrency(inv.grand_total)}</td>
-                                            <td className="pdf-hide">
-                                                <button className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); setViewInvoice(inv); }} title="View / Edit">
-                                                    <MdEdit style={{ fontSize: 14 }} />
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))}
+                                    {invoices.map((inv, idx) => {
+                                        const st = inv.status || 'issued';
+                                        return (
+                                            <tr key={inv.id || idx} style={{ cursor: 'pointer' }} onClick={() => setViewInvoice(inv)}>
+                                                <td>{formatDate(inv.invoice_date)}</td>
+                                                <td>
+                                                    <span style={{ fontFamily: 'var(--font-mono, monospace)', fontWeight: 700, color: 'var(--color-primary)', fontSize: 'var(--text-xs)' }}>
+                                                        {inv.invoice_number || inv.production_number || '—'}
+                                                    </span>
+                                                </td>
+                                                <td>
+                                                    <select
+                                                        value={tableStatuses[inv.id] || inv.status || 'issued'}
+                                                        onClick={e => e.stopPropagation()}
+                                                        onChange={(e) => {
+                                                            const newStatus = e.target.value;
+                                                            setTableStatuses(prev => ({
+                                                                ...prev,
+                                                                [inv.id]: newStatus
+                                                            }));
+                                                        }}
+                                                        style={{
+                                                            padding: '4px 8px',
+                                                            borderRadius: '6px',
+                                                            border: '1px solid var(--color-border, #cbd5e1)',
+                                                            fontSize: '12px',
+                                                            fontWeight: 600,
+                                                            background: 'var(--color-bg-surface, #ffffff)',
+                                                            color: 'var(--color-text-primary, #0f172a)',
+                                                            cursor: 'pointer',
+                                                            outline: 'none',
+                                                        }}
+                                                    >
+                                                        <option value="issued">Issued</option>
+                                                        <option value="paid">Paid</option>
+                                                        <option value="draft">Draft</option>
+                                                        <option value="void">Void</option>
+                                                    </select>
+                                                </td>
+                                                <td style={{ fontWeight: 500 }}>
+                                                    {isProduction ? (inv.item_name || '—') : (inv.order_number || '—')}
+                                                </td>
+                                                {isProduction && <td style={{ textAlign: 'right' }}>{inv.quantity_produced || '—'} {inv.item_unit || ''}</td>}
+                                                {isProduction && <td style={{ fontSize: 'var(--text-xs)' }}>{formatDate(inv.expiry_date)}</td>}
+                                                <td style={{ textAlign: 'right', fontWeight: 500 }}>{formatCurrency(inv.subtotal)}</td>
+                                                <td style={{ textAlign: 'right', color: 'var(--color-text-muted)' }}>{formatCurrency(inv.total_vat)}</td>
+                                                {!isProduction && <td style={{ textAlign: 'right', color: (inv.discount_amount || 0) > 0 ? '#16a34a' : 'var(--color-text-muted)' }}>
+                                                    {(inv.discount_amount || 0) > 0 ? `-${formatCurrency(inv.discount_amount)}` : '—'}
+                                                </td>}
+                                                <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--color-primary)' }}>{formatCurrency(inv.grand_total)}</td>
+                                                <td className="pdf-hide">
+                                                    <button className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); setViewInvoice(inv); }} title="View / Edit">
+                                                        <MdEdit style={{ fontSize: 14 }} />
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
                                     {/* Totals Row */}
                                     <tr style={{ fontWeight: 700, borderTop: '2px solid var(--color-border)', background: 'var(--color-surface-hover)' }}>
-                                        <td colSpan={isProduction ? 5 : 3} style={{ textAlign: 'right', textTransform: 'uppercase', fontSize: 'var(--text-xs)', letterSpacing: 0.5 }}>
+                                        <td colSpan={isProduction ? 6 : 4} style={{ textAlign: 'right', textTransform: 'uppercase', fontSize: 'var(--text-xs)', letterSpacing: 0.5 }}>
                                             Total ({invoices.length} invoices)
                                         </td>
                                         <td style={{ textAlign: 'right' }}>{formatCurrency(group.subtotal)}</td>
@@ -391,6 +450,9 @@ const ConsolidatedDetailModal = ({
                 {/* Footer Actions */}
                 <div className="modal-footer" style={{ borderTop: '1px solid var(--color-border)', padding: '16px 24px', display: 'flex', justifyContent: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
                     <button className="btn btn-secondary btn-md" onClick={onClose}>Close</button>
+                    <button className="btn btn-primary btn-md" onClick={handleSaveStatus} disabled={savingStatus} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <MdSave size={16} /> {savingStatus ? 'Saving...' : 'Save'}
+                    </button>
                     <button className="btn btn-secondary btn-md" onClick={handleExcel} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <MdFileDownload /> Export Excel
                     </button>

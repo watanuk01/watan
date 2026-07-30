@@ -34,6 +34,7 @@ export const toDate = (ts) => {
  */
 export const DATE_PRESETS = [
     { id: 'today', label: 'Today', days: 0 },
+    { id: 'yesterday', label: 'Yesterday', days: 1 },
     { id: '7d', label: 'Last 7 Days', days: 7 },
     { id: '15d', label: 'Last 15 Days', days: 15 },
     { id: '30d', label: 'Last 30 Days', days: 30 },
@@ -45,6 +46,10 @@ export const getPresetDates = (presetId) => {
     const from = startOfDay(today);
     switch (presetId) {
         case 'today': return { dateFrom: from, dateTo: endOfDay(today) };
+        case 'yesterday': {
+            const y = daysAgo(1);
+            return { dateFrom: startOfDay(y), dateTo: endOfDay(y) };
+        }
         case '7d': return { dateFrom: daysAgo(7), dateTo: endOfDay(today) };
         case '15d': return { dateFrom: daysAgo(15), dateTo: endOfDay(today) };
         case '30d':
@@ -665,49 +670,126 @@ export const fetchRestaurantComparison = async (filters = {}) => {
     }).sort((a, b) => b.orderValue - a.orderValue);
 };
 
-/** Top N ordered items — respects filters */
-export const fetchTopOrderedItems = async (limit = 10, filters = {}) => {
+/** Top N ordered items — respects filters, includes comparative previous period metrics */
+export const fetchTopOrderedItems = async (limit = 500, filters = {}) => {
     const allOrders = await getOrders();
-    const filtered = applyFilters(allOrders, filters);
+    const currentFiltered = applyFilters(allOrders, filters);
+
+    // Calculate matching previous period filters
+    let prevFilters = { ...filters };
+    if (filters.dateFrom && filters.dateTo) {
+        const fromTs = filters.dateFrom.getTime();
+        const toTs = filters.dateTo.getTime();
+        const duration = Math.max(toTs - fromTs, 86400000);
+        prevFilters.dateFrom = new Date(fromTs - duration);
+        prevFilters.dateTo = new Date(fromTs - 1);
+    } else {
+        const now = new Date();
+        prevFilters.dateFrom = daysAgo(60);
+        prevFilters.dateTo = daysAgo(30);
+    }
+
+    const prevFiltered = applyFilters(allOrders, prevFilters);
+
     const map = {};
     const categorySet = new Set();
 
-    filtered.forEach(o => {
+    // 1. Current Period
+    currentFiltered.forEach(o => {
         (o.items || []).forEach(item => {
             const iname = item.item_name || item.name || item.title || item.product_name;
             if (!iname) return;
             const cat = item.category_name || item.category || 'Uncategorised';
             categorySet.add(cat);
 
+            const unitPrice = Number(item.selling_price || item.price || item.unit_price || item.cost_price || 0);
+
             if (!map[iname]) {
                 map[iname] = {
                     name: iname,
+                    price: unitPrice,
                     quantity: 0,
                     value: 0,
+                    prevQuantity: 0,
+                    prevValue: 0,
                     unit: item.unit || item.base_unit || 'units',
                     category: cat,
                 };
             }
 
             const qty = Number(item.quantity || item.qty || 1);
-            const val = Number(item.line_total ?? item.total ?? ((item.selling_price || item.price || item.cost_price || 0) * qty));
+            const val = Number(item.line_total ?? item.total ?? ((unitPrice || map[iname].price || 0) * qty));
 
             map[iname].quantity += qty;
             map[iname].value += val;
+
+            if (map[iname].price === 0 && qty > 0 && val > 0) {
+                map[iname].price = val / qty;
+            }
 
             if (item.unit) map[iname].unit = item.unit;
             if (cat && cat !== 'Uncategorised') map[iname].category = cat;
         });
     });
 
+    // 2. Previous Period
+    prevFiltered.forEach(o => {
+        (o.items || []).forEach(item => {
+            const iname = item.item_name || item.name || item.title || item.product_name;
+            if (!iname) return;
+            const cat = item.category_name || item.category || 'Uncategorised';
+            categorySet.add(cat);
+
+            const unitPrice = Number(item.selling_price || item.price || item.unit_price || item.cost_price || 0);
+            const qty = Number(item.quantity || item.qty || 1);
+            const val = Number(item.line_total ?? item.total ?? (unitPrice * qty));
+
+            if (!map[iname]) {
+                map[iname] = {
+                    name: iname,
+                    price: unitPrice || (qty > 0 ? val / qty : 0),
+                    quantity: 0,
+                    value: 0,
+                    prevQuantity: 0,
+                    prevValue: 0,
+                    unit: item.unit || item.base_unit || 'units',
+                    category: cat,
+                };
+            }
+
+            map[iname].prevQuantity += qty;
+            map[iname].prevValue += val;
+        });
+    });
+
     const items = Object.values(map)
+        .map(i => {
+            const quantity = Math.round(i.quantity * 100) / 100;
+            const prevQuantity = Math.round(i.prevQuantity * 100) / 100;
+            const diff = Math.round((quantity - prevQuantity) * 100) / 100;
+
+            let growthPct = 0;
+            if (prevQuantity > 0) {
+                growthPct = Math.round(((quantity - prevQuantity) / prevQuantity) * 1000) / 10;
+            } else if (quantity > 0) {
+                growthPct = 100;
+            }
+
+            const computedPrice = i.price > 0 ? i.price : (quantity > 0 ? i.value / quantity : 0);
+
+            return {
+                ...i,
+                price: Math.round(computedPrice * 100) / 100,
+                quantity,
+                prevQuantity,
+                difference: diff,
+                growthPct,
+                value: Math.round(i.value * 100) / 100,
+                prevValue: Math.round(i.prevValue * 100) / 100,
+            };
+        })
         .sort((a, b) => b.quantity - a.quantity)
-        .slice(0, limit)
-        .map(i => ({
-            ...i,
-            quantity: Math.round(i.quantity * 100) / 100,
-            value: Math.round(i.value * 100) / 100,
-        }));
+        .slice(0, limit);
 
     return { items, categories: [...categorySet].sort() };
 };

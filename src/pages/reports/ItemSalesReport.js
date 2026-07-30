@@ -4,6 +4,10 @@ import {
     MdTrendingUp, MdShoppingCart, MdCategory,
 } from 'react-icons/md';
 import {
+    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+    ResponsiveContainer, Legend,
+} from 'recharts';
+import {
     fetchTopOrderedItems,
     fetchRestaurantList,
     formatCurrency,
@@ -12,8 +16,6 @@ import {
 } from '../../services/analyticsService';
 import toast from 'react-hot-toast';
 import '../dashboard/Dashboard.css';
-
-const CHART_COLORS = ['#c9a96e', '#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6', '#ef4444', '#14b8a6', '#f97316'];
 
 const DATE_PRESETS = [
     { id: 'today', label: 'Today' },
@@ -63,13 +65,61 @@ const KpiCard = ({ label, value, sub, color, icon: Icon }) => (
     </div>
 );
 
+const CustomChartTooltip = ({ active, payload, label }) => {
+    if (active && payload && payload.length) {
+        const prevVal = payload.find(p => p.dataKey === 'prevQuantity')?.value ?? 0;
+        const selVal = payload.find(p => p.dataKey === 'quantity')?.value ?? 0;
+        return (
+            <div style={{
+                background: '#ffffff',
+                border: '1px solid #cbd5e1',
+                borderRadius: '8px',
+                padding: '10px 14px',
+                boxShadow: '0 10px 25px -5px rgba(0,0,0,0.15)',
+                color: '#1e293b',
+                fontSize: '12px',
+                minWidth: '170px',
+            }}>
+                <div style={{ fontWeight: 700, marginBottom: '6px', color: '#0f172a' }}>{label}</div>
+                <div style={{ color: '#60a5fa', marginBottom: '2px' }}>Previous Qty : {prevVal}</div>
+                <div style={{ color: '#22c55e', fontWeight: 600 }}>Selected Qty : {selVal}</div>
+            </div>
+        );
+    }
+    return null;
+};
+
+const CustomLeastChartTooltip = ({ active, payload, label }) => {
+    if (active && payload && payload.length) {
+        const prevVal = payload.find(p => p.dataKey === 'prevQuantity')?.value ?? 0;
+        const selVal = payload.find(p => p.dataKey === 'quantity')?.value ?? 0;
+        return (
+            <div style={{
+                background: '#ffffff',
+                border: '1px solid #cbd5e1',
+                borderRadius: '8px',
+                padding: '10px 14px',
+                boxShadow: '0 10px 25px -5px rgba(0,0,0,0.15)',
+                color: '#1e293b',
+                fontSize: '12px',
+                minWidth: '170px',
+            }}>
+                <div style={{ fontWeight: 700, marginBottom: '6px', color: '#0f172a' }}>{label}</div>
+                <div style={{ color: '#f472b6', marginBottom: '2px' }}>Previous Qty : {prevVal}</div>
+                <div style={{ color: '#ef4444', fontWeight: 600 }}>Selected Qty : {selVal}</div>
+            </div>
+        );
+    }
+    return null;
+};
+
 const ItemSalesReport = () => {
     const [loading, setLoading] = useState(false);
     const [items, setItems] = useState([]);
     const [categories, setCategories] = useState([]);
 
     // Filters
-    const [datePreset, setDatePreset] = useState('this_month');
+    const [datePreset, setDatePreset] = useState('today');
     const [customFrom, setCustomFrom] = useState('');
     const [customTo, setCustomTo] = useState('');
     const [appliedCustomFrom, setAppliedCustomFrom] = useState('');
@@ -77,16 +127,15 @@ const ItemSalesReport = () => {
     const [selectedRestaurant, setSelectedRestaurant] = useState('');
     const [restaurantOptions, setRestaurantOptions] = useState([]);
     const [categoryFilter, setCategoryFilter] = useState('all');
+    const [selectedItemFilter, setSelectedItemFilter] = useState('all');
     const [searchQuery, setSearchQuery] = useState('');
 
     const reportRef = useRef(null);
 
-    // Load restaurant list for filter
     useEffect(() => {
         fetchRestaurantList().then(setRestaurantOptions).catch(console.error);
     }, []);
 
-    // Build filter object
     const getFilters = useCallback(() => {
         let filters = {};
         if (datePreset === 'custom') {
@@ -121,30 +170,33 @@ const ItemSalesReport = () => {
         }
     }, [getFilters]);
 
-    // Reload on filter change
     useEffect(() => {
         loadData();
     }, [datePreset, appliedCustomFrom, appliedCustomTo, selectedRestaurant]); // eslint-disable-line
 
-    // Apply client-side filters
     let filteredItems = items;
     if (categoryFilter !== 'all') {
         filteredItems = filteredItems.filter(i => i.category === categoryFilter);
+    }
+    if (selectedItemFilter !== 'all') {
+        filteredItems = filteredItems.filter(i => i.name === selectedItemFilter);
     }
     if (searchQuery) {
         const q = searchQuery.toLowerCase();
         filteredItems = filteredItems.filter(i => i.name.toLowerCase().includes(q));
     }
 
-    // Sort by value (revenue) descending
-    const sortedItems = [...filteredItems].sort((a, b) => b.value - a.value);
+    const sortedItems = [...filteredItems].sort((a, b) => b.quantity - a.quantity);
+    const top10Most = sortedItems.slice(0, 10);
+    const top10Least = [...filteredItems].sort((a, b) => a.quantity - b.quantity).slice(0, 10);
 
     // KPI calculations
     const totalQty = filteredItems.reduce((s, i) => s + i.quantity, 0);
     const totalValue = filteredItems.reduce((s, i) => s + i.value, 0);
     const avgItemValue = filteredItems.length > 0 ? totalValue / filteredItems.length : 0;
 
-    // PDF Export
+    const activePresetLabel = DATE_PRESETS.find(p => p.id === datePreset)?.label || 'Today';
+
     const handlePdfExport = async () => {
         toast.loading('Generating PDF…', { id: 'pdf' });
         try {
@@ -152,16 +204,13 @@ const ItemSalesReport = () => {
             const { default: autoTable } = await import('jspdf-autotable');
             const doc = new jsPDF({ orientation: 'landscape' });
 
-            // Title
             doc.setFontSize(16);
             doc.setTextColor(40);
             doc.text('Item Sales Report', 14, 15);
 
-            // Subtitle with filter info
             doc.setFontSize(10);
             doc.setTextColor(100);
-            const preset = DATE_PRESETS.find(p => p.id === datePreset);
-            let filterText = `Period: ${preset?.label || datePreset}`;
+            let filterText = `Period: ${activePresetLabel}`;
             if (selectedRestaurant) {
                 const rest = restaurantOptions.find(r => r.restaurant_id === selectedRestaurant);
                 if (rest) filterText += ` | Restaurant: ${rest.restaurant_name}`;
@@ -170,36 +219,30 @@ const ItemSalesReport = () => {
             doc.text(filterText, 14, 22);
             doc.text(`Generated: ${new Date().toLocaleDateString('en-GB')} ${new Date().toLocaleTimeString('en-GB')}`, 14, 27);
 
-            // Summary KPIs
-            doc.setFontSize(10);
-            doc.setTextColor(40);
-            doc.text(`Total Items: ${sortedItems.length}  |  Total Quantity: ${totalQty.toFixed(2)}  |  Total Revenue: ${formatCurrency(totalValue)}  |  Avg Item Value: ${formatCurrency(avgItemValue)}`, 14, 35);
-
-            // Table
             autoTable(doc, {
-                head: [['#', 'Item Name', 'Category', 'Quantity Ordered', 'Unit Price', 'Total Value', '% Revenue']],
+                head: [['#', 'Item Title', 'Price', 'Selected Qty', 'Previous Qty', 'Difference', 'Growth %']],
                 body: sortedItems.map((item, i) => [
                     i + 1,
                     item.name,
-                    item.category || '—',
-                    `${item.quantity.toFixed(2)} ${item.unit || 'units'}`,
-                    item.quantity > 0 ? formatCurrency(item.value / item.quantity) : '—',
-                    formatCurrency(item.value),
-                    totalValue > 0 ? `${Math.round(item.value / totalValue * 100)}%` : '0%',
+                    formatCurrency(item.price),
+                    item.quantity,
+                    item.prevQuantity,
+                    item.difference > 0 ? `+${item.difference}` : `${item.difference}`,
+                    item.growthPct > 0 ? `+${item.growthPct}%` : `${item.growthPct}%`,
                 ]),
-                startY: 42,
+                startY: 34,
                 styles: { fontSize: 8, cellPadding: 3 },
-                headStyles: { fillColor: [201, 169, 110], textColor: [255, 255, 255], fontStyle: 'bold' },
-                alternateRowStyles: { fillColor: [245, 245, 245] },
+                headStyles: { fillColor: [253, 232, 237], textColor: [30, 41, 59], fontStyle: 'bold' },
+                alternateRowStyles: { fillColor: [250, 250, 250] },
                 columnStyles: {
                     0: { cellWidth: 12, halign: 'center' },
+                    2: { halign: 'right' },
                     3: { halign: 'right' },
                     4: { halign: 'right' },
                     5: { halign: 'right' },
                     6: { halign: 'right' },
                 },
                 didDrawPage: (data) => {
-                    // Footer
                     doc.setFontSize(8);
                     doc.setTextColor(150);
                     doc.text(`Page ${data.pageNumber}`, data.settings.margin.left, doc.internal.pageSize.height - 10);
@@ -217,6 +260,7 @@ const ItemSalesReport = () => {
 
     return (
         <div className="reports-page">
+            {/* Header */}
             <div className="page-header">
                 <div>
                     <h2 className="page-title">Item Sales Report</h2>
@@ -234,7 +278,7 @@ const ItemSalesReport = () => {
                 </div>
             </div>
 
-            {/* Filter Bar */}
+            {/* Filter Bar 1 */}
             <div className="dash-filter-bar">
                 <div className="dash-filter-section">
                     <MdFilterList className="dash-filter-icon" />
@@ -279,7 +323,7 @@ const ItemSalesReport = () => {
                 )}
             </div>
 
-            {/* Item Filters */}
+            {/* Filter Bar 2 */}
             <div className="dash-filter-bar" style={{ marginTop: -8 }}>
                 <MdFilterList className="dash-filter-icon" />
                 <select
@@ -289,6 +333,14 @@ const ItemSalesReport = () => {
                 >
                     <option value="all">All Categories</option>
                     {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <select
+                    className="dash-filter-select"
+                    value={selectedItemFilter}
+                    onChange={e => setSelectedItemFilter(e.target.value)}
+                >
+                    <option value="all">All Items</option>
+                    {items.map(i => <option key={i.name} value={i.name}>{i.name}</option>)}
                 </select>
                 <div style={{ position: 'relative', flex: 1, minWidth: 180 }}>
                     <MdSearch style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)', fontSize: 16 }} />
@@ -304,12 +356,12 @@ const ItemSalesReport = () => {
             </div>
 
             {loading ? (
-                <div style={{ textAlign: 'center', padding: 80, color: 'var(--color-text-muted)' }}>
-                    Loading item sales data…
+                <div style={{ textAlign: 'center', padding: '80px', color: 'var(--color-text-muted)' }}>
+                    Loading item sales breakdown…
                 </div>
             ) : (
-                <div ref={reportRef} style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-                    {/* KPI Cards */}
+                <div ref={reportRef} style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                    {/* 4 KPI Summary Cards */}
                     <div className="kpi-row">
                         <KpiCard label="Total Items" value={sortedItems.length} icon={MdCategory} />
                         <KpiCard label="Total Quantity" value={totalQty.toFixed(2)} icon={MdShoppingCart} />
@@ -317,68 +369,181 @@ const ItemSalesReport = () => {
                         <KpiCard label="Avg Item Value" value={formatCurrency(avgItemValue)} color="#3b82f6" />
                     </div>
 
-                    {/* Sales Table */}
-                    {sortedItems.length === 0 ? (
-                        <div className="card">
-                            <div className="empty-state" style={{ padding: 60 }}>
-                                <div className="empty-state-icon">📊</div>
-                                <div className="empty-state-title">No Item Sales Data</div>
-                                <div className="empty-state-description">No orders found for the selected filters. Try adjusting the date range or restaurant filter.</div>
-                            </div>
-                        </div>
-                    ) : (
-                        <div className="card">
-                            <div className="card-header">
-                                <h3>Item Sales Breakdown</h3>
-                                <span className="badge badge-muted">{sortedItems.length} items</span>
-                            </div>
-                            <div className="data-table-wrapper" style={{ border: 'none', borderRadius: 0 }}>
-                                <table className="data-table">
-                                    <thead>
+                    {/* Item Sales Table in Scrollable Container */}
+                    <div className="card" style={{ padding: 0, overflow: 'hidden', borderRadius: '16px' }}>
+                        <div style={{
+                            maxHeight: '440px',
+                            overflowY: 'auto',
+                            overflowX: 'auto',
+                        }}>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                                <thead>
+                                    <tr style={{
+                                        background: '#fde8ed', // Soft pink theme header matching screenshot
+                                        position: 'sticky',
+                                        top: 0,
+                                        zIndex: 10,
+                                        boxShadow: '0 2px 4px rgba(0,0,0,0.06)',
+                                    }}>
+                                        <th style={{ padding: '14px 20px', color: '#1e293b', fontWeight: 700 }}>Item Title</th>
+                                        <th style={{ padding: '14px 20px', color: '#1e293b', fontWeight: 700, textAlign: 'right' }}>Price</th>
+                                        <th style={{ padding: '14px 20px', color: '#1e293b', fontWeight: 700, textAlign: 'right' }}>Selected Qty</th>
+                                        <th style={{ padding: '14px 20px', color: '#1e293b', fontWeight: 700, textAlign: 'right' }}>Previous Qty</th>
+                                        <th style={{ padding: '14px 20px', color: '#1e293b', fontWeight: 700, textAlign: 'right' }}>Difference</th>
+                                        <th style={{ padding: '14px 20px', color: '#1e293b', fontWeight: 700, textAlign: 'right' }}>Growth %</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {sortedItems.length === 0 ? (
                                         <tr>
-                                            <th>#</th>
-                                            <th>Item Name</th>
-                                            <th>Category</th>
-                                            <th>Quantity Ordered</th>
-                                            <th>Unit Price</th>
-                                            <th>Total Value</th>
-                                            <th>% of Revenue</th>
+                                            <td colSpan={6} style={{ textAlign: 'center', padding: '40px', color: 'var(--color-text-muted)' }}>
+                                                No items found for the selected filters.
+                                            </td>
                                         </tr>
-                                    </thead>
-                                    <tbody>
-                                        {sortedItems.map((item, i) => {
-                                            const pct = totalValue > 0 ? Math.round(item.value / totalValue * 100) : 0;
-                                            const unitPrice = item.quantity > 0 ? item.value / item.quantity : 0;
+                                    ) : (
+                                        sortedItems.map((item, idx) => {
+                                            const isDiffPos = item.difference > 0;
+                                            const isDiffNeg = item.difference < 0;
+                                            const isGrowthPos = item.growthPct > 0;
+                                            const isGrowthNeg = item.growthPct < 0;
+
                                             return (
-                                                <tr key={item.name}>
-                                                    <td style={{ color: 'var(--color-text-muted)', fontWeight: 700 }}>{i + 1}</td>
-                                                    <td style={{ fontWeight: 600 }}>{item.name}</td>
-                                                    <td style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>{item.category || '—'}</td>
-                                                    <td>{item.quantity.toFixed(2)} {item.unit || 'units'}</td>
-                                                    <td style={{ color: 'var(--color-text-secondary)' }}>{formatCurrency(unitPrice)}</td>
-                                                    <td style={{ fontWeight: 700, color: '#c9a96e' }}>{formatCurrency(item.value)}</td>
-                                                    <td>
-                                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                                            <div style={{ flex: 1, height: 6, background: 'var(--color-border)', borderRadius: 3 }}>
-                                                                <div style={{
-                                                                    width: `${pct}%`,
-                                                                    height: '100%',
-                                                                    background: CHART_COLORS[i % CHART_COLORS.length],
-                                                                    borderRadius: 3,
-                                                                    transition: 'width 0.3s ease',
-                                                                }} />
-                                                            </div>
-                                                            <span style={{ fontSize: 11, minWidth: 30 }}>{pct}%</span>
-                                                        </div>
+                                                <tr
+                                                    key={item.name + idx}
+                                                    style={{
+                                                        borderBottom: '1px solid var(--color-border-light, rgba(255,255,255,0.06))',
+                                                    }}
+                                                >
+                                                    {/* Item Title */}
+                                                    <td style={{ padding: '14px 20px', fontWeight: 500, color: 'var(--color-text-primary)' }}>
+                                                        {item.name}
+                                                    </td>
+
+                                                    {/* Price */}
+                                                    <td style={{ padding: '14px 20px', textAlign: 'right', color: 'var(--color-text-secondary)' }}>
+                                                        {formatCurrency(item.price)}
+                                                    </td>
+
+                                                    {/* Selected Qty */}
+                                                    <td style={{ padding: '14px 20px', textAlign: 'right', fontWeight: 700, color: '#d9534f' }}>
+                                                        {item.quantity}
+                                                    </td>
+
+                                                    {/* Previous Qty */}
+                                                    <td style={{ padding: '14px 20px', textAlign: 'right', color: 'var(--color-text-muted)' }}>
+                                                        {item.prevQuantity}
+                                                    </td>
+
+                                                    {/* Difference */}
+                                                    <td style={{ padding: '14px 20px', textAlign: 'right', fontWeight: 600 }}>
+                                                        {isDiffPos && <span style={{ color: '#22c55e' }}>↗ +{item.difference}</span>}
+                                                        {isDiffNeg && <span style={{ color: '#ef4444' }}>↘ {item.difference}</span>}
+                                                        {!isDiffPos && !isDiffNeg && <span style={{ color: 'var(--color-text-muted)' }}>— 0</span>}
+                                                    </td>
+
+                                                    {/* Growth % */}
+                                                    <td style={{ padding: '14px 20px', textAlign: 'right', fontWeight: 600 }}>
+                                                        {isGrowthPos && <span style={{ color: '#22c55e' }}>+{item.growthPct}%</span>}
+                                                        {isGrowthNeg && <span style={{ color: '#ef4444' }}>{item.growthPct}%</span>}
+                                                        {!isGrowthPos && !isGrowthNeg && <span style={{ color: 'var(--color-text-muted)' }}>0%</span>}
                                                     </td>
                                                 </tr>
                                             );
-                                        })}
-                                    </tbody>
-                                </table>
+                                        })
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    {/* Dual Comparative Bar Charts Section */}
+                    <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(460px, 1fr))',
+                        gap: '24px',
+                    }}>
+                        {/* 🔥 Top 10 Most Ordered Items */}
+                        <div className="card" style={{ padding: '20px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
+                                <div>
+                                    <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--color-text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                        <span>🔥</span> Top 10 Most Ordered Items
+                                    </h3>
+                                    <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--color-text-muted)' }}>
+                                        Based on: {activePresetLabel}
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div style={{ width: '100%', height: 350 }}>
+                                <ResponsiveContainer>
+                                    <BarChart data={top10Most} margin={{ top: 10, right: 10, left: -20, bottom: 85 }}>
+                                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
+                                        <XAxis
+                                            dataKey="name"
+                                            interval={0}
+                                            angle={-45}
+                                            textAnchor="end"
+                                            height={85}
+                                            tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }}
+                                        />
+                                        <YAxis tick={{ fontSize: 11, fill: 'var(--color-text-muted)' }} />
+                                        <Tooltip content={<CustomChartTooltip />} />
+                                        <Legend
+                                            verticalAlign="top"
+                                            align="right"
+                                            height={30}
+                                            iconType="square"
+                                            wrapperStyle={{ fontSize: '12px', paddingBottom: '10px' }}
+                                        />
+                                        <Bar dataKey="prevQuantity" fill="#70bbfd" radius={[4, 4, 0, 0]} name="Previous Qty" barSize={14} />
+                                        <Bar dataKey="quantity" fill="#42bb68" radius={[4, 4, 0, 0]} name="Selected Qty" barSize={14} />
+                                    </BarChart>
+                                </ResponsiveContainer>
                             </div>
                         </div>
-                    )}
+
+                        {/* 📉 Top 10 Least Selling Items */}
+                        <div className="card" style={{ padding: '20px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
+                                <div>
+                                    <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--color-text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                        <span>📉</span> Top 10 Least Selling Items
+                                    </h3>
+                                    <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--color-text-muted)' }}>
+                                        Based on: {activePresetLabel}
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div style={{ width: '100%', height: 350 }}>
+                                <ResponsiveContainer>
+                                    <BarChart data={top10Least} margin={{ top: 10, right: 10, left: -20, bottom: 85 }}>
+                                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
+                                        <XAxis
+                                            dataKey="name"
+                                            interval={0}
+                                            angle={-45}
+                                            textAnchor="end"
+                                            height={85}
+                                            tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }}
+                                        />
+                                        <YAxis tick={{ fontSize: 11, fill: 'var(--color-text-muted)' }} />
+                                        <Tooltip content={<CustomLeastChartTooltip />} />
+                                        <Legend
+                                            verticalAlign="top"
+                                            align="right"
+                                            height={30}
+                                            iconType="square"
+                                            wrapperStyle={{ fontSize: '12px', paddingBottom: '10px' }}
+                                        />
+                                        <Bar dataKey="prevQuantity" fill="#fbcfe8" radius={[4, 4, 0, 0]} name="Previous Qty" barSize={14} />
+                                        <Bar dataKey="quantity" fill="#ef4444" radius={[4, 4, 0, 0]} name="Selected Qty" barSize={14} />
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             )}
         </div>

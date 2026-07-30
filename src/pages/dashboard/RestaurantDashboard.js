@@ -1336,6 +1336,7 @@ const RestaurantDashboard = () => {
                         <div className="dash-filter-presets">
                             {[
                                 { key: 'today', label: 'Today' },
+                                { key: 'yesterday', label: 'Yesterday' },
                                 { key: '7d', label: 'Last 7 Days' },
                                 { key: '15d', label: 'Last 15 Days' },
                                 { key: '30d', label: 'Last 30 Days' },
