@@ -3,7 +3,7 @@ import {
     MdClose, MdFileDownload, MdCheckCircle, MdWarning,
     MdEdit, MdSave, MdCancel, MdEmail, MdSync,
 } from 'react-icons/md';
-import { updateInvoice } from '../../services/invoiceService';
+import { updateInvoice, updateInvoiceStatus } from '../../services/invoiceService';
 import toast from 'react-hot-toast';
 import './Invoices.css';
 
@@ -12,9 +12,32 @@ const InvoiceDetail = ({ invoice, onClose, supplierDetails, onUpdated }) => {
     const [editing, setEditing] = useState(false);
     const [editItems, setEditItems] = useState([]);
     const [editDiscount, setEditDiscount] = useState({ type: 'none', value: 0 });
+    const [editStatus, setEditStatus] = useState(invoice?.status || 'issued');
     const [saving, setSaving] = useState(false);
+    const [savingStatus, setSavingStatus] = useState(false);
     const [sendingEmail, setSendingEmail] = useState(false);
     const [syncingXero, setSyncingXero] = useState(false);
+
+    const handleSaveStatus = async () => {
+        const targetId = invoice?.id || invoice?.doc_id || invoice?.invoice_id;
+        if (!targetId) {
+            toast.error('Invoice ID is missing');
+            return;
+        }
+        setSavingStatus(true);
+        try {
+            await updateInvoiceStatus(targetId, editStatus);
+            toast.success(`Payment status updated to ${editStatus.toUpperCase()}`);
+            if (onUpdated) {
+                onUpdated({ ...invoice, status: editStatus });
+            }
+        } catch (err) {
+            console.error('Save status error:', err);
+            toast.error(`Failed to update status: ${err.message || 'Error'}`);
+        } finally {
+            setSavingStatus(false);
+        }
+    };
 
     useEffect(() => {
         if (invoice) {
@@ -23,6 +46,7 @@ const InvoiceDetail = ({ invoice, onClose, supplierDetails, onUpdated }) => {
                 type: invoice.discount_type || 'none',
                 value: invoice.discount_value || 0,
             });
+            setEditStatus(invoice.status || 'issued');
         }
     }, [invoice]);
 
@@ -152,6 +176,7 @@ const InvoiceDetail = ({ invoice, onClose, supplierDetails, onUpdated }) => {
                 line_items: editItems,
                 discount_type: editDiscount.type,
                 discount_value: editDiscount.value,
+                status: editStatus,
             });
             toast.success('Invoice updated successfully');
             setEditing(false);
@@ -166,6 +191,7 @@ const InvoiceDetail = ({ invoice, onClose, supplierDetails, onUpdated }) => {
                     subtotal: editTotals.subtotal,
                     total_vat: editTotals.totalVat,
                     grand_total: editTotals.grandTotal,
+                    status: editStatus,
                 });
             }
         } catch (err) {
@@ -182,6 +208,7 @@ const InvoiceDetail = ({ invoice, onClose, supplierDetails, onUpdated }) => {
             type: invoice.discount_type || 'none',
             value: invoice.discount_value || 0,
         });
+        setEditStatus(invoice.status || 'issued');
         setEditing(false);
     };
 
@@ -277,7 +304,10 @@ const InvoiceDetail = ({ invoice, onClose, supplierDetails, onUpdated }) => {
                 <div className="modal-header" style={{ borderBottom: '1px solid var(--color-border)', padding: '20px 24px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                         <h2 style={{ margin: 0, fontSize: '1.25rem' }}>Invoice <span className="text-monospace">{invoice.invoice_number}</span></h2>
-                        {invoice.status === 'issued' && <span className="badge badge-info"><MdCheckCircle /> Issued</span>}
+                        {(invoice.status === 'issued' || !invoice.status) && <span className="badge badge-info"><MdCheckCircle /> Issued</span>}
+                        {invoice.status === 'paid' && <span className="badge badge-success" style={{ background: 'rgba(34, 197, 94, 0.12)', color: '#16a34a', border: '1px solid rgba(34, 197, 94, 0.3)' }}><MdCheckCircle /> Paid</span>}
+                        {invoice.status === 'draft' && <span className="badge badge-warning" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#d97706', border: '1px solid rgba(245, 158, 11, 0.3)' }}>Draft</span>}
+                        {invoice.status === 'void' && <span className="badge badge-danger" style={{ background: 'rgba(239, 68, 68, 0.12)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.3)' }}>Void</span>}
                         {invoice.xero_invoice_id && (
                             <span className="badge badge-success" style={{ background: 'rgba(19, 181, 234, 0.12)', color: '#0d9dd9', border: '1px solid rgba(19, 181, 234, 0.3)' }}
                                 title={`Xero Invoice: ${invoice.xero_invoice_number || invoice.xero_invoice_id}`}>
@@ -489,11 +519,11 @@ const InvoiceDetail = ({ invoice, onClose, supplierDetails, onUpdated }) => {
                             )}
 
                             {/* Totals Section */}
-                            <div className="totals-wrapper" style={{ display: 'flex', justifyContent: 'space-between', marginTop: 32 }}>
-                                {/* VAT Summary Box */}
-                                <div className="vat-summary" style={{ width: '45%' }}>
+                            <div className="totals-wrapper" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 32 }}>
+                                {/* Left Column: VAT Summary & Payment Status Selector in White Space */}
+                                <div style={{ width: '48%', display: 'flex', flexDirection: 'column', gap: 16 }}>
                                     {invoice.vat_summary && invoice.vat_summary.length > 0 && (
-                                        <>
+                                        <div className="vat-summary">
                                             <div style={{ fontSize: 13, textTransform: 'uppercase', color: '#1f2937', fontWeight: 700, marginBottom: 8, letterSpacing: 0.5 }}>VAT Summary</div>
                                             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                                                 <thead>
@@ -513,12 +543,37 @@ const InvoiceDetail = ({ invoice, onClose, supplierDetails, onUpdated }) => {
                                                     ))}
                                                 </tbody>
                                             </table>
-                                        </>
+                                        </div>
                                     )}
+
+                                    {/* Payment Status Dropdown Selector in Left White Space */}
+                                    <div className="pdf-hide-select" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0', width: 'fit-content' }}>
+                                        <span style={{ fontSize: 13, fontWeight: 700, color: '#334155' }}>Payment Status:</span>
+                                        <select
+                                            value={editStatus}
+                                            onChange={e => setEditStatus(e.target.value)}
+                                            style={{
+                                                padding: '6px 10px',
+                                                borderRadius: '6px',
+                                                border: '1px solid #cbd5e1',
+                                                fontSize: '13px',
+                                                fontWeight: 600,
+                                                backgroundColor: '#ffffff',
+                                                color: '#0f172a',
+                                                cursor: 'pointer',
+                                                outline: 'none',
+                                            }}
+                                        >
+                                            <option value="issued">Issued</option>
+                                            <option value="paid">Paid</option>
+                                            <option value="draft">Draft</option>
+                                            <option value="void">Void / Cancelled</option>
+                                        </select>
+                                    </div>
                                 </div>
 
-                                {/* Grand Totals */}
-                                <div className="totals" style={{ width: '40%' }}>
+                                {/* Right Column: Grand Totals */}
+                                <div className="totals" style={{ width: '45%' }}>
                                     <div className="row" style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #f3f4f6', fontSize: 14 }}>
                                         <span style={{ color: '#374151' }}>Total Net Amount</span>
                                         <span style={{ fontWeight: 600, color: '#111' }}>{formatCurrency(subtotal)}</span>
@@ -536,9 +591,9 @@ const InvoiceDetail = ({ invoice, onClose, supplierDetails, onUpdated }) => {
                                             <span style={{ fontWeight: 600 }}>-{formatCurrency(discountAmt)}</span>
                                         </div>
                                     )}
-                                    <div className="row grand" style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 12, marginTop: 4, borderTop: '2px solid #111', fontSize: 18, fontWeight: 700, color: '#111' }}>
-                                        <span>Invoice Total</span>
-                                        <span>{formatCurrency(grandTotal)}</span>
+                                    <div className="row grand" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 12, marginTop: 4, borderTop: '2px solid #111' }}>
+                                        <span style={{ fontSize: 18, fontWeight: 700, color: '#111' }}>Invoice Total</span>
+                                        <span style={{ fontSize: 18, fontWeight: 700, color: '#111' }}>{formatCurrency(grandTotal)}</span>
                                     </div>
                                 </div>
                             </div>
@@ -558,15 +613,15 @@ const InvoiceDetail = ({ invoice, onClose, supplierDetails, onUpdated }) => {
                 </div>
 
                 {/* Modal Actions */}
-                <div className="modal-footer" style={{ borderTop: '1px solid var(--color-border)', padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div className="modal-footer" style={{ borderTop: '1px solid var(--color-border)', padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         {invoice.xero_status === 'failed' && (
                             <span style={{ color: 'var(--color-danger)', fontSize: 'var(--text-sm)', display: 'flex', alignItems: 'center', gap: 4 }}>
                                 <MdWarning /> Xero Sync Failed
                             </span>
                         )}
                     </div>
-                    <div style={{ display: 'flex', gap: 10 }}>
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                         {editing ? (
                             <>
                                 <button className="btn btn-secondary btn-md" onClick={handleCancelEdit} style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -581,6 +636,10 @@ const InvoiceDetail = ({ invoice, onClose, supplierDetails, onUpdated }) => {
                             <>
                                 <button className="btn btn-secondary btn-md" onClick={onClose} style={{ padding: '8px 16px' }}>
                                     Close
+                                </button>
+                                <button className="btn btn-primary btn-md" onClick={handleSaveStatus} disabled={savingStatus}
+                                    style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px' }}>
+                                    <MdSave size={16} /> {savingStatus ? 'Saving...' : 'Save'}
                                 </button>
                                 {!isProduction && (
                                     <button className="btn btn-ghost btn-md" onClick={() => setEditing(true)}

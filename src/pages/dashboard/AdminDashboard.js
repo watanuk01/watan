@@ -788,6 +788,7 @@ const AdminDashboard = () => {
                         <div className="dash-filter-presets">
                             {[
                                 { id: 'today', label: 'Today' },
+                                { id: 'yesterday', label: 'Yesterday' },
                                 { id: '7d', label: 'Last 7 Days' },
                                 { id: '15d', label: 'Last 15 Days' },
                                 { id: '30d', label: 'Last 30 Days' },
