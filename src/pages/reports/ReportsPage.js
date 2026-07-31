@@ -96,7 +96,11 @@ const renderPieLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent })
     );
 };
 
-const shortVal = v => v >= 1000 ? `£${(v / 1000).toFixed(1)}k` : `£${v}`;
+const shortVal = v => {
+    if (!v) return '£0';
+    if (v >= 1000) return `£${(v / 1000).toFixed(1)}k`;
+    return `£${v}`;
+};
 
 // ═══════════════════════════════════════════════════════
 // EMAIL MODAL
@@ -662,12 +666,12 @@ const ReportsPage = () => {
             if (dateTo) filters.dateTo = dateTo;
         }
         if (selectedRestaurant) {
-            const found = restaurantOptions.find(r => r.restaurant_id === selectedRestaurant || r.id === selectedRestaurant);
+            const found = restaurantOptions.find(r => r.restaurant_name === selectedRestaurant || r.restaurant_id === selectedRestaurant || r.id === selectedRestaurant);
             if (found) {
                 filters.restaurantId = found.restaurant_id || found.id;
                 filters.restaurantName = found.restaurant_name || found.name;
             } else {
-                filters.restaurantId = selectedRestaurant;
+                filters.restaurantName = selectedRestaurant;
             }
         }
         return filters;
@@ -741,7 +745,7 @@ const ReportsPage = () => {
                 ? `${appliedCustomFrom || '—'} to ${appliedCustomTo || '—'}`
                 : REPORT_PRESETS.find(p => p.id === datePreset)?.label || datePreset;
             const restStr = selectedRestaurant
-                ? restaurantOptions.find(r => r.restaurant_id === selectedRestaurant || r.id === selectedRestaurant)?.restaurant_name || selectedRestaurant
+                ? restaurantOptions.find(r => r.restaurant_name === selectedRestaurant || r.restaurant_id === selectedRestaurant || r.id === selectedRestaurant)?.restaurant_name || selectedRestaurant
                 : 'All Restaurants';
             doc.text(`Period: ${dateStr}   |   Restaurant Filter: ${restStr}   |   Generated: ${new Date().toLocaleString('en-GB')}`, 14, 26);
 
@@ -918,7 +922,7 @@ const ReportsPage = () => {
                 ? `${appliedCustomFrom || '—'} to ${appliedCustomTo || '—'}`
                 : REPORT_PRESETS.find(p => p.id === datePreset)?.label || datePreset;
             const restStr = selectedRestaurant
-                ? restaurantOptions.find(r => r.restaurant_id === selectedRestaurant || r.id === selectedRestaurant)?.restaurant_name || selectedRestaurant
+                ? restaurantOptions.find(r => r.restaurant_name === selectedRestaurant || r.restaurant_id === selectedRestaurant || r.id === selectedRestaurant)?.restaurant_name || selectedRestaurant
                 : 'All Restaurants';
 
             let bodyHtml = '';
@@ -1214,7 +1218,7 @@ const ReportsPage = () => {
                     >
                         <option value="">All Restaurants</option>
                         {restaurantOptions.map(r => (
-                            <option key={r.restaurant_id} value={r.restaurant_id}>{r.restaurant_name}</option>
+                            <option key={r.restaurant_id || r.id} value={r.restaurant_name}>{r.restaurant_name}</option>
                         ))}
                     </select>
                 </div>

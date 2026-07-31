@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import {
     getInvoices, getInvoiceById, getSupplierDetails, saveSupplierDetails,
     getConsolidatedData, getRestaurantUsers, regenerateAllInvoiceVat,
+    updateInvoiceStatus,
 } from '../../services/invoiceService';
 import { getProductionInvoices } from '../../services/productionService';
 import {
@@ -331,7 +332,40 @@ const InvoicesPage = () => {
                                             <td style={{ textAlign: 'right', fontWeight: 500 }}>{formatCurrency(inv.subtotal || inv.total_ingredient_cost)}</td>
                                             <td style={{ textAlign: 'right', color: 'var(--color-text-muted)' }}>{formatCurrency(inv.total_vat || inv.vat_amount)}</td>
                                             <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--color-primary)' }}>{formatCurrency(inv.grand_total || inv.total_with_vat)}</td>
-                                            <td>{getStatusBadge(inv.status)}</td>
+                                            <td onClick={e => e.stopPropagation()}>
+                                                <select
+                                                    value={(inv.status || 'issued').toLowerCase()}
+                                                    onChange={async (e) => {
+                                                        const newStatus = e.target.value;
+                                                        const invId = inv.id || inv.doc_id || inv.invoice_id;
+                                                        try {
+                                                            toast.loading('Updating status…', { id: 'inv-status' });
+                                                            await updateInvoiceStatus(invId, newStatus);
+                                                            toast.success(`Status updated to ${newStatus.toUpperCase()}`, { id: 'inv-status' });
+                                                            fetchData();
+                                                        } catch (err) {
+                                                            console.error('Failed to update status:', err);
+                                                            toast.error('Failed to update status', { id: 'inv-status' });
+                                                        }
+                                                    }}
+                                                    style={{
+                                                        padding: '4px 8px',
+                                                        borderRadius: '6px',
+                                                        border: '1px solid #cbd5e1',
+                                                        fontSize: '12px',
+                                                        fontWeight: 600,
+                                                        backgroundColor: '#ffffff',
+                                                        color: '#111111',
+                                                        cursor: 'pointer',
+                                                        outline: 'none',
+                                                    }}
+                                                >
+                                                    <option value="issued">Issued</option>
+                                                    <option value="paid">Paid</option>
+                                                    <option value="draft">Draft</option>
+                                                    <option value="void">Void / Cancelled</option>
+                                                </select>
+                                            </td>
                                             <td>
                                                 {inv.xero_invoice_id ? (
                                                     <span title={`Xero: ${inv.xero_invoice_number || inv.xero_invoice_id}`} style={{ color: '#13b5ea', fontSize: 16, display: 'flex', alignItems: 'center', gap: 4 }}>

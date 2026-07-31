@@ -114,9 +114,40 @@ const getEpos = async () => {
 const getPurchaseOrders = async () => {
     if (_vendorCache) return _vendorCache;
     const snap = await getDocs(collection(db, 'purchase_orders'));
+
     _vendorCache = snap.docs.map(d => {
         const data = d.data();
-        const dateVal = data.created_at || data.order_date || data.expected_delivery_date || data.received_at || data.date;
+
+        // Try named fields first (snake_case and camelCase variants)
+        let dateVal = data.created_at || data.createdAt
+            || data.order_date || data.orderDate
+            || data.expected_delivery_date || data.expectedDeliveryDate
+            || data.received_at || data.receivedAt
+            || data.date || data.timestamp
+            || data.updated_at || data.updatedAt;
+
+        // If no named field found, scan ALL fields for the first Firestore Timestamp
+        if (!dateVal) {
+            for (const key of Object.keys(data)) {
+                const v = data[key];
+                if (v && typeof v === 'object' && typeof v.toDate === 'function') {
+                    dateVal = v;
+                    break;
+                }
+            }
+        }
+
+        // If still nothing, try any ISO date string field
+        if (!dateVal) {
+            for (const key of Object.keys(data)) {
+                const v = data[key];
+                if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) {
+                    dateVal = v;
+                    break;
+                }
+            }
+        }
+
         return {
             id: d.id,
             ...data,
@@ -165,6 +196,10 @@ const getProductions = async () => {
 const applyFilters = (rows, { dateFrom, dateTo, restaurantId, restaurantName } = {}) =>
     rows.filter(r => {
         const ca = r.created_at;
+
+        // If date filters are active, exclude records with no date
+        if ((dateFrom || dateTo) && !ca) return false;
+
         if (dateFrom && ca && ca < dateFrom) return false;
         if (dateTo && ca && ca > dateTo) return false;
 
@@ -174,10 +209,14 @@ const applyFilters = (rows, { dateFrom, dateTo, restaurantId, restaurantName } =
             const targetId = (restaurantId || '').toLowerCase();
             const targetName = (restaurantName || '').toLowerCase();
 
-            const matchesId = targetId && (rid === targetId || rname === targetId || rid.includes(targetId) || targetId.includes(rid));
-            const matchesName = targetName && (rname === targetName || rid === targetName || rname.includes(targetName) || targetName.includes(rname));
+            // If record specifies a restaurant, enforce matching
+            if (rid || rname) {
+                const matchesId = targetId && (rid === targetId || rname === targetId || rid.includes(targetId) || targetId.includes(rid));
+                const matchesName = targetName && (rname === targetName || rid === targetName || rname.includes(targetName) || targetName.includes(rname));
 
-            if (!matchesId && !matchesName) return false;
+                if (!matchesId && !matchesName) return false;
+            }
+            // If record has no restaurant field (e.g. Central Kitchen PO), include it as shared CK supply
         }
 
         return true;
@@ -794,25 +833,150 @@ export const fetchTopOrderedItems = async (limit = 500, filters = {}) => {
     return { items, categories: [...categorySet].sort() };
 };
 
+const resolveVendorName = (data) => {
+    let name = null;
+
+    if (typeof data.vendor === 'string') name = data.vendor;
+    else if (data.vendor && typeof data.vendor === 'object') name = data.vendor.name || data.vendor.label || data.vendor.vendor_name;
+
+    if (!name && typeof data.vendor_name === 'string') name = data.vendor_name;
+    if (!name && typeof data.supplier_name === 'string') name = data.supplier_name;
+    if (!name && typeof data.supplier === 'string') name = data.supplier;
+    else if (!name && data.supplier && typeof data.supplier === 'object') name = data.supplier.name || data.supplier.label;
+
+    if (!name && data.vendorDetails) {
+        name = typeof data.vendorDetails === 'object' ? (data.vendorDetails.name || data.vendorDetails.vendor_name) : data.vendorDetails;
+    }
+    if (!name && data.supplierDetails) {
+        name = typeof data.supplierDetails === 'object' ? (data.supplierDetails.name || data.supplierDetails.supplier_name) : data.supplierDetails;
+    }
+
+    if (!name && data.items && Array.isArray(data.items) && data.items.length > 0) {
+        for (const item of data.items) {
+            if (typeof item.vendor === 'string') { name = item.vendor; break; }
+            if (item.vendor && typeof item.vendor === 'object' && item.vendor.name) { name = item.vendor.name; break; }
+            if (item.vendor_name) { name = item.vendor_name; break; }
+            if (item.supplier) { name = typeof item.supplier === 'string' ? item.supplier : item.supplier.name; break; }
+        }
+    }
+
+    if (!name) return null;
+    const str = String(name).trim();
+    const lower = str.toLowerCase();
+
+    // Exclude internal non-vendor names
+    if (!str || lower.includes('central kitchen') || ['unknown', 'n/a', 'none', 'null', 'undefined'].includes(lower)) {
+        return null;
+    }
+
+    // Capitalize vendor names cleanly (e.g. 'atlantic' -> 'Atlantic', 'pickstock' -> 'Pickstock')
+    return str.charAt(0).toUpperCase() + str.slice(1);
+};
+
+const getRecordTotalValue = (data) => {
+    // 1. Direct header value
+    let val = Number(
+        data.total_amount ?? data.total ?? data.grand_total ?? data.amount ??
+        data.total_value ?? data.total_cost ?? data.value ?? data.subtotal ?? 0
+    );
+
+    // 2. If header value is 0, check line items
+    if (val === 0 && data.items && Array.isArray(data.items) && data.items.length > 0) {
+        val = data.items.reduce((sum, it) => {
+            const lineTotal = Number(it.total ?? it.line_total ?? it.subtotal ?? 0);
+            if (lineTotal > 0) return sum + lineTotal;
+
+            const qty = Number(it.received_quantity ?? it.quantity ?? it.qty ?? it.initial_quantity ?? 1);
+            const price = Number(it.received_price ?? it.unit_price ?? it.price ?? it.cost_price ?? it.purchase_price ?? it.cost ?? 0);
+            return sum + (qty * price);
+        }, 0);
+    }
+
+    // 3. For inventory batch documents (single item batch)
+    if (val === 0) {
+        const qty = Number(data.initial_quantity ?? data.current_quantity ?? data.quantity ?? data.received_quantity ?? 0);
+        const price = Number(data.cost_price ?? data.unit_price ?? data.price ?? data.purchase_price ?? data.cost ?? 0);
+        val = qty * price;
+    }
+
+    return val;
+};
+
 export const fetchVendorAnalysis = async (filters = {}) => {
-    const orders = await getPurchaseOrders();
+    const [purchaseOrders, batches, invoices] = await Promise.all([
+        getPurchaseOrders(),
+        getBatches(),
+        getInvoices(),
+    ]);
 
-    // 1. Try filtering by date range (POs are Central Kitchen level, so ignore branch restaurant filter)
-    const dateFiltersOnly = { dateFrom: filters.dateFrom, dateTo: filters.dateTo };
-    let filtered = applyFilters(orders, dateFiltersOnly);
+    const allRecords = [];
 
-    // 2. If no purchase orders match the narrow date window (e.g. Today), fallback to all purchase orders
+    // 1. Purchase orders
+    purchaseOrders.forEach(po => {
+        const v = resolveVendorName(po);
+        if (v) {
+            allRecords.push({
+                ...po,
+                _source: 'po',
+                _vendorName: v,
+                total_val: getRecordTotalValue(po),
+            });
+        }
+    });
+
+    // 2. Inventory batches
+    batches.forEach(b => {
+        const v = resolveVendorName(b);
+        if (v) {
+            allRecords.push({
+                ...b,
+                _source: 'batch',
+                _vendorName: v,
+                total_val: getRecordTotalValue(b),
+            });
+        }
+    });
+
+    // 3. Invoices
+    invoices.forEach(inv => {
+        const v = resolveVendorName(inv);
+        if (v) {
+            allRecords.push({
+                ...inv,
+                _source: 'invoice',
+                created_at: inv.invoice_date || inv.created_at,
+                _vendorName: v,
+                total_val: getRecordTotalValue(inv),
+            });
+        }
+    });
+
+    // Filter strictly by date range and restaurant (NO FALLBACK)
+    const filtered = applyFilters(allRecords, filters);
+
     if (!filtered || filtered.length === 0) {
-        filtered = orders;
+        return [];
     }
 
     const map = {};
     filtered.forEach(data => {
-        const vendor = data.vendor || data.vendor_name || data.supplier_name || 'Unknown Vendor';
+        const vendor = data._vendorName || resolveVendorName(data);
+        if (!vendor) return;
+
+        const orderVal = Number(data.total_val || getRecordTotalValue(data));
+
+        let itemQty = 0;
+        if (data.items && Array.isArray(data.items) && data.items.length > 0) {
+            itemQty = data.items.reduce((acc, it) => acc + (Number(it.quantity || it.qty || it.received_quantity) || 1), 0);
+        } else {
+            itemQty = Number(data.initial_quantity || data.current_quantity || data.quantity || data.received_quantity || 0);
+            if (itemQty === 0 && orderVal > 0) itemQty = 1;
+        }
+
         if (!map[vendor]) map[vendor] = { name: vendor, orders: 0, value: 0, items: 0 };
         map[vendor].orders++;
-        map[vendor].value += Number(data.total_amount || data.total || 0);
-        map[vendor].items += (data.items || []).length;
+        map[vendor].value += orderVal;
+        map[vendor].items += itemQty;
     });
 
     return Object.values(map)
@@ -858,7 +1022,7 @@ export const fetchBatchAnalytics = async (filters = {}) => {
         avgUtilization: totalReceived > 0 ? Math.round((totalUsed / totalReceived) * 1000) / 10 : 0,
         productionToday: doneToday,
         productionWeek: doneWeek,
-        expiredList: expiredList.sort((a, b) => b.value - a.value).slice(0, 10),
+        expiredList,
     };
 };
 
@@ -906,7 +1070,6 @@ export const fetchRestaurantDirectory = async () => {
 };
 
 /**
- * Fetch restaurant list for filter dropdowns.
  * Extracts unique restaurants across users, orders, waste, and EPOS.
  * Returns [{ id, name, restaurant_name, restaurant_id }]
  */
@@ -914,73 +1077,37 @@ export const fetchRestaurantList = async () => {
     if (_restaurantListCache) return _restaurantListCache;
 
     try {
-        const [usersSnap, allOrders, allWaste, allEpos] = await Promise.all([
-            getDocs(collection(db, 'users')),
-            getOrders(),
-            getWaste(),
-            getEpos(),
-        ]);
-
         const restMap = new Map();
 
-        // 1. Users
+        // 1. Users collection (instant query)
+        const usersSnap = await getDocs(collection(db, 'users'));
         usersSnap.docs.forEach(d => {
             const u = d.data();
-            const rName = u.restaurant_name || (u.role?.includes('restaurant') ? u.name : null);
-            if (rName) {
+            const rName = u.restaurant_name || u.name;
+            if (rName && (u.role?.includes('restaurant') || u.restaurant_name || u.restaurant_id)) {
                 const key = rName.trim().toLowerCase();
                 restMap.set(key, {
                     id: d.id,
-                    name: u.name || rName.trim(),
+                    name: rName.trim(),
                     restaurant_name: rName.trim(),
                     restaurant_id: u.restaurant_id || d.id,
                 });
             }
         });
 
-        // 2. Orders
-        allOrders.forEach(o => {
-            const rName = o.restaurant_name;
+        // 2. Invoices collection (lightweight query for restaurant names)
+        const invoicesSnap = await getDocs(collection(db, 'invoices'));
+        invoicesSnap.docs.forEach(d => {
+            const inv = d.data();
+            const rName = inv.restaurant_name || inv.vendor_name || inv.customer_name;
             if (rName) {
                 const key = rName.trim().toLowerCase();
                 if (!restMap.has(key)) {
                     restMap.set(key, {
-                        id: o.restaurant_id || key,
+                        id: inv.restaurant_id || d.id,
                         name: rName.trim(),
                         restaurant_name: rName.trim(),
-                        restaurant_id: o.restaurant_id || key,
-                    });
-                }
-            }
-        });
-
-        // 3. Waste
-        allWaste.forEach(w => {
-            const rName = w.location_name;
-            if (rName && w.location_type === 'restaurant') {
-                const key = rName.trim().toLowerCase();
-                if (!restMap.has(key)) {
-                    restMap.set(key, {
-                        id: w.location_id || key,
-                        name: rName.trim(),
-                        restaurant_name: rName.trim(),
-                        restaurant_id: w.location_id || key,
-                    });
-                }
-            }
-        });
-
-        // 4. EPOS
-        allEpos.forEach(e => {
-            const rName = e.restaurant_name;
-            if (rName) {
-                const key = rName.trim().toLowerCase();
-                if (!restMap.has(key)) {
-                    restMap.set(key, {
-                        id: e.restaurant_id || key,
-                        name: rName.trim(),
-                        restaurant_name: rName.trim(),
-                        restaurant_id: e.restaurant_id || key,
+                        restaurant_id: inv.restaurant_id || d.id,
                     });
                 }
             }

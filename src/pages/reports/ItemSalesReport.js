@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
     MdFilterList, MdSearch, MdPictureAsPdf,
     MdTrendingUp, MdShoppingCart, MdCategory,
+    MdEmail, MdClose,
 } from 'react-icons/md';
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -14,8 +15,46 @@ import {
     startOfDay,
     endOfDay,
 } from '../../services/analyticsService';
+import { getFunctions, httpsCallable } from 'firebase/functions';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import toast from 'react-hot-toast';
 import '../dashboard/Dashboard.css';
+
+const EmailModal = ({ onClose, onSend, sending }) => {
+    const [email, setEmail] = useState('');
+    return (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999 }}>
+            <div style={{ background: 'var(--color-bg-surface, #1e1e2e)', border: '1px solid var(--color-border, rgba(255,255,255,0.12))', borderRadius: 12, width: 420, padding: 24, boxShadow: '0 20px 40px rgba(0,0,0,0.4)', color: 'var(--color-text-primary, #f1f5f9)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                    <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <MdEmail style={{ color: '#c9a96e' }} /> Email Item Sales Report
+                    </h3>
+                    <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer', fontSize: 18 }}><MdClose /></button>
+                </div>
+                <p style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 16 }}>
+                    Enter recipient email address to receive the full HTML item sales report.
+                </p>
+                <form onSubmit={e => { e.preventDefault(); if (email) onSend(email); }}>
+                    <input
+                        type="email"
+                        required
+                        placeholder="e.g. manager@watan.co.uk"
+                        value={email}
+                        onChange={e => setEmail(e.target.value)}
+                        style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--color-border, rgba(255,255,255,0.15))', background: 'var(--color-bg-body, #12121a)', color: '#fff', fontSize: 14, marginBottom: 20, boxSizing: 'border-box', outline: 'none' }}
+                    />
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                        <button type="button" onClick={onClose} className="btn btn-secondary btn-sm" disabled={sending}>Cancel</button>
+                        <button type="submit" className="btn btn-primary btn-sm" disabled={sending || !email}>
+                            {sending ? 'Sending…' : 'Send Email'}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
 
 const DATE_PRESETS = [
     { id: 'today', label: 'Today' },
@@ -114,65 +153,79 @@ const CustomLeastChartTooltip = ({ active, payload, label }) => {
 };
 
 const ItemSalesReport = () => {
-    const [loading, setLoading] = useState(false);
-    const [items, setItems] = useState([]);
-    const [categories, setCategories] = useState([]);
-
-    // Filters
     const [datePreset, setDatePreset] = useState('today');
     const [customFrom, setCustomFrom] = useState('');
     const [customTo, setCustomTo] = useState('');
     const [appliedCustomFrom, setAppliedCustomFrom] = useState('');
     const [appliedCustomTo, setAppliedCustomTo] = useState('');
     const [selectedRestaurant, setSelectedRestaurant] = useState('');
-    const [restaurantOptions, setRestaurantOptions] = useState([]);
+
     const [categoryFilter, setCategoryFilter] = useState('all');
     const [selectedItemFilter, setSelectedItemFilter] = useState('all');
     const [searchQuery, setSearchQuery] = useState('');
 
+    const [items, setItems] = useState([]);
+    const [categories, setCategories] = useState([]);
+    const [restaurantOptions, setRestaurantOptions] = useState([]);
+    const [loading, setLoading] = useState(true);
+
+    const [showEmailModal, setShowEmailModal] = useState(false);
+    const [emailSending, setEmailSending] = useState(false);
+
     const reportRef = useRef(null);
 
     useEffect(() => {
-        fetchRestaurantList().then(setRestaurantOptions).catch(console.error);
+        let mounted = true;
+        fetchRestaurantList()
+            .then(res => {
+                if (mounted && res) setRestaurantOptions(res);
+            })
+            .catch(err => console.warn('Failed to load restaurant options:', err));
+        return () => { mounted = false; };
     }, []);
-
-    const getFilters = useCallback(() => {
-        let filters = {};
-        if (datePreset === 'custom') {
-            if (appliedCustomFrom) filters.dateFrom = new Date(appliedCustomFrom);
-            if (appliedCustomTo) filters.dateTo = endOfDay(new Date(appliedCustomTo));
-        } else {
-            const { dateFrom, dateTo } = getPresetDates(datePreset);
-            if (dateFrom) filters.dateFrom = dateFrom;
-            if (dateTo) filters.dateTo = dateTo;
-        }
-        if (selectedRestaurant) {
-            const found = restaurantOptions.find(r => r.restaurant_id === selectedRestaurant);
-            if (found) {
-                filters.restaurantId = found.restaurant_id;
-                filters.restaurantName = found.restaurant_name;
-            }
-        }
-        return filters;
-    }, [datePreset, appliedCustomFrom, appliedCustomTo, selectedRestaurant, restaurantOptions]);
 
     const loadData = useCallback(async () => {
         setLoading(true);
         try {
-            const result = await fetchTopOrderedItems(500, getFilters());
-            setItems(result.items);
-            setCategories(result.categories);
-        } catch (e) {
+            let df = null, dt = null;
+            if (datePreset === 'custom') {
+                if (appliedCustomFrom) df = startOfDay(new Date(appliedCustomFrom));
+                if (appliedCustomTo) dt = endOfDay(new Date(appliedCustomTo));
+            } else {
+                const dates = getPresetDates(datePreset);
+                df = dates.dateFrom;
+                dt = dates.dateTo;
+            }
+
+            const filters = {
+                dateFrom: df,
+                dateTo: dt,
+            };
+
+            if (selectedRestaurant) {
+                const found = restaurantOptions.find(r => r.restaurant_name === selectedRestaurant || r.restaurant_id === selectedRestaurant);
+                if (found) {
+                    filters.restaurantId = found.restaurant_id || found.id;
+                    filters.restaurantName = found.restaurant_name || found.name;
+                } else {
+                    filters.restaurantName = selectedRestaurant;
+                }
+            }
+
+            const result = await fetchTopOrderedItems(500, filters);
+            setItems(result?.items || []);
+            setCategories(result?.categories || []);
+        } catch (err) {
+            console.error('Failed to load Item Sales Report:', err);
             toast.error('Failed to load item sales data');
-            console.error(e);
         } finally {
             setLoading(false);
         }
-    }, [getFilters]);
+    }, [datePreset, appliedCustomFrom, appliedCustomTo, selectedRestaurant, restaurantOptions]);
 
     useEffect(() => {
         loadData();
-    }, [datePreset, appliedCustomFrom, appliedCustomTo, selectedRestaurant]); // eslint-disable-line
+    }, [loadData]);
 
     let filteredItems = items;
     if (categoryFilter !== 'all') {
@@ -187,67 +240,63 @@ const ItemSalesReport = () => {
     }
 
     const sortedItems = [...filteredItems].sort((a, b) => b.quantity - a.quantity);
-    const top10Most = sortedItems.slice(0, 10);
-    const top10Least = [...filteredItems].sort((a, b) => a.quantity - b.quantity).slice(0, 10);
+    const topMostOrdered = [...sortedItems].slice(0, 5);
+    const leastOrdered = [...sortedItems].sort((a, b) => a.quantity - b.quantity).slice(0, 5);
 
-    // KPI calculations
-    const totalQty = filteredItems.reduce((s, i) => s + i.quantity, 0);
-    const totalValue = filteredItems.reduce((s, i) => s + i.value, 0);
-    const avgItemValue = filteredItems.length > 0 ? totalValue / filteredItems.length : 0;
-
+    const totalItemsCount = sortedItems.length;
+    const totalQtyOrdered = sortedItems.reduce((acc, i) => acc + (i.quantity || 0), 0);
+    const totalRevenueValue = sortedItems.reduce((acc, i) => acc + (i.value || 0), 0);
+    const avgPrice = totalItemsCount > 0 ? totalRevenueValue / (totalQtyOrdered || 1) : 0;
     const activePresetLabel = DATE_PRESETS.find(p => p.id === datePreset)?.label || 'Today';
 
-    const handlePdfExport = async () => {
-        toast.loading('Generating PDF…', { id: 'pdf' });
+    const handlePdfExport = () => {
         try {
-            const { default: jsPDF } = await import('jspdf');
-            const { default: autoTable } = await import('jspdf-autotable');
-            const doc = new jsPDF({ orientation: 'landscape' });
+            toast.loading('Generating PDF…', { id: 'pdf' });
+            const doc = new jsPDF('p', 'mm', 'a4');
 
-            doc.setFontSize(16);
-            doc.setTextColor(40);
-            doc.text('Item Sales Report', 14, 15);
+            doc.setFillColor(30, 30, 46);
+            doc.rect(0, 0, 210, 24, 'F');
+            doc.setTextColor(201, 169, 110);
+            doc.setFontSize(14);
+            doc.setFont('helvetica', 'bold');
+            doc.text('Watan Central Kitchen — Item Sales Report', 14, 15);
 
-            doc.setFontSize(10);
-            doc.setTextColor(100);
-            let filterText = `Period: ${activePresetLabel}`;
-            if (selectedRestaurant) {
-                const rest = restaurantOptions.find(r => r.restaurant_id === selectedRestaurant);
-                if (rest) filterText += ` | Restaurant: ${rest.restaurant_name}`;
+            let dateStr = activePresetLabel;
+            if (datePreset === 'custom' && appliedCustomFrom && appliedCustomTo) {
+                dateStr = `${appliedCustomFrom} to ${appliedCustomTo}`;
             }
-            if (categoryFilter !== 'all') filterText += ` | Category: ${categoryFilter}`;
-            doc.text(filterText, 14, 22);
-            doc.text(`Generated: ${new Date().toLocaleDateString('en-GB')} ${new Date().toLocaleTimeString('en-GB')}`, 14, 27);
+            const restObj = restaurantOptions.find(r => r.restaurant_name === selectedRestaurant || r.restaurant_id === selectedRestaurant);
+            const restStr = restObj ? restObj.restaurant_name : 'All Restaurants';
+
+            doc.setTextColor(60);
+            doc.setFontSize(9);
+            doc.setFont('helvetica', 'normal');
+            doc.text(`Period: ${dateStr}   |   Restaurant: ${restStr}   |   Generated: ${new Date().toLocaleDateString('en-GB')}`, 14, 31);
+
+            const tableRows = sortedItems.map((item, idx) => [
+                idx + 1,
+                item.name,
+                formatCurrency(item.price),
+                `${item.quantity} ${item.unit || 'units'}`,
+                `${item.prevQuantity} ${item.unit || 'units'}`,
+                `${item.difference > 0 ? '+' : ''}${item.difference} ${item.unit || 'units'}`,
+                `${item.growthPct > 0 ? '+' : ''}${item.growthPct}%`,
+            ]);
 
             autoTable(doc, {
+                startY: 36,
                 head: [['#', 'Item Title', 'Price', 'Selected Qty', 'Previous Qty', 'Difference', 'Growth %']],
-                body: sortedItems.map((item, i) => [
-                    i + 1,
-                    item.name,
-                    formatCurrency(item.price),
-                    item.quantity,
-                    item.prevQuantity,
-                    item.difference > 0 ? `+${item.difference}` : `${item.difference}`,
-                    item.growthPct > 0 ? `+${item.growthPct}%` : `${item.growthPct}%`,
-                ]),
-                startY: 34,
+                body: tableRows,
                 styles: { fontSize: 8, cellPadding: 3 },
-                headStyles: { fillColor: [253, 232, 237], textColor: [30, 41, 59], fontStyle: 'bold' },
-                alternateRowStyles: { fillColor: [250, 250, 250] },
+                headStyles: { fillColor: [30, 30, 46], textColor: [201, 169, 110], fontStyle: 'bold' },
                 columnStyles: {
-                    0: { cellWidth: 12, halign: 'center' },
+                    0: { cellWidth: 10 },
                     2: { halign: 'right' },
                     3: { halign: 'right' },
                     4: { halign: 'right' },
                     5: { halign: 'right' },
                     6: { halign: 'right' },
-                },
-                didDrawPage: (data) => {
-                    doc.setFontSize(8);
-                    doc.setTextColor(150);
-                    doc.text(`Page ${data.pageNumber}`, data.settings.margin.left, doc.internal.pageSize.height - 10);
-                    doc.text('Watan Central Kitchen — Item Sales Report', doc.internal.pageSize.width / 2, doc.internal.pageSize.height - 10, { align: 'center' });
-                },
+                }
             });
 
             doc.save(`item_sales_report_${new Date().toISOString().slice(0, 10)}.pdf`);
@@ -258,9 +307,87 @@ const ItemSalesReport = () => {
         }
     };
 
+    const handleEmailReport = async (recipientEmail) => {
+        setEmailSending(true);
+        try {
+            toast.loading('Sending email…', { id: 'email' });
+            let dateStr = activePresetLabel;
+            if (datePreset === 'custom' && appliedCustomFrom && appliedCustomTo) {
+                dateStr = `${appliedCustomFrom} to ${appliedCustomTo}`;
+            }
+            const restObj = restaurantOptions.find(r => r.restaurant_name === selectedRestaurant || r.restaurant_id === selectedRestaurant);
+            const restStr = restObj ? restObj.restaurant_name : 'All Restaurants';
+
+            const rows = sortedItems.map((item, idx) => `
+                <tr style="border-bottom: 1px solid #e2e8f0; font-size: 13px;">
+                    <td style="padding: 10px; color: #64748b;">${idx + 1}</td>
+                    <td style="padding: 10px; font-weight: 600; color: #1e293b;">${item.name}</td>
+                    <td style="padding: 10px; text-align: right; color: #475569;">${formatCurrency(item.price)}</td>
+                    <td style="padding: 10px; text-align: right; font-weight: 700; color: #d9534f;">${item.quantity} ${item.unit || 'units'}</td>
+                    <td style="padding: 10px; text-align: right; color: #64748b;">${item.prevQuantity} ${item.unit || 'units'}</td>
+                    <td style="padding: 10px; text-align: right; font-weight: 600; color: ${item.difference >= 0 ? '#16a34a' : '#dc2626'};">
+                        ${item.difference > 0 ? '+' : ''}${item.difference} ${item.unit || 'units'}
+                    </td>
+                    <td style="padding: 10px; text-align: right; font-weight: 600; color: ${item.growthPct >= 0 ? '#16a34a' : '#dc2626'};">
+                        ${item.growthPct > 0 ? '+' : ''}${item.growthPct}%
+                    </td>
+                </tr>
+            `).join('');
+
+            const htmlContent = `
+                <div style="font-family: Arial, Helvetica, sans-serif; background-color: #f1f5f9; padding: 24px; color: #1e293b;">
+                    <div style="max-width: 900px; margin: 0 auto; background: #ffffff; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); overflow: hidden;">
+                        <div style="background: #1e1e2e; padding: 24px; border-bottom: 3px solid #c9a96e;">
+                            <h1 style="margin: 0; color: #c9a96e; font-size: 22px;">Watan Central Kitchen — Item Sales Report</h1>
+                            <div style="color: #94a3b8; font-size: 14px; margin-top: 6px;">Detailed Item Performance & Sales Metrics</div>
+                        </div>
+                        <div style="background: #f8fafc; padding: 14px 24px; border-bottom: 1px solid #e2e8f0; font-size: 13px; color: #475569;">
+                            <strong>Period:</strong> ${dateStr} &nbsp;|&nbsp;
+                            <strong>Restaurant Scope:</strong> ${restStr} &nbsp;|&nbsp;
+                            <strong>Generated:</strong> ${new Date().toLocaleString('en-GB')}
+                        </div>
+                        <div style="padding: 24px;">
+                            <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+                                <thead>
+                                    <tr style="background: #1e1e2e; color: #c9a96e; text-align: left;">
+                                        <th style="padding: 10px;">#</th>
+                                        <th style="padding: 10px;">Item Title</th>
+                                        <th style="padding: 10px; text-align: right;">Price</th>
+                                        <th style="padding: 10px; text-align: right;">Selected Qty</th>
+                                        <th style="padding: 10px; text-align: right;">Previous Qty</th>
+                                        <th style="padding: 10px; text-align: right;">Difference</th>
+                                        <th style="padding: 10px; text-align: right;">Growth %</th>
+                                    </tr>
+                                </thead>
+                                <tbody>${rows}</tbody>
+                            </table>
+                        </div>
+                        <div style="background: #f1f5f9; padding: 14px 24px; font-size: 12px; color: #64748b; text-align: center; border-top: 1px solid #e2e8f0;">
+                            Watan Central Kitchen Platform — Operational Reports
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            const functions = getFunctions();
+            const fn = httpsCallable(functions, 'sendReportEmail');
+            await fn({
+                recipientEmail: recipientEmail,
+                reportHtml: htmlContent,
+                reportTitle: `Item Sales Report — ${dateStr}`,
+            });
+            toast.success(`Report emailed to ${recipientEmail}`, { id: 'email' });
+            setShowEmailModal(false);
+        } catch (err) {
+            console.error('Email send failed:', err);
+            toast.error(err.message || 'Failed to send email', { id: 'email' });
+        } finally {
+            setEmailSending(false);
+        }
+    };
+
     return (
         <div className="reports-page">
-            {/* Header */}
             <div className="page-header">
                 <div>
                     <h2 className="page-title">Item Sales Report</h2>
@@ -275,10 +402,17 @@ const ItemSalesReport = () => {
                     >
                         <MdPictureAsPdf /> Download PDF
                     </button>
+                    <button
+                        className="btn btn-primary btn-sm"
+                        onClick={() => setShowEmailModal(true)}
+                        title="Email Report"
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}
+                    >
+                        <MdEmail /> Email Report
+                    </button>
                 </div>
             </div>
 
-            {/* Filter Bar 1 */}
             <div className="dash-filter-bar">
                 <div className="dash-filter-section">
                     <MdFilterList className="dash-filter-icon" />
@@ -304,7 +438,7 @@ const ItemSalesReport = () => {
                     >
                         <option value="">All Restaurants</option>
                         {restaurantOptions.map(r => (
-                            <option key={r.restaurant_id} value={r.restaurant_id}>{r.restaurant_name}</option>
+                            <option key={r.restaurant_id || r.id} value={r.restaurant_name}>{r.restaurant_name}</option>
                         ))}
                     </select>
                 </div>
@@ -323,7 +457,6 @@ const ItemSalesReport = () => {
                 )}
             </div>
 
-            {/* Filter Bar 2 */}
             <div className="dash-filter-bar" style={{ marginTop: -8 }}>
                 <MdFilterList className="dash-filter-icon" />
                 <select
@@ -361,30 +494,18 @@ const ItemSalesReport = () => {
                 </div>
             ) : (
                 <div ref={reportRef} style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-                    {/* 4 KPI Summary Cards */}
                     <div className="kpi-row">
                         <KpiCard label="Total Items" value={sortedItems.length} icon={MdCategory} />
-                        <KpiCard label="Total Quantity" value={totalQty.toFixed(2)} icon={MdShoppingCart} />
-                        <KpiCard label="Total Revenue" value={formatCurrency(totalValue)} color="#c9a96e" icon={MdTrendingUp} />
-                        <KpiCard label="Avg Item Value" value={formatCurrency(avgItemValue)} color="#3b82f6" />
+                        <KpiCard label="Total Quantity" value={totalQtyOrdered.toFixed(2)} icon={MdShoppingCart} />
+                        <KpiCard label="Total Revenue" value={formatCurrency(totalRevenueValue)} color="#c9a96e" icon={MdTrendingUp} />
+                        <KpiCard label="Avg Item Value" value={formatCurrency(avgPrice)} color="#3b82f6" />
                     </div>
 
-                    {/* Item Sales Table in Scrollable Container */}
                     <div className="card" style={{ padding: 0, overflow: 'hidden', borderRadius: '16px' }}>
-                        <div style={{
-                            maxHeight: '440px',
-                            overflowY: 'auto',
-                            overflowX: 'auto',
-                        }}>
+                        <div style={{ maxHeight: '440px', overflowY: 'auto', overflowX: 'auto' }}>
                             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
                                 <thead>
-                                    <tr style={{
-                                        background: '#fde8ed', // Soft pink theme header matching screenshot
-                                        position: 'sticky',
-                                        top: 0,
-                                        zIndex: 10,
-                                        boxShadow: '0 2px 4px rgba(0,0,0,0.06)',
-                                    }}>
+                                    <tr style={{ background: '#fde8ed', position: 'sticky', top: 0, zIndex: 10, boxShadow: '0 2px 4px rgba(0,0,0,0.06)' }}>
                                         <th style={{ padding: '14px 20px', color: '#1e293b', fontWeight: 700 }}>Item Title</th>
                                         <th style={{ padding: '14px 20px', color: '#1e293b', fontWeight: 700, textAlign: 'right' }}>Price</th>
                                         <th style={{ padding: '14px 20px', color: '#1e293b', fontWeight: 700, textAlign: 'right' }}>Selected Qty</th>
@@ -396,9 +517,7 @@ const ItemSalesReport = () => {
                                 <tbody>
                                     {sortedItems.length === 0 ? (
                                         <tr>
-                                            <td colSpan={6} style={{ textAlign: 'center', padding: '40px', color: 'var(--color-text-muted)' }}>
-                                                No items found for the selected filters.
-                                            </td>
+                                            <td colSpan={6} style={{ textAlign: 'center', padding: '40px', color: 'var(--color-text-muted)' }}>No items found for the selected filters.</td>
                                         </tr>
                                     ) : (
                                         sortedItems.map((item, idx) => {
@@ -406,42 +525,17 @@ const ItemSalesReport = () => {
                                             const isDiffNeg = item.difference < 0;
                                             const isGrowthPos = item.growthPct > 0;
                                             const isGrowthNeg = item.growthPct < 0;
-
                                             return (
-                                                <tr
-                                                    key={item.name + idx}
-                                                    style={{
-                                                        borderBottom: '1px solid var(--color-border-light, rgba(255,255,255,0.06))',
-                                                    }}
-                                                >
-                                                    {/* Item Title */}
-                                                    <td style={{ padding: '14px 20px', fontWeight: 500, color: 'var(--color-text-primary)' }}>
-                                                        {item.name}
-                                                    </td>
-
-                                                    {/* Price */}
-                                                    <td style={{ padding: '14px 20px', textAlign: 'right', color: 'var(--color-text-secondary)' }}>
-                                                        {formatCurrency(item.price)}
-                                                    </td>
-
-                                                    {/* Selected Qty */}
-                                                    <td style={{ padding: '14px 20px', textAlign: 'right', fontWeight: 700, color: '#d9534f' }}>
-                                                        {item.quantity}
-                                                    </td>
-
-                                                    {/* Previous Qty */}
-                                                    <td style={{ padding: '14px 20px', textAlign: 'right', color: 'var(--color-text-muted)' }}>
-                                                        {item.prevQuantity}
-                                                    </td>
-
-                                                    {/* Difference */}
+                                                <tr key={item.name + idx} style={{ borderBottom: '1px solid var(--color-border-light, rgba(255,255,255,0.06))' }}>
+                                                    <td style={{ padding: '14px 20px', fontWeight: 500, color: 'var(--color-text-primary)' }}>{item.name}</td>
+                                                    <td style={{ padding: '14px 20px', textAlign: 'right', color: 'var(--color-text-secondary)' }}>{formatCurrency(item.price)}</td>
+                                                    <td style={{ padding: '14px 20px', textAlign: 'right', fontWeight: 700, color: '#d9534f' }}>{item.quantity} {item.unit || 'units'}</td>
+                                                    <td style={{ padding: '14px 20px', textAlign: 'right', color: 'var(--color-text-muted)' }}>{item.prevQuantity} {item.unit || 'units'}</td>
                                                     <td style={{ padding: '14px 20px', textAlign: 'right', fontWeight: 600 }}>
-                                                        {isDiffPos && <span style={{ color: '#22c55e' }}>↗ +{item.difference}</span>}
-                                                        {isDiffNeg && <span style={{ color: '#ef4444' }}>↘ {item.difference}</span>}
-                                                        {!isDiffPos && !isDiffNeg && <span style={{ color: 'var(--color-text-muted)' }}>— 0</span>}
+                                                        {isDiffPos && <span style={{ color: '#22c55e' }}>↗ +{item.difference} {item.unit || 'units'}</span>}
+                                                        {isDiffNeg && <span style={{ color: '#ef4444' }}>↘ {item.difference} {item.unit || 'units'}</span>}
+                                                        {!isDiffPos && !isDiffNeg && <span style={{ color: 'var(--color-text-muted)' }}>— 0 {item.unit || 'units'}</span>}
                                                     </td>
-
-                                                    {/* Growth % */}
                                                     <td style={{ padding: '14px 20px', textAlign: 'right', fontWeight: 600 }}>
                                                         {isGrowthPos && <span style={{ color: '#22c55e' }}>+{item.growthPct}%</span>}
                                                         {isGrowthNeg && <span style={{ color: '#ef4444' }}>{item.growthPct}%</span>}
@@ -477,7 +571,7 @@ const ItemSalesReport = () => {
 
                             <div style={{ width: '100%', height: 350 }}>
                                 <ResponsiveContainer>
-                                    <BarChart data={top10Most} margin={{ top: 10, right: 10, left: -20, bottom: 85 }}>
+                                    <BarChart data={sortedItems.slice(0, 10)} margin={{ top: 10, right: 10, left: -20, bottom: 85 }}>
                                         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
                                         <XAxis
                                             dataKey="name"
@@ -518,7 +612,7 @@ const ItemSalesReport = () => {
 
                             <div style={{ width: '100%', height: 350 }}>
                                 <ResponsiveContainer>
-                                    <BarChart data={top10Least} margin={{ top: 10, right: 10, left: -20, bottom: 85 }}>
+                                    <BarChart data={[...sortedItems].sort((a, b) => a.quantity - b.quantity).slice(0, 10)} margin={{ top: 10, right: 10, left: -20, bottom: 85 }}>
                                         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
                                         <XAxis
                                             dataKey="name"
@@ -545,6 +639,14 @@ const ItemSalesReport = () => {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {showEmailModal && (
+                <EmailModal
+                    onClose={() => setShowEmailModal(false)}
+                    onSend={handleEmailReport}
+                    sending={emailSending}
+                />
             )}
         </div>
     );

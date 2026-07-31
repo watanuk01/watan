@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import Pagination from '../../components/common/Pagination';
-import { getInvoices, getInvoiceById, getSupplierDetails } from '../../services/invoiceService';
+import { getInvoices, getInvoiceById, getSupplierDetails, updateInvoiceStatus } from '../../services/invoiceService';
 import InvoiceDetail from '../invoices/InvoiceDetail';
 import {
     MdReceipt,
@@ -275,7 +275,40 @@ const RestaurantInvoices = () => {
                                         ) : '—'}
                                     </td>
                                     <td style={{ fontWeight: 700 }}>{formatCurrency(inv.grand_total)}</td>
-                                    <td>{getStatusBadge(inv.status)}</td>
+                                    <td>
+                                        <select
+                                            value={(inv.status || 'issued').toLowerCase()}
+                                            onChange={async (e) => {
+                                                const newStatus = e.target.value;
+                                                const invId = inv.id || inv.doc_id || inv.invoice_id;
+                                                try {
+                                                    toast.loading('Updating status…', { id: 'inv-status-rest' });
+                                                    await updateInvoiceStatus(invId, newStatus);
+                                                    toast.success(`Status updated to ${newStatus.toUpperCase()}`, { id: 'inv-status-rest' });
+                                                    fetchData();
+                                                } catch (err) {
+                                                    console.error('Failed to update status:', err);
+                                                    toast.error('Failed to update status', { id: 'inv-status-rest' });
+                                                }
+                                            }}
+                                            style={{
+                                                padding: '4px 8px',
+                                                borderRadius: '6px',
+                                                border: '1px solid #cbd5e1',
+                                                fontSize: '12px',
+                                                fontWeight: 600,
+                                                backgroundColor: '#ffffff',
+                                                color: '#111111',
+                                                cursor: 'pointer',
+                                                outline: 'none',
+                                            }}
+                                        >
+                                            <option value="issued">Issued</option>
+                                            <option value="paid">Paid</option>
+                                            <option value="draft">Draft</option>
+                                            <option value="void">Void / Cancelled</option>
+                                        </select>
+                                    </td>
                                     <td>
                                         <button
                                             className="btn-action"
