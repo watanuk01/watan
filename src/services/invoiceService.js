@@ -29,6 +29,7 @@ import {
     Timestamp,
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import { adjustStock } from './inventoryService';
 
 // ─── COLLECTIONS ───
 const INVOICES = 'invoices';
@@ -425,6 +426,17 @@ export const regenerateAllInvoiceVat = async () => {
 export const updateInvoice = async (invoiceId, updates) => {
     const { line_items, discount_type, discount_value, notes, status } = updates;
 
+    // Fetch existing invoice to compare quantity changes for Central Kitchen inventory adjustment
+    let existingInvoice = null;
+    try {
+        const snap = await getDoc(doc(db, INVOICES, invoiceId));
+        if (snap.exists()) {
+            existingInvoice = snap.data();
+        }
+    } catch (e) {
+        console.warn('Could not fetch existing invoice for stock sync:', e);
+    }
+
     // Recalculate line item amounts
     const recalculatedItems = (line_items || []).map(item => {
         const netAmount = (item.unit_price || 0) * (item.quantity || 0);
@@ -437,6 +449,42 @@ export const updateInvoice = async (invoiceId, updates) => {
             gross_amount: Math.round((netAmount + vatAmount) * 100) / 100,
         };
     });
+
+    // Sync inventory if line_items are being updated and existing invoice is present
+    if (existingInvoice && line_items) {
+        const oldQtyMap = {};
+        (existingInvoice.line_items || []).forEach(item => {
+            if (item.item_id) {
+                oldQtyMap[item.item_id] = (oldQtyMap[item.item_id] || 0) + (item.quantity || 0);
+            }
+        });
+
+        const newQtyMap = {};
+        recalculatedItems.forEach(item => {
+            if (item.item_id) {
+                newQtyMap[item.item_id] = (newQtyMap[item.item_id] || 0) + (item.quantity || 0);
+            }
+        });
+
+        const allItemIds = new Set([...Object.keys(oldQtyMap), ...Object.keys(newQtyMap)]);
+        for (const itemId of allItemIds) {
+            const oldQty = oldQtyMap[itemId] || 0;
+            const newQty = newQtyMap[itemId] || 0;
+            const qtyDiff = oldQty - newQty; // Positive = reduced qty (add back stock), Negative = increased qty (deduct stock)
+
+            if (qtyDiff !== 0) {
+                try {
+                    await adjustStock(
+                        itemId,
+                        qtyDiff,
+                        `Invoice ${existingInvoice.invoice_number || invoiceId} quantity update (${oldQty} -> ${newQty})`
+                    );
+                } catch (err) {
+                    console.error(`Failed to adjust inventory for item ${itemId} on invoice update:`, err);
+                }
+            }
+        }
+    }
 
     // Recalculate VAT summary
     const vatSummary = buildVatSummary(recalculatedItems);
