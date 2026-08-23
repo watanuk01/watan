@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
     ResponsiveContainer, Cell, PieChart, Pie, Legend,
@@ -9,6 +10,7 @@ import {
     MdInventory2, MdRefresh, MdWarning, MdFilterList,
     MdPictureAsPdf, MdEmail, MdClose, MdExpandMore,
     MdExpandLess, MdSearch, MdTrendingUp, MdTrendingDown,
+    MdContentCut,
 } from 'react-icons/md';
 import {
     fetchRestaurantComparison,
@@ -16,6 +18,7 @@ import {
     fetchBatchAnalytics,
     fetchTopOrderedItems,
     fetchRestaurantList,
+    fetchButcheringAnalytics,
     formatCurrency,
     clearCache,
     startOfDay,
@@ -37,6 +40,7 @@ const TABS = [
     { id: 'items', label: 'Item Analytics', icon: MdShoppingCart },
     { id: 'vendors', label: 'Vendor Performance', icon: MdInventory2 },
     { id: 'batches', label: 'Batch Analytics', icon: MdBarChart },
+    { id: 'butcher', label: 'Butchering & Yield', icon: MdContentCut },
 ];
 
 // Report-specific date presets
@@ -622,16 +626,150 @@ const BatchAnalyticsTab = ({ data }) => {
 };
 
 // ═══════════════════════════════════════════════════════
+// BUTCHERING & YIELD TAB
+// ═══════════════════════════════════════════════════════
+const ButcheringYieldTab = ({ data }) => {
+    if (!data) return null;
+    const { totalOrders, totalInputKg, totalOutputKg, totalWasteKg, avgYieldPct, speciesData, topCutsData, orders } = data;
+
+    return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+            {/* KPI Cards Row */}
+            <div className="kpi-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
+                <KpiCard label="Butchering Runs" value={totalOrders} sub="Total processing jobs" />
+                <KpiCard label="Total Input Weight" value={`${totalInputKg.toLocaleString()} Kg`} sub="Raw carcasses received" color="var(--color-primary)" />
+                <KpiCard label="Usable Output Weight" value={`${totalOutputKg.toLocaleString()} Kg`} sub="Final cut yield" color="var(--color-success)" />
+                <KpiCard label="Bone / Waste Weight" value={`${totalWasteKg.toLocaleString()} Kg`} sub="Trimmings & waste" color="var(--color-danger)" />
+                <KpiCard label="Avg Yield Efficiency" value={`${avgYieldPct}%`} sub="Output / Input ratio" color={avgYieldPct >= 85 ? 'var(--color-success)' : 'var(--color-warning)'} />
+            </div>
+
+            {/* Charts Row */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+                {/* Species Yield & Weight Chart */}
+                <div className="report-card">
+                    <h3 className="report-card-title">Yield &amp; Output Weight by Species</h3>
+                    <p style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 16 }}>
+                        Breakdown of input vs usable output weight across animal types
+                    </p>
+                    <div style={{ height: 300 }}>
+                        {speciesData.length === 0 ? (
+                            <div className="butcher-empty"><p>No butchering data for selected period</p></div>
+                        ) : (
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={speciesData}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR} />
+                                    <XAxis dataKey="species" stroke={TEXT_COLOR} fontSize={12} />
+                                    <YAxis stroke={TEXT_COLOR} fontSize={12} unit=" kg" />
+                                    <Tooltip contentStyle={tooltipStyle} formatter={(val) => [`${val} Kg`]} />
+                                    <Legend />
+                                    <Bar dataKey="inputKg" name="Input Kg" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                                    <Bar dataKey="outputKg" name="Usable Output Kg" fill="#c9a96e" radius={[4, 4, 0, 0]} />
+                                    <Bar dataKey="wasteKg" name="Waste/Bones Kg" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        )}
+                    </div>
+                </div>
+
+                {/* Top Master Cuts Distribution */}
+                <div className="report-card">
+                    <h3 className="report-card-title">Top Master Cuts Yield Share</h3>
+                    <p style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 16 }}>
+                        Most produced meat cuts by total weight (Kg)
+                    </p>
+                    <div style={{ height: 300 }}>
+                        {topCutsData.length === 0 ? (
+                            <div className="butcher-empty"><p>No cut data available</p></div>
+                        ) : (
+                            <ResponsiveContainer width="100%" height="100%">
+                                <PieChart>
+                                    <Pie
+                                        data={topCutsData}
+                                        dataKey="weightKg"
+                                        nameKey="name"
+                                        cx="50%"
+                                        cy="50%"
+                                        outerRadius={95}
+                                        label={({ name, pct }) => `${name} (${pct}%)`}
+                                    >
+                                        {topCutsData.map((entry, index) => (
+                                            <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                                        ))}
+                                    </Pie>
+                                    <Tooltip contentStyle={tooltipStyle} formatter={(val) => [`${val} Kg`, 'Weight']} />
+                                </PieChart>
+                            </ResponsiveContainer>
+                        )}
+                    </div>
+                </div>
+            </div>
+
+            {/* Butchering Orders Detailed Table */}
+            <div className="report-card">
+                <h3 className="report-card-title">Butchering Runs Detail ({orders.length})</h3>
+                <div className="butcher-table-wrap" style={{ marginTop: 12 }}>
+                    <table className="butcher-table">
+                        <thead>
+                            <tr>
+                                <th>ORDER NO</th>
+                                <th>SOURCE BATCH</th>
+                                <th>SPECIES</th>
+                                <th>INPUT (KG)</th>
+                                <th>OUTPUT (KG)</th>
+                                <th>WASTE (KG)</th>
+                                <th>YIELD (%)</th>
+                                <th>OPERATOR</th>
+                                <th>DATE</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {orders.length === 0 ? (
+                                <tr><td colSpan={9} style={{ textAlign: 'center', padding: 30, color: 'var(--color-text-muted)' }}>No butchering runs recorded for this date range</td></tr>
+                            ) : (
+                                orders.map(o => (
+                                    <tr key={o.id}>
+                                        <td><span className="batch-code">{o.order_no || 'BUT-RUN'}</span></td>
+                                        <td style={{ color: 'var(--color-text-secondary)' }}>{o.source_batch_no || 'Whole Carcass'}</td>
+                                        <td>
+                                            <span style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>
+                                                {o.animal_type || 'Lamb'}
+                                            </span>
+                                        </td>
+                                        <td style={{ fontWeight: 600 }}>{o.input_weight_kg} kg</td>
+                                        <td style={{ fontWeight: 700, color: 'var(--color-success)' }}>{o.output_weight_kg} kg</td>
+                                        <td style={{ color: 'var(--color-danger)' }}>{o.waste_weight_kg} kg</td>
+                                        <td>
+                                            <span className={`yield-badge ${o.yield_pct >= 85 ? 'high' : o.yield_pct >= 70 ? 'medium' : 'low'}`}>
+                                                {o.yield_pct}%
+                                            </span>
+                                        </td>
+                                        <td style={{ color: 'var(--color-text-secondary)', fontSize: 13 }}>{o.butcher_name || o.created_by || 'Master Butcher'}</td>
+                                        <td style={{ color: 'var(--color-text-muted)', fontSize: 12 }}>{o.date || (o.created_at ? new Date(o.created_at).toLocaleDateString('en-GB') : '—')}</td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// ═══════════════════════════════════════════════════════
 // MAIN REPORTS PAGE
 // ═══════════════════════════════════════════════════════
 const ReportsPage = () => {
-    const [tab, setTab] = useState('restaurants');
+    const [searchParams] = useSearchParams();
+    const urlTab = searchParams.get('tab');
+    const [tab, setTab] = useState(urlTab || 'restaurants');
     const [loading, setLoading] = useState(false);
     const [restaurants, setRestaurants] = useState(null);
     const [items, setItems] = useState(null);
     const [itemCategories, setItemCategories] = useState([]);
     const [vendors, setVendors] = useState(null);
     const [batches, setBatches] = useState(null);
+    const [butcheringData, setButcheringData] = useState(null);
 
     // Filter state
     const [datePreset, setDatePreset] = useState('today');
@@ -691,6 +829,8 @@ const ReportsPage = () => {
                 setVendors(await fetchVendorAnalysis(filters));
             } else if (t === 'batches') {
                 setBatches(await fetchBatchAnalytics(filters));
+            } else if (t === 'butcher') {
+                setButcheringData(await fetchButcheringAnalytics(filters));
             }
         } catch (e) {
             toast.error('Failed to load analytics data');
@@ -711,6 +851,7 @@ const ReportsPage = () => {
         setItems(null);
         setVendors(null);
         setBatches(null);
+        setButcheringData(null);
         setTimeout(() => loadTab(tab), 50);
     };
 
@@ -889,6 +1030,32 @@ const ReportsPage = () => {
                             b.item_name, b.batch_number, `${b.quantity} ${b.unit}`,
                             b.expiry_date?.toLocaleDateString('en-GB') || '—',
                             formatCurrency(b.value),
+                        ]),
+                        headStyles, bodyStyles,
+                        styles: { cellPadding: 2.5 },
+                    });
+                }
+            } else if (tab === 'butcher' && butcheringData) {
+                doc.setFontSize(9.5);
+                doc.setFont('helvetica', 'bold');
+                doc.setTextColor(30, 30, 46);
+                doc.text(`Butchering & Yield Summary: ${butcheringData.totalOrders} Runs | Input: ${butcheringData.totalInputKg} Kg | Usable Output: ${butcheringData.totalOutputKg} Kg | Waste/Bones: ${butcheringData.totalWasteKg} Kg | Avg Yield: ${butcheringData.avgYieldPct}%`, 14, startY);
+                startY += 6;
+
+                if (butcheringData.orders?.length) {
+                    autoTable(doc, {
+                        startY,
+                        head: [['Order No', 'Source Batch', 'Species', 'Input (Kg)', 'Output (Kg)', 'Waste (Kg)', 'Yield (%)', 'Operator', 'Date']],
+                        body: butcheringData.orders.map(o => [
+                            o.order_no || 'BUT-RUN',
+                            o.source_batch_no || '—',
+                            o.animal_type || 'Lamb',
+                            `${o.input_weight_kg} kg`,
+                            `${o.output_weight_kg} kg`,
+                            `${o.waste_weight_kg} kg`,
+                            `${o.yield_pct}%`,
+                            o.butcher_name || 'Butcher',
+                            o.date || (o.created_at ? new Date(o.created_at).toLocaleDateString('en-GB') : '—'),
                         ]),
                         headStyles, bodyStyles,
                         styles: { cellPadding: 2.5 },
@@ -1258,6 +1425,7 @@ const ReportsPage = () => {
                         {tab === 'items' && <ItemAnalytics data={items} categories={itemCategories} />}
                         {tab === 'vendors' && <VendorPerformance data={vendors} />}
                         {tab === 'batches' && <BatchAnalyticsTab data={batches} />}
+                        {tab === 'butcher' && <ButcheringYieldTab data={butcheringData} />}
                     </>
                 )}
             </div>

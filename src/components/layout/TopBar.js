@@ -137,6 +137,8 @@ const TopBar = () => {
         const labels = {
             admin: 'Super Admin',
             ck_staff: 'Kitchen Staff',
+            chef: 'Head Chef',
+            butcher: 'Master Butcher',
             restaurant_manager: 'Restaurant Manager',
             restaurant_manager_non_managed: 'Restaurant Manager',
             delivery_partner: 'Delivery Partner',

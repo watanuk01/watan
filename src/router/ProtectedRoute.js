@@ -37,6 +37,8 @@ export const getDashboardPath = (role, restaurantId, userProfile) => {
             return '/dashboard';
         case 'chef':
             return '/inventory/items';
+        case 'butcher':
+            return '/butchering/dashboard';
         case 'restaurant_manager':
         case 'restaurant_manager_non_managed':
             if (!isSouthallBranch(userProfile || { restaurant_id: restaurantId })) {

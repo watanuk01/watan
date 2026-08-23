@@ -283,20 +283,43 @@ export const cancelPurchaseOrder = async (orderId, reason = '') => {
 // ═══════════════════════════════════════════
 
 export const getUniqueVendors = async () => {
-    const q = query(collection(db, PURCHASE_ORDERS));
-    const snap = await getDocs(q);
     const vendors = new Set();
-    snap.docs.forEach(d => {
-        const vendor = d.data().vendor;
-        if (vendor) vendors.add(vendor);
-    });
 
-    // Also get vendors from inventory items
-    const itemSnap = await getDocs(collection(db, 'inventory_items'));
-    itemSnap.docs.forEach(d => {
-        const v = d.data().vendor;
-        if (v) vendors.add(v);
-    });
+    try {
+        const poSnap = await getDocs(collection(db, PURCHASE_ORDERS));
+        poSnap.docs.forEach(d => {
+            const data = d.data();
+            const v = data.vendor || data.vendor_name || data.supplier;
+            if (v && typeof v === 'string' && v.trim()) vendors.add(v.trim());
+        });
+    } catch (e) { console.error('Error fetching PO vendors:', e); }
+
+    try {
+        const itemSnap = await getDocs(collection(db, 'inventory_items'));
+        itemSnap.docs.forEach(d => {
+            const data = d.data();
+            const v = data.vendor || data.supplier || data.vendor_name;
+            if (v && typeof v === 'string' && v.trim()) vendors.add(v.trim());
+        });
+    } catch (e) { console.error('Error fetching item vendors:', e); }
+
+    try {
+        const batchSnap = await getDocs(collection(db, 'inventory_batches'));
+        batchSnap.docs.forEach(d => {
+            const data = d.data();
+            const v = data.vendor || data.vendor_name || data.supplier;
+            if (v && typeof v === 'string' && v.trim()) vendors.add(v.trim());
+        });
+    } catch (e) { console.error('Error fetching batch vendors:', e); }
+
+    try {
+        const vSnap = await getDocs(collection(db, 'vendors'));
+        vSnap.docs.forEach(d => {
+            const data = d.data();
+            const v = data.name || data.vendor_name || data.title;
+            if (v && typeof v === 'string' && v.trim()) vendors.add(v.trim());
+        });
+    } catch (e) { /* collection optional */ }
 
     return [...vendors].sort();
 };

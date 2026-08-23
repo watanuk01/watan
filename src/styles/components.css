@@ -181,19 +181,23 @@
     resize: vertical;
 }
 
-/* Base styles to prevent transparent dropdown items globally */
+/* Base styles to prevent white dropdown items globally */
 select.form-input,
 .form-select,
+.table-cell-select,
 select {
-    background-color: var(--color-surface);
+    background-color: var(--color-surface, #1e1e2e) !important;
+    color: var(--color-text-primary, #ffffff) !important;
     cursor: pointer;
 }
 
 select.form-input option,
 .form-select option,
+.table-cell-select option,
 select option {
-    background-color: var(--color-surface);
-    color: var(--color-text-primary);
+    background-color: #1e1e2e !important;
+    color: #ffffff !important;
+    padding: 8px 12px;
 }
 
 

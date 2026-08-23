@@ -13,6 +13,8 @@ import {
     MdWarning,
     MdCheckCircle,
     MdPictureAsPdf,
+    MdCropFree,
+    MdAutoFixHigh,
 } from 'react-icons/md';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -28,19 +30,39 @@ const loadDraft = () => {
     } catch { return null; }
 };
 
+const getTodayDateStr = () => new Date().toISOString().substring(0, 10);
+const getCurrentTimeStr = () => {
+    const d = new Date();
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return `${hh}:${mm}`;
+};
+const generateAutoInvoiceNo = () => {
+    const today = new Date();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    return `INV-${today.getFullYear()}-${mm}${dd}`;
+};
+
 const CreatePurchaseOrder = () => {
     const navigate = useNavigate();
     const location = useLocation();
     const draft = useRef(loadDraft());
     const [items, setItems] = useState([]);          // all inventory items (grocery + raw_meat)
     const [selectedItems, setSelectedItems] = useState(draft.current?.selectedItems || []);
-    const [vendor, setVendor] = useState(draft.current?.vendor || '');
-    const [expectedDate, setExpectedDate] = useState(draft.current?.expectedDate || '');
+    const [vendor, setVendor] = useState(draft.current?.vendor || 'ABC Meat Suppliers');
+    const [invoiceNo, setInvoiceNo] = useState(draft.current?.invoiceNo || generateAutoInvoiceNo());
+    const [invoiceDate, setInvoiceDate] = useState(draft.current?.invoiceDate || getTodayDateStr());
+    const [receiveDate, setReceiveDate] = useState(draft.current?.receiveDate || getTodayDateStr());
+    const [receiveTime, setReceiveTime] = useState(draft.current?.receiveTime || getCurrentTimeStr());
+    const [expectedDate, setExpectedDate] = useState(draft.current?.expectedDate || getTodayDateStr());
     const [notes, setNotes] = useState(draft.current?.notes || '');
     const [submitting, setSubmitting] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [showDropdown, setShowDropdown] = useState(false);
     const [vendors, setVendors] = useState([]);
+    const [isCustomVendor, setIsCustomVendor] = useState(false);
+    const [customVendor, setCustomVendor] = useState('');
     const [categoryFilter, setCategoryFilter] = useState('');
     const [lowStockOnly, setLowStockOnly] = useState(false);
     const [successOrder, setSuccessOrder] = useState(null);
@@ -56,9 +78,9 @@ const CreatePurchaseOrder = () => {
 
     // ── Save draft to localStorage on every change ──
     const saveDraft = useCallback(() => {
-        const data = { selectedItems, vendor, expectedDate, notes };
+        const data = { selectedItems, vendor, invoiceNo, invoiceDate, receiveDate, receiveTime, expectedDate, notes };
         localStorage.setItem(DRAFT_KEY, JSON.stringify(data));
-    }, [selectedItems, vendor, expectedDate, notes]);
+    }, [selectedItems, vendor, invoiceNo, invoiceDate, receiveDate, receiveTime, expectedDate, notes]);
 
     useEffect(() => { saveDraft(); }, [saveDraft]);
 
@@ -202,6 +224,12 @@ const CreatePurchaseOrder = () => {
     );
 
     const handleSubmit = async () => {
+        const finalVendor = isCustomVendor ? customVendor.trim() : vendor;
+        if (!finalVendor) {
+            toast.error('Please select or enter a vendor');
+            return;
+        }
+
         if (selectedItems.length === 0) {
             toast.error('Please add at least one item');
             return;
@@ -217,7 +245,7 @@ const CreatePurchaseOrder = () => {
         try {
             const result = await createPurchaseOrder({
                 items: selectedItems,
-                vendor,
+                vendor: finalVendor,
                 expected_delivery_date: expectedDate,
                 notes,
             });
@@ -338,38 +366,104 @@ const CreatePurchaseOrder = () => {
                 </button>
             </div>
 
-            {/* Order Details */}
-            <div className="po-form-grid">
-                <div className="form-group">
-                    <label className="form-label">Vendor</label>
-                    <select
-                        className="form-input"
-                        value={vendor}
-                        onChange={(e) => setVendor(e.target.value)}
-                    >
-                        <option value="">All Vendors</option>
-                        {vendors.map(v => <option key={v} value={v}>{v}</option>)}
-                    </select>
+            {/* Vendor & Invoice Details */}
+            <div className="vendor-invoice-card">
+                <h3 className="vendor-invoice-title">Vendor &amp; Invoice Details</h3>
+
+                <div className="vendor-invoice-grid">
+                    <div className="form-group">
+                        <label className="form-label">Vendor <span className="required" style={{ color: 'var(--color-danger)' }}>*</span></label>
+                        {isCustomVendor ? (
+                            <div style={{ display: 'flex', gap: 6 }}>
+                                <input
+                                    type="text"
+                                    className="form-input"
+                                    style={{ flex: 1 }}
+                                    placeholder="Enter new vendor name..."
+                                    value={customVendor}
+                                    onChange={(e) => setCustomVendor(e.target.value)}
+                                />
+                                <button
+                                    type="button"
+                                    className="btn-text-link"
+                                    style={{ fontSize: 11, whiteSpace: 'nowrap' }}
+                                    onClick={() => setIsCustomVendor(false)}
+                                >
+                                    Select List
+                                </button>
+                            </div>
+                        ) : (
+                            <select
+                                className="form-input"
+                                value={vendor}
+                                onChange={(e) => {
+                                    if (e.target.value === '__CUSTOM_VENDOR__') {
+                                        setIsCustomVendor(true);
+                                    } else {
+                                        setVendor(e.target.value);
+                                    }
+                                }}
+                            >
+                                <option value="">Select Vendor</option>
+                                {vendors.map(v => <option key={v} value={v}>{v}</option>)}
+                                <option value="__CUSTOM_VENDOR__">+ Enter New Vendor Name...</option>
+                            </select>
+                        )}
+                    </div>
+
+                    <div className="form-group">
+                        <label className="form-label">Invoice No <span className="required" style={{ color: 'var(--color-danger)' }}>*</span></label>
+                        <input
+                            type="text"
+                            className="form-input"
+                            value={invoiceNo}
+                            onChange={(e) => setInvoiceNo(e.target.value)}
+                            placeholder="INV-2026-0618"
+                        />
+                    </div>
+
+                    <div className="form-group">
+                        <label className="form-label">Invoice Date</label>
+                        <input
+                            type="date"
+                            className="form-input"
+                            value={invoiceDate}
+                            onChange={(e) => setInvoiceDate(e.target.value)}
+                        />
+                    </div>
+
+                    <div className="form-group">
+                        <label className="form-label">Receive Date</label>
+                        <input
+                            type="date"
+                            className="form-input"
+                            value={receiveDate}
+                            onChange={(e) => setReceiveDate(e.target.value)}
+                        />
+                    </div>
                 </div>
-                <div className="form-group">
-                    <label className="form-label">Expected Delivery Date</label>
-                    <input
-                        type="date"
-                        className="form-input"
-                        value={expectedDate}
-                        onChange={(e) => setExpectedDate(e.target.value)}
-                        min={new Date().toISOString().split('T')[0]}
-                    />
-                </div>
-                <div className="form-group full-width">
-                    <label className="form-label">Notes (optional)</label>
-                    <input
-                        type="text"
-                        className="form-input"
-                        value={notes}
-                        onChange={(e) => setNotes(e.target.value)}
-                        placeholder="e.g. Weekly stock replenishment"
-                    />
+
+                <div className="vendor-invoice-row-2">
+                    <div className="form-group">
+                        <label className="form-label">Receive Time</label>
+                        <input
+                            type="time"
+                            className="form-input"
+                            value={receiveTime}
+                            onChange={(e) => setReceiveTime(e.target.value)}
+                        />
+                    </div>
+
+                    <div className="form-group">
+                        <label className="form-label">Notes</label>
+                        <input
+                            type="text"
+                            className="form-input"
+                            value={notes}
+                            onChange={(e) => setNotes(e.target.value)}
+                            placeholder="Vehicle no, driver name, remarks..."
+                        />
+                    </div>
                 </div>
             </div>
 

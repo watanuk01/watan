@@ -69,6 +69,7 @@ let _batchCache = null;
 let _inventoryItemsCache = null;
 let _restaurantListCache = null;
 let _productionCache = null;
+let _butcheringCache = null;
 
 export const clearCache = () => {
     _orderCache = null;
@@ -80,6 +81,7 @@ export const clearCache = () => {
     _inventoryItemsCache = null;
     _restaurantListCache = null;
     _productionCache = null;
+    _butcheringCache = null;
 };
 
 const getOrders = async () => {
@@ -1122,3 +1124,112 @@ export const fetchRestaurantList = async () => {
         return [];
     }
 };
+
+// ════════════════════════════════════════════════════════
+// BUTCHERING & YIELD ANALYTICS
+// ════════════════════════════════════════════════════════
+
+const getButcheringOrders = async () => {
+    if (_butcheringCache) return _butcheringCache;
+    try {
+        const snap = await getDocs(collection(db, 'butchering_orders'));
+        _butcheringCache = snap.docs.map(d => {
+            const data = d.data();
+            const inputKg = Number(data.input_weight_kg) || 0;
+            const outputKg = Number(data.output_weight_kg) || 0;
+            const yieldPct = Number(data.yield_pct) || (inputKg > 0 ? Math.round((outputKg / inputKg) * 100) : 0);
+            return {
+                id: d.id,
+                ...data,
+                input_weight_kg: inputKg,
+                output_weight_kg: outputKg,
+                waste_weight_kg: Math.max(0, inputKg - outputKg),
+                yield_pct: yieldPct,
+                created_at: toDate(data.created_at || data.order_date || data.date),
+            };
+        });
+        return _butcheringCache;
+    } catch (e) {
+        console.error('Error fetching butchering orders:', e);
+        return [];
+    }
+};
+
+export const fetchButcheringAnalytics = async (filters = {}) => {
+    const allOrders = await getButcheringOrders();
+    const filteredOrders = applyFilters(allOrders, filters);
+
+    let totalOrders = 0;
+    let totalInputKg = 0;
+    let totalOutputKg = 0;
+    let totalWasteKg = 0;
+    const speciesMap = {};
+    const cutsMap = {};
+
+    filteredOrders.forEach(o => {
+        totalOrders++;
+        const inKg = o.input_weight_kg || 0;
+        const outKg = o.output_weight_kg || 0;
+        const wasteKg = o.waste_weight_kg || 0;
+
+        totalInputKg += inKg;
+        totalOutputKg += outKg;
+        totalWasteKg += wasteKg;
+
+        const species = o.animal_type || detectSpeciesName(o.source_batch_no || o.source_batch_name || o.item_name || 'Meat');
+        if (!speciesMap[species]) {
+            speciesMap[species] = { species, inputKg: 0, outputKg: 0, wasteKg: 0, orderCount: 0 };
+        }
+        speciesMap[species].inputKg += inKg;
+        speciesMap[species].outputKg += outKg;
+        speciesMap[species].wasteKg += wasteKg;
+        speciesMap[species].orderCount++;
+
+        if (Array.isArray(o.child_cuts)) {
+            o.child_cuts.forEach(c => {
+                const cutName = c.item_name || c.cut_name || 'Cut';
+                const cWeight = Number(c.weight_kg || c.quantity) || 0;
+                if (!cutsMap[cutName]) cutsMap[cutName] = { name: cutName, weightKg: 0, isWaste: !!c.is_waste };
+                cutsMap[cutName].weightKg += cWeight;
+            });
+        }
+    });
+
+    const avgYieldPct = totalInputKg > 0 ? Math.round((totalOutputKg / totalInputKg) * 1000) / 10 : 0;
+
+    const speciesData = Object.values(speciesMap).map(s => ({
+        species: s.species,
+        inputKg: Math.round(s.inputKg * 10) / 10,
+        outputKg: Math.round(s.outputKg * 10) / 10,
+        wasteKg: Math.round(s.wasteKg * 10) / 10,
+        yieldPct: s.inputKg > 0 ? Math.round((s.outputKg / s.inputKg) * 100) : 0,
+        orderCount: s.orderCount,
+    })).sort((a, b) => b.outputKg - a.outputKg);
+
+    const topCutsData = Object.values(cutsMap).map(c => ({
+        name: c.name,
+        weightKg: Math.round(c.weightKg * 10) / 10,
+        isWaste: c.isWaste,
+        pct: totalOutputKg > 0 ? Math.round((c.weightKg / totalOutputKg) * 100) : 0,
+    })).sort((a, b) => b.weightKg - a.weightKg).slice(0, 10);
+
+    return {
+        totalOrders,
+        totalInputKg: Math.round(totalInputKg * 10) / 10,
+        totalOutputKg: Math.round(totalOutputKg * 10) / 10,
+        totalWasteKg: Math.round(totalWasteKg * 10) / 10,
+        avgYieldPct,
+        speciesData,
+        topCutsData,
+        orders: filteredOrders.sort((a, b) => (b.created_at || 0) - (a.created_at || 0)),
+    };
+};
+
+function detectSpeciesName(name = '') {
+    const s = String(name).toLowerCase();
+    if (s.includes('chicken') || s.includes('poultry')) return 'Chicken';
+    if (s.includes('beef') || s.includes('cow') || s.includes('steak')) return 'Beef';
+    if (s.includes('prawn') || s.includes('shrimp') || s.includes('fish') || s.includes('seafood')) return 'Seafood';
+    if (s.includes('goat')) return 'Goat';
+    return 'Lamb';
+}
