@@ -11,6 +11,7 @@
 import {
     collection,
     doc,
+    getDoc,
     getDocs,
     addDoc,
     updateDoc,
@@ -24,6 +25,7 @@ import { db } from '../firebase';
 
 // ─── COLLECTIONS ───
 const CUT_TYPES = 'cut_types';
+const BUTCHER_ANIMALS = 'butcher_animals';
 const BUTCHERING_ORDERS = 'butchering_orders';
 const BATCHES = 'inventory_batches';
 const ITEMS = 'inventory_items';
@@ -135,6 +137,151 @@ export const updateCutType = async (id, data) => {
 /** Delete Cut Type for admin cut types */
 export const deleteCutType = async (id) => {
     await deleteDoc(doc(db, CUT_TYPES, id));
+};
+
+// ═══════════════════════════════════════════
+// 1b. ANIMAL MASTER CRUD
+// ═══════════════════════════════════════════
+
+const ANIMAL_TYPES = ['Lamb', 'Mutton', 'Goat', 'Chicken', 'Beef', 'Seafood', 'Pork', 'Turkey', 'Duck', 'Other'];
+export { ANIMAL_TYPES };
+
+/** Get all Animal master records */
+export const getAnimals = async () => {
+    try {
+        const snap = await getDocs(collection(db, BUTCHER_ANIMALS));
+        const list = snap.docs.map(d => {
+            const data = d.data();
+            return {
+                id: d.id,
+                ...data,
+                created_at: data.created_at?.toDate?.() || null,
+                updated_at: data.updated_at?.toDate?.() || null,
+            };
+        });
+        return list.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    } catch (err) {
+        console.error('Error fetching animals:', err);
+        return [];
+    }
+};
+
+/** Get a single Animal by ID */
+export const getAnimalById = async (id) => {
+    const snap = await getDoc(doc(db, BUTCHER_ANIMALS, id));
+    if (!snap.exists()) return null;
+    const data = snap.data();
+    return {
+        id: snap.id,
+        ...data,
+        created_at: data.created_at?.toDate?.() || null,
+        updated_at: data.updated_at?.toDate?.() || null,
+    };
+};
+
+/**
+ * Create a new Animal master record.
+ * Also syncs each cut type to the `cut_types` collection for backward compatibility.
+ */
+export const createAnimal = async (data) => {
+    const animalData = {
+        name: data.name || '',
+        animal_type: data.animal_type || 'Lamb',
+        base_weight: Number(data.base_weight) || 0,
+        base_unit: 'kg',
+        allowed_butchering_quantities: (data.allowed_butchering_quantities || []).map(Number).filter(n => Number.isFinite(n) && n > 0),
+        notes: data.notes || '',
+        cut_types: (data.cut_types || []).map(ct => ({
+            name: ct.name || '',
+            std_weight_kg: Number(ct.std_weight_kg) || 0,
+            shelf_life_days: Number(ct.shelf_life_days) || 5,
+            is_waste: Boolean(ct.is_waste),
+            notes: ct.notes || '',
+        })),
+        created_at: serverTimestamp(),
+        updated_at: serverTimestamp(),
+    };
+
+    const docRef = await addDoc(collection(db, BUTCHER_ANIMALS), animalData);
+
+    // Sync cut types to the flat cut_types collection
+    for (const ct of animalData.cut_types) {
+        await addDoc(collection(db, CUT_TYPES), {
+            name: ct.name,
+            animal_type: animalData.animal_type,
+            std_weight_kg: ct.std_weight_kg,
+            shelf_life_days: ct.shelf_life_days,
+            is_waste: ct.is_waste,
+            notes: ct.notes,
+            animal_id: docRef.id,
+            created_at: serverTimestamp(),
+        });
+    }
+
+    return { id: docRef.id, ...animalData };
+};
+
+/**
+ * Update an Animal master record.
+ * Deletes old synced cut_types and re-creates them.
+ */
+export const updateAnimal = async (id, data) => {
+    const animalData = {
+        name: data.name || '',
+        animal_type: data.animal_type || 'Lamb',
+        base_weight: Number(data.base_weight) || 0,
+        base_unit: 'kg',
+        allowed_butchering_quantities: (data.allowed_butchering_quantities || []).map(Number).filter(n => Number.isFinite(n) && n > 0),
+        notes: data.notes || '',
+        cut_types: (data.cut_types || []).map(ct => ({
+            name: ct.name || '',
+            std_weight_kg: Number(ct.std_weight_kg) || 0,
+            shelf_life_days: Number(ct.shelf_life_days) || 5,
+            is_waste: Boolean(ct.is_waste),
+            notes: ct.notes || '',
+        })),
+        updated_at: serverTimestamp(),
+    };
+
+    await updateDoc(doc(db, BUTCHER_ANIMALS, id), animalData);
+
+    // Remove old synced cut types for this animal
+    try {
+        const oldSnap = await getDocs(query(collection(db, CUT_TYPES), where('animal_id', '==', id)));
+        for (const d of oldSnap.docs) {
+            await deleteDoc(doc(db, CUT_TYPES, d.id));
+        }
+    } catch (e) {
+        console.warn('Could not clean old synced cut types:', e);
+    }
+
+    // Re-create synced cut types
+    for (const ct of animalData.cut_types) {
+        await addDoc(collection(db, CUT_TYPES), {
+            name: ct.name,
+            animal_type: animalData.animal_type,
+            std_weight_kg: ct.std_weight_kg,
+            shelf_life_days: ct.shelf_life_days,
+            is_waste: ct.is_waste,
+            notes: ct.notes,
+            animal_id: id,
+            created_at: serverTimestamp(),
+        });
+    }
+};
+
+/** Delete an Animal master record and its synced cut types */
+export const deleteAnimal = async (id) => {
+    // Delete synced cut types
+    try {
+        const snap = await getDocs(query(collection(db, CUT_TYPES), where('animal_id', '==', id)));
+        for (const d of snap.docs) {
+            await deleteDoc(doc(db, CUT_TYPES, d.id));
+        }
+    } catch (e) {
+        console.warn('Could not clean synced cut types:', e);
+    }
+    await deleteDoc(doc(db, BUTCHER_ANIMALS, id));
 };
 
 // ═══════════════════════════════════════════
@@ -468,32 +615,52 @@ export const getBatchGenealogyTree = async (searchTerm) => {
 // 4. BUTCHER PURCHASE ORDER
 // ═══════════════════════════════════════════
 
-/** Create a Meat-specific Purchase Order for Butchering */
+/**
+ * Create a Meat Purchase Order (status = 'ordered').
+ * No batches are created until receiveButcherPO is called.
+ * Total = quantity × unit_price (not weight).
+ */
 export const createButcherPurchaseOrder = async (poData) => {
     const poNumber = poData.po_number || `MPO-${new Date().toISOString().substring(2, 10).replace(/-/g, '')}-${Math.floor(100 + Math.random() * 900)}`;
     const vendorName = poData.vendor || poData.vendor_name || 'Meat Supplier';
 
+    const formattedItems = (poData.items || []).map(i => ({
+        ...i,
+        quantity: Number(i.quantity) || 0,
+        unit_price: Number(i.unit_price) || 0,
+        purchase_price: (Number(i.quantity) || 0) * (Number(i.unit_price) || 0),
+    }));
+
     const docData = {
         po_number: poNumber,
-        invoice_no: poData.invoice_no || '',
-        invoice_date: poData.invoice_date || '',
-        receive_date: poData.receive_date || '',
-        receive_time: poData.receive_time || '',
         is_butcher_po: true,
         vendor: vendorName,
         vendor_name: vendorName,
-        items: poData.items || [],
-        total_quantity: (poData.items || []).reduce((s, i) => s + (Number(i.quantity) || 0), 0),
-        total_weight_kg: (poData.items || []).reduce((s, i) => s + (Number(i.weight_kg || i.quantity) || 0), 0),
-        total_amount: (poData.items || []).reduce((s, i) => s + ((Number(i.weight_kg || i.quantity) || 0) * (Number(i.unit_price) || 0)), 0),
-        status: 'received',
-        notes: poData.notes || 'Meat Delivery Received — Butchering Dept',
+        items: formattedItems,
+        total_quantity: formattedItems.reduce((s, i) => s + i.quantity, 0),
+        total_amount: formattedItems.reduce((s, i) => s + i.purchase_price, 0),
+        status: 'ordered',
+        notes: poData.notes || '',
         created_at: serverTimestamp(),
     };
 
     const docRef = await addDoc(collection(db, PURCHASE_ORDERS), docData);
+    return { id: docRef.id, ...docData, created_at: new Date().toISOString() };
+};
 
-    // Fetch existing inventory items to check if received raw meat items exist
+/**
+ * Mark a Butcher PO as received — creates inventory batches and registers items.
+ */
+export const receiveButcherPO = async (poId) => {
+    const poSnap = await getDoc(doc(db, PURCHASE_ORDERS, poId));
+    if (!poSnap.exists()) throw new Error('PO not found');
+    const poData = poSnap.data();
+    if (poData.status === 'received') throw new Error('PO already received');
+
+    const vendorName = poData.vendor || poData.vendor_name || 'Meat Supplier';
+    const items = poData.items || [];
+
+    // Fetch existing raw meat items
     const existingItemsSnap = await getDocs(query(collection(db, ITEMS), where('item_type', '==', 'raw_meat'))).catch(() => ({ docs: [] }));
     const existingItemMap = new Map();
     existingItemsSnap.docs.forEach(d => {
@@ -501,41 +668,43 @@ export const createButcherPurchaseOrder = async (poData) => {
         if (data.name) existingItemMap.set(data.name.toLowerCase().trim(), d.id);
     });
 
-    // Create raw meat parent batches in inventory_batches AND register in inventory_items!
-    const createdBatches = [];
     const bRef = writeBatch(db);
+    const createdBatches = [];
 
-    for (let i = 0; i < (poData.items || []).length; i++) {
-        const item = poData.items[i];
+    for (let i = 0; i < items.length; i++) {
+        const item = items[i];
         const itemName = item.item_name || 'Raw Meat';
+        const qty = Number(item.quantity) || 1;
         const newBatchRef = doc(collection(db, BATCHES));
-        const batchNo = item.batch_number || `BT-RM-${new Date().toISOString().substring(2, 10).replace(/-/g, '')}-${Math.floor(100 + Math.random() * 900)}`;
+        const batchNo = `BT-RM-${new Date().toISOString().substring(2, 10).replace(/-/g, '')}-${Math.floor(100 + Math.random() * 900)}`;
 
-        const weight = Number(item.weight_kg || item.quantity) || 10;
         const batchData = {
             batch_number: batchNo,
             item_name: itemName,
             item_type: 'raw_meat',
             category: 'Raw Meat',
-            quantity: weight,
-            remaining_weight_kg: weight,
-            weight_kg: weight,
-            initial_quantity: weight,
+            quantity: qty,
+            remaining_weight_kg: qty,
+            weight_kg: qty,
+            initial_quantity: qty,
             unit: 'kg',
             vendor_name: vendorName,
             supplier: vendorName,
-            invoice_no: poData.invoice_no || '',
+            po_id: poId,
+            po_number: poData.po_number,
+            is_butcher_po: true,
+            is_butcher_inventory: true,
             received_at: serverTimestamp(),
-            expiry_date: item.expiry_date || new Date(Date.now() + 7 * 86400 * 1000).toISOString().substring(0, 10),
+            expiry_date: new Date(Date.now() + 7 * 86400 * 1000).toISOString().substring(0, 10),
             butchered_status: 'pending',
             is_cut: false,
             created_at: serverTimestamp(),
         };
 
         bRef.set(newBatchRef, batchData);
-        createdBatches.push({ id: newBatchRef.id, ...batchData });
+        createdBatches.push({ id: newBatchRef.id, ...batchData, created_at: new Date().toISOString() });
 
-        // Check if item exists in inventory_items; if not, create it!
+        // Register in inventory_items if not exists
         const normKey = itemName.toLowerCase().trim();
         if (!existingItemMap.has(normKey)) {
             const newItemRef = doc(collection(db, ITEMS));
@@ -547,7 +716,7 @@ export const createButcherPurchaseOrder = async (poData) => {
                 supplier: vendorName,
                 unit: 'kg',
                 cost_price: Number(item.unit_price) || 0,
-                current_stock: weight,
+                current_stock: qty,
                 status: 'active',
                 created_at: serverTimestamp(),
                 updated_at: serverTimestamp(),
@@ -556,7 +725,68 @@ export const createButcherPurchaseOrder = async (poData) => {
         }
     }
 
-    await bRef.commit();
+    // Update PO status
+    bRef.update(doc(db, PURCHASE_ORDERS, poId), {
+        status: 'received',
+        received_at: serverTimestamp(),
+    });
 
-    return { id: docRef.id, ...docData, createdBatches };
+    await bRef.commit();
+    return { createdBatches };
 };
+
+/** Get all Butcher Purchase Orders */
+export const getButcherPurchaseOrders = async () => {
+    try {
+        const snap = await getDocs(query(collection(db, PURCHASE_ORDERS), where('is_butcher_po', '==', true)));
+        const list = snap.docs.map(d => {
+            const data = d.data();
+            return {
+                id: d.id,
+                ...data,
+                created_at: data.created_at?.toDate?.() ? data.created_at.toDate().toISOString() : (typeof data.created_at === 'string' ? data.created_at : null),
+            };
+        });
+        return list.sort((a, b) => {
+            const tA = new Date(a.created_at || 0).getTime();
+            const tB = new Date(b.created_at || 0).getTime();
+            return tB - tA;
+        });
+    } catch (err) {
+        console.error('Error fetching butcher POs:', err);
+        return [];
+    }
+};
+
+/** Get butcher inventory — received uncut meat batches */
+export const getButcherInventory = async () => {
+    try {
+        const snap = await getDocs(collection(db, BATCHES));
+        const allBatches = snap.docs.map(d => {
+            const data = d.data();
+            return {
+                id: d.id,
+                ...data,
+                created_at: data.created_at?.toDate?.() ? data.created_at.toDate().toISOString() : (typeof data.created_at === 'string' ? data.created_at : null),
+                received_at: data.received_at?.toDate?.() ? data.received_at.toDate().toISOString() : (typeof data.received_at === 'string' ? data.received_at : null),
+                expiry_date: data.expiry_date?.toDate?.() ? data.expiry_date.toDate().toISOString().substring(0, 10) : (typeof data.expiry_date === 'string' ? data.expiry_date : '—'),
+            };
+        });
+        return allBatches.filter(b => {
+            const isButcherBatch = b.is_butcher_inventory === true;
+            const isNotChild = !b.parent_batch_id;
+            const isNotCut = b.is_cut !== true;
+            const notCompleted = b.butchered_status !== 'completed';
+            const hasStock = (Number(b.quantity || b.remaining_weight_kg || b.initial_quantity) > 0);
+            return isButcherBatch && isNotChild && isNotCut && notCompleted && hasStock;
+        }).sort((a, b) => {
+            const tA = new Date(a.created_at || 0).getTime();
+            const tB = new Date(b.created_at || 0).getTime();
+            return tB - tA;
+        });
+    } catch (err) {
+        console.error('Error fetching butcher inventory:', err);
+        return [];
+    }
+};
+

@@ -16,7 +16,7 @@ import {
 } from 'react-icons/md';
 import {
     getButcheringOrders,
-    getUnbutcheredBatches,
+    getButcherInventory,
 } from '../../services/butcheringService';
 import './ButcheringModule.css';
 
@@ -24,9 +24,14 @@ import './ButcheringModule.css';
 const sanitize = (obj) => {
     if (!obj || typeof obj !== 'object') return obj;
     if (Array.isArray(obj)) return obj.map(sanitize);
-    // Firestore Timestamp check
-    if (obj.seconds !== undefined && obj.nanoseconds !== undefined) {
+    if (obj.seconds !== undefined) {
         return new Date(obj.seconds * 1000).toLocaleDateString('en-GB');
+    }
+    if (obj._methodName || (obj.constructor && obj.constructor.name === 'FieldValue')) {
+        return new Date().toLocaleDateString('en-GB');
+    }
+    if (obj instanceof Date) {
+        return obj.toLocaleDateString('en-GB');
     }
     const result = {};
     for (const key of Object.keys(obj)) {
@@ -40,6 +45,23 @@ const safeNum = (val) => {
     return isNaN(n) ? 0 : n;
 };
 
+const safeDate = (val) => {
+    if (!val) return '—';
+    if (typeof val === 'string') return val;
+    if (typeof val === 'number') return new Date(val).toLocaleDateString('en-GB');
+    if (val instanceof Date) return val.toLocaleDateString('en-GB');
+    if (typeof val === 'object') {
+        if (val.seconds !== undefined && typeof val.seconds === 'number') {
+            return new Date(val.seconds * 1000).toLocaleDateString('en-GB');
+        }
+        if (typeof val.toDate === 'function') {
+            return val.toDate().toLocaleDateString('en-GB');
+        }
+        return '—';
+    }
+    return String(val);
+};
+
 const ButcherDashboard = () => {
     const navigate = useNavigate();
     const [loading, setLoading] = useState(true);
@@ -51,7 +73,7 @@ const ButcherDashboard = () => {
         try {
             const [orderList, unbutchered] = await Promise.all([
                 getButcheringOrders(),
-                getUnbutcheredBatches(),
+                getButcherInventory(),
             ]);
             setOrders((orderList || []).map(sanitize));
             setPendingBatches((unbutchered || []).map(sanitize));
@@ -293,7 +315,7 @@ const ButcherDashboard = () => {
                                         <div className="pb-batch-no">{b.batch_number || b.id}</div>
                                         <div className="pb-product">{b.item_name || 'Whole Meat'}</div>
                                         <div className="pb-meta">
-                                            {b.vendor_name || b.supplier || 'Meat Supplier'} &nbsp;•&nbsp; Expiry: {b.expiry_date || 'N/A'}
+                                            {b.vendor_name || b.supplier || 'Meat Supplier'} &nbsp;•&nbsp; Expiry: {safeDate(b.expiry_date)}
                                         </div>
                                     </div>
                                     <div className="pb-right">

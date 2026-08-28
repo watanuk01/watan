@@ -85,12 +85,12 @@ const Sidebar = () => {
                         type: 'submenu', label: 'Butchering', icon: MdContentCut, key: 'butchering',
                         children: [
                             { label: 'Butcher Dashboard', path: '/butchering/dashboard' },
-                            { label: 'New Order', path: '/butchering/new' },
+                            { label: 'Cut Types Admin', path: '/butchering/cut-types' },
+                            { label: 'Meat Purchase Order', path: '/butchering/purchase-order' },
+                            { label: 'Butcher Inventory', path: '/butchering/inventory' },
+                            { label: 'New Butchering Order', path: '/butchering/new' },
                             { label: 'Butchering History', path: '/butchering/history' },
                             { label: 'Batch Traceability & QR', path: '/traceability' },
-                            { label: 'Meat Purchase Order', path: '/butchering/purchase-order' },
-                            { label: 'Reports & Yield Analytics', path: '/reports?tab=butcher' },
-                            { label: 'Cut Types Admin', path: '/butchering/cut-types' },
                         ]
                     },
                     {
@@ -162,12 +162,12 @@ const Sidebar = () => {
                         type: 'submenu', label: 'Butchering', icon: MdContentCut, key: 'butchering',
                         children: [
                             { label: 'Butcher Dashboard', path: '/butchering/dashboard' },
-                            { label: 'New Order', path: '/butchering/new' },
+                            { label: 'Cut Types Admin', path: '/butchering/cut-types' },
+                            { label: 'Meat Purchase Order', path: '/butchering/purchase-order' },
+                            { label: 'Butcher Inventory', path: '/butchering/inventory' },
+                            { label: 'New Butchering Order', path: '/butchering/new' },
                             { label: 'Butchering History', path: '/butchering/history' },
                             { label: 'Batch Traceability & QR', path: '/traceability' },
-                            { label: 'Meat Purchase Order', path: '/butchering/purchase-order' },
-                            { label: 'Reports & Yield Analytics', path: '/reports?tab=butcher' },
-                            { label: 'Cut Types Admin', path: '/butchering/cut-types' },
                         ]
                     },
                     {
@@ -196,12 +196,12 @@ const Sidebar = () => {
                         type: 'submenu', label: 'Butchering', icon: MdContentCut, key: 'butchering',
                         children: [
                             { label: 'Butcher Dashboard', path: '/butchering/dashboard' },
-                            { label: 'New Order', path: '/butchering/new' },
+                            { label: 'Cut Types Admin', path: '/butchering/cut-types' },
+                            { label: 'Meat Purchase Order', path: '/butchering/purchase-order' },
+                            { label: 'Butcher Inventory', path: '/butchering/inventory' },
+                            { label: 'New Butchering Order', path: '/butchering/new' },
                             { label: 'Butchering History', path: '/butchering/history' },
                             { label: 'Batch Traceability & QR', path: '/traceability' },
-                            { label: 'Meat Purchase Order', path: '/butchering/purchase-order' },
-                            { label: 'Reports & Yield Analytics', path: '/reports?tab=butcher' },
-                            { label: 'Cut Types Admin', path: '/butchering/cut-types' },
                         ]
                     },
                     { type: 'item', label: 'Current Stock', icon: MdInventory2, path: '/inventory/stock' },

@@ -69,6 +69,7 @@ import ButcheringHistory from '../pages/butchering/ButcheringHistory';
 import BatchTraceability from '../pages/butchering/BatchTraceability';
 import CutTypesAdmin from '../pages/butchering/CutTypesAdmin';
 import ButcherPurchaseOrder from '../pages/butchering/ButcherPurchaseOrder';
+import ButcherInventory from '../pages/butchering/ButcherInventory';
 
 // Notifications
 import NotificationsPage from '../pages/notifications/NotificationsPage';
@@ -377,6 +378,14 @@ const AppRouter = () => {
                         element={
                             <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef', 'butcher']}>
                                 <ButcherPurchaseOrder />
+                            </ProtectedRoute>
+                        }
+                    />
+                    <Route
+                        path="/butchering/inventory"
+                        element={
+                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef', 'butcher']}>
+                                <ButcherInventory />
                             </ProtectedRoute>
                         }
                     />

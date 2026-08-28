@@ -18,8 +18,9 @@ import {
     MdInfo,
 } from 'react-icons/md';
 import {
-    getUnbutcheredBatches,
+    getButcherInventory,
     getCutTypes,
+    getAnimals,
     createButcheringOrder,
 } from '../../services/butcheringService';
 import QrCodeSvg from '../../components/ui/QrCodeSvg';
@@ -31,8 +32,14 @@ const safeNum = (v, fallback = 0) => { const n = Number(v); return isNaN(n) ? fa
 const sanitize = (obj) => {
     if (!obj || typeof obj !== 'object') return obj;
     if (Array.isArray(obj)) return obj.map(sanitize);
-    if (obj.seconds !== undefined && obj.nanoseconds !== undefined) {
+    if (obj.seconds !== undefined) {
         return new Date(obj.seconds * 1000).toLocaleDateString('en-GB');
+    }
+    if (obj._methodName || (obj.constructor && obj.constructor.name === 'FieldValue')) {
+        return new Date().toLocaleDateString('en-GB');
+    }
+    if (obj instanceof Date) {
+        return obj.toLocaleDateString('en-GB');
     }
     const result = {};
     for (const key of Object.keys(obj)) { result[key] = sanitize(obj[key]); }
@@ -42,7 +49,6 @@ const sanitize = (obj) => {
 let _rowCounter = 1;
 const newRowId = () => String(_rowCounter++);
 
-// Build readable genealogy text for QR codes — no URLs, just full traceability as text
 const buildBatchQrText = ({ batchNo, cutName, weightKg, isWaste, parentBatchNo, parentProduct, parentWeight, vendor, butcherName, date, yieldPct, expiry, orderNo }) => {
     return [
         `WATAN CENTRAL KITCHEN`,
@@ -75,35 +81,123 @@ const NewButcheringOrder = () => {
 
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
-    //setBatches stores parent batches returned by:getUnbutcheredBatches()
     const [batches, setBatches] = useState([]);
-    //setCutMaster stores master records returned by:getCutTypes()
     const [cutMaster, setCutMaster] = useState([]);
-    //Stores only the selected batch's Firestore document ID.
+    const [animals, setAnimals] = useState([]);
     const [selectedBatchId, setSelectedBatchId] = useState('');
-    //Stores the complete selected parent batch object.
     const [selectedBatch, setSelectedBatch] = useState(null);
     const [butcherName, setButcherName] = useState('Central Kitchen Butcher');
     const [date, setDate] = useState(new Date().toISOString().substring(0, 10));
     const [notes, setNotes] = useState('');
-    //This stores the cut output rows.
     const [cuts, setCuts] = useState([]);
-    //stores the result returned by the service createButcheringOrder.
     const [createdOrder, setCreatedOrder] = useState(null);
+    const [amountToButcher, setAmountToButcher] = useState('');
+    const [showAllCuts, setShowAllCuts] = useState(false);
+
+    // Detect animal type from batch item name
+    const detectAnimalType = (batch) => {
+        if (!batch) return null;
+        if (batch.animal_type) return batch.animal_type;
+        const name = (batch.item_name || '').toLowerCase();
+        if (name.includes('chicken')) return 'Chicken';
+        if (name.includes('beef') || name.includes('cow')) return 'Beef';
+        if (name.includes('mutton')) return 'Mutton';
+        if (name.includes('goat')) return 'Goat';
+        if (name.includes('lamb') || name.includes('sheep')) return 'Lamb';
+        if (name.includes('pork')) return 'Pork';
+        if (name.includes('turkey')) return 'Turkey';
+        if (name.includes('duck')) return 'Duck';
+        if (name.includes('prawn') || name.includes('fish') || name.includes('seafood') ||
+            name.includes('salmon') || name.includes('cod')) return 'Seafood';
+        return null;
+    };
+
+    // Find matching animal master for proportional calculations
+    const findMatchingAnimal = (batch) => {
+        if (!batch) return null;
+        const batchName = (batch.item_name || '').toLowerCase();
+        // First try exact name match
+        let match = animals.find(a => batchName.includes(a.name.toLowerCase()));
+        if (match) return match;
+        // Then try animal_type match
+        const animalType = detectAnimalType(batch);
+        if (animalType) {
+            match = animals.find(a => a.animal_type === animalType);
+        }
+        return match || null;
+    };
+
+    // Calculate proportional cuts based on amount to butcher
+    const applyProportionalCuts = (batch, butcherAmount) => {
+        const matchedAnimal = findMatchingAnimal(batch);
+        const parentNo = batch.batch_number || batch.id;
+
+        if (matchedAnimal && matchedAnimal.cut_types && matchedAnimal.cut_types.length > 0) {
+            const baseWeight = safeNum(matchedAnimal.base_weight, 1);
+            const ratio = safeNum(butcherAmount, 0) / baseWeight;
+
+            const rows = matchedAnimal.cut_types.map((ct, i) => {
+                const stdWeight = safeNum(ct.std_weight_kg, 0);
+                const proportionalWeight = Math.round(stdWeight * ratio * 100) / 100;
+                const code = (ct.name || 'CUT').replace(/[^a-zA-Z0-9]/g, '').substring(0, 4).toUpperCase();
+
+                return {
+                    id: newRowId(),
+                    cut_name: ct.name,
+                    weight_kg: proportionalWeight > 0 ? proportionalWeight : 0,
+                    is_waste: Boolean(ct.is_waste),
+                    shelf_life_days: safeNum(ct.shelf_life_days, 5),
+                    child_batch_no: `${parentNo}-${code}-${i + 1}`,
+                };
+            });
+
+            setCuts(rows);
+        } else {
+            // Fallback to cut types from flat collection
+            const animalType = detectAnimalType(batch);
+            const filtered = animalType
+                ? cutMaster.filter(c => (c.animal_type || '').toLowerCase() === animalType.toLowerCase())
+                : cutMaster;
+            const listToUse = filtered.length > 0 ? filtered : cutMaster.slice(0, 5);
+
+            const totalStdWeight = listToUse.reduce((s, c) => s + safeNum(c.std_weight_kg, 2), 0);
+            const amt = safeNum(butcherAmount, 0);
+
+            const rows = listToUse.map((c, i) => {
+                const stdWeight = safeNum(c.std_weight_kg, 2);
+                const proportion = totalStdWeight > 0 ? stdWeight / totalStdWeight : 1 / listToUse.length;
+                const propWeight = Math.round(amt * proportion * 100) / 100;
+                const code = (c.name || 'CUT').replace(/[^a-zA-Z0-9]/g, '').substring(0, 4).toUpperCase();
+
+                return {
+                    id: newRowId(),
+                    cut_name: c.name,
+                    weight_kg: propWeight > 0 ? propWeight : 0,
+                    is_waste: Boolean(c.is_waste),
+                    shelf_life_days: safeNum(c.shelf_life_days, 5),
+                    child_batch_no: `${parentNo}-${code}-${i + 1}`,
+                };
+            });
+
+            setCuts(rows);
+        }
+    };
 
     const load = async () => {
         setLoading(true);
         try {
-            //both should called successfully else get rejected and go into catch error block
-            const [batchList, cutList] = await Promise.all([getUnbutcheredBatches(), getCutTypes()]);
+            const [batchList, cutList, animalList] = await Promise.all([
+                getButcherInventory(),
+                getCutTypes(),
+                getAnimals(),
+            ]);
 
-            //The purpose is to convert Firestore timestamp objects into display-safe date strings.
             const sanitizedBatches = (batchList || []).map(sanitize);
             const sanitizedCuts = (cutList || []).map(sanitize);
 
             setBatches(sanitizedBatches);
-
             setCutMaster(sanitizedCuts);
+            setAnimals(animalList || []);
 
             let initialBatch = sanitizedBatches[0] || null;
             if (preselectedId) {
@@ -111,12 +205,14 @@ const NewButcheringOrder = () => {
             }
 
             if (initialBatch) {
-                // sets the selected value in the dropdown.
                 setSelectedBatchId(initialBatch.id);
-                //provides full source-batch data weight calculations,vendor display,expiry display,service submission.
                 setSelectedBatch(initialBatch);
-                //creates initial output rows based on the selected animal.
-                applyDefaultCuts(initialBatch, sanitizedCuts);
+                const availableWeight = safeNum(initialBatch.weight_kg || initialBatch.quantity || initialBatch.initial_quantity, 10);
+                setAmountToButcher(String(availableWeight));
+                // Apply proportional cuts after animals load
+                setTimeout(() => {
+                    applyProportionalCuts(initialBatch, availableWeight);
+                }, 0);
             }
         } catch (err) {
             console.error('Load error:', err);
@@ -126,79 +222,30 @@ const NewButcheringOrder = () => {
         }
     };
 
-    const [showAllCuts, setShowAllCuts] = useState(false);
+    useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Detect Animal Type from batch item name — supports all species including seafood
-    const detectAnimalType = (batch) => {
-        if (!batch) return null;
-        if (batch.animal_type) return batch.animal_type;
-        const name = (batch.item_name || '').toLowerCase();
-        if (name.includes('chicken')) return 'Chicken';
-        if (name.includes('beef') || name.includes('cow') || name.includes('veal')) return 'Beef';
-        if (name.includes('mutton')) return 'Mutton';
-        if (name.includes('goat')) return 'Goat';
-        if (name.includes('lamb') || name.includes('sheep')) return 'Lamb';
-        if (name.includes('pork') || name.includes('pig')) return 'Pork';
-        if (name.includes('turkey')) return 'Turkey';
-        if (name.includes('duck')) return 'Duck';
-        // Seafood detection — prawns, shrimp, fish, salmon, cod, squid, lobster, crab, etc.
-        if (name.includes('prawn') || name.includes('shrimp') || name.includes('fish') ||
-            name.includes('salmon') || name.includes('cod') || name.includes('squid') ||
-            name.includes('lobster') || name.includes('crab') || name.includes('oyster') ||
-            name.includes('scallop') || name.includes('octopus') || name.includes('tuna') ||
-            name.includes('haddock') || name.includes('mackerel') || name.includes('seafood')) return 'Seafood';
-        // Unknown product — return null so we show ALL cut types
-        return null;
+    // When amount to butcher changes, recalculate proportional cuts
+    const handleAmountChange = (val) => {
+        setAmountToButcher(val);
+        if (selectedBatch && safeNum(val) > 0) {
+            applyProportionalCuts(selectedBatch, safeNum(val));
+        }
     };
 
-    // Creates default cut rows based on selected batch animal type
-    const applyDefaultCuts = (batch, masterList) => {
-        const animalType = detectAnimalType(batch);
-        const parentNo = batch.batch_number || batch.id;
-        const parentWeight = safeNum(batch.weight_kg || batch.quantity || batch.initial_quantity, 10);
-
-        // Filter master list to cuts matching this animal type (or Mutton/Lamb grouped)
-        const filtered = animalType ? masterList.filter(c => {
-            const cutAnimal = (c.animal_type || '').toLowerCase();
-            const targetAnimal = animalType.toLowerCase();
-            if (targetAnimal === 'mutton' || targetAnimal === 'lamb') {
-                return cutAnimal === 'mutton' || cutAnimal === 'lamb';
-            }
-            return cutAnimal === targetAnimal;
-        }) : [];
-
-        const listToUse = filtered.length > 0 ? filtered : masterList;
-        const defaults = listToUse.slice(0, 5).map((c, i) => {
-            const code = c.name.replace(/[^a-zA-Z0-9]/g, '').substring(0, 4).toUpperCase();
-            // Proportional initial weight allocation so total defaults don't exceed carcass weight
-            const stdW = safeNum(c.std_weight_kg, 2.5);
-            const propWeight = Math.min(stdW, Math.round((parentWeight / (listToUse.length || 4)) * 10) / 10);
-            return {
-                id: newRowId(),
-                cut_name: c.name,
-                weight_kg: propWeight > 0 ? propWeight : 1.0,
-                is_waste: Boolean(c.is_waste),
-                shelf_life_days: safeNum(c.shelf_life_days, 5),
-                child_batch_no: `${parentNo}-${code}-${i + 1}`,
-            };
-        });
-        setCuts(defaults);
-    };
-
-    useEffect(() => { load(); }, []);
-
-    // Runs when user selects another option in source batch dropdown
     const handleBatchChange = (id) => {
         setSelectedBatchId(id);
         const found = batches.find(b => b.id === id);
         setSelectedBatch(found || null);
-        if (found) applyDefaultCuts(found, cutMaster);
+        if (found) {
+            const availableWeight = safeNum(found.weight_kg || found.quantity || found.initial_quantity, 10);
+            setAmountToButcher(String(availableWeight));
+            applyProportionalCuts(found, availableWeight);
+        }
     };
 
-    // Current detected animal type for selected batch
     const currentAnimal = detectAnimalType(selectedBatch);
+    const matchedAnimalMaster = findMatchingAnimal(selectedBatch);
 
-    // Filter available cuts for table dropdown — falls back to ALL cuts if no match
     const getAvailableCutTypes = () => {
         if (showAllCuts || !currentAnimal) return cutMaster;
         const filtered = cutMaster.filter(c => {
@@ -209,35 +256,30 @@ const NewButcheringOrder = () => {
             }
             return cutAnimal === targetAnimal || cutAnimal === 'other';
         });
-        // If no matching cuts found for this animal, show all cuts
         return filtered.length > 0 ? filtered : cutMaster;
     };
 
-    // Parent weight and allocation metrics
+    // Metrics
     const parentWeight = safeNum(selectedBatch?.weight_kg || selectedBatch?.quantity || selectedBatch?.initial_quantity, 0);
+    const butcherAmt = safeNum(amountToButcher, 0);
     const usableWeight = cuts.filter(c => !c.is_waste).reduce((s, c) => s + safeNum(c.weight_kg), 0);
     const wasteWeight = cuts.filter(c => c.is_waste).reduce((s, c) => s + safeNum(c.weight_kg), 0);
     const allocated = usableWeight + wasteWeight;
-    const remaining = Math.max(0, parentWeight - allocated);
-
-    // Yield Rate: (Usable Cuts Weight / Parent Weight) * 100
-    const yieldPct = parentWeight > 0 ? Math.round((usableWeight / parentWeight) * 1000) / 10 : 0;
-    const isOverAllocated = allocated > parentWeight + 0.05;
-    const isYieldInvalid = usableWeight > parentWeight;
+    const remaining = Math.max(0, butcherAmt - allocated);
+    const yieldPct = butcherAmt > 0 ? Math.round((usableWeight / butcherAmt) * 1000) / 10 : 0;
+    const isOverAllocated = allocated > butcherAmt + 0.05;
 
     const addRow = () => {
         const available = getAvailableCutTypes();
         const defaultCut = available[0] || cutMaster[0];
         const parentNo = selectedBatch?.batch_number || 'BAT';
         const code = (defaultCut?.name || 'CUT').replace(/[^a-zA-Z0-9]/g, '').substring(0, 4).toUpperCase();
-
-        // Smart weight for newly added row (uses remaining unallocated weight up to 2.5 kg)
-        const unallocatedLeft = Math.max(0, parentWeight - allocated);
+        const unallocatedLeft = Math.max(0, butcherAmt - allocated);
         const initialWeight = unallocatedLeft > 0 ? Math.min(2.5, Math.round(unallocatedLeft * 10) / 10) : 1.0;
 
         setCuts(p => [...p, {
             id: newRowId(),
-            cut_name: defaultCut?.name || 'Lamb Chops',
+            cut_name: defaultCut?.name || 'Cut',
             weight_kg: initialWeight,
             is_waste: Boolean(defaultCut?.is_waste),
             shelf_life_days: safeNum(defaultCut?.shelf_life_days, 5),
@@ -258,7 +300,6 @@ const NewButcheringOrder = () => {
                 const master = cutMaster.find(m => m.name === value);
                 if (master) {
                     updated.is_waste = Boolean(master.is_waste);
-                    updated.weight_kg = safeNum(master.std_weight_kg, c.weight_kg);
                     updated.shelf_life_days = safeNum(master.shelf_life_days, c.shelf_life_days);
                 }
                 const parentNo = selectedBatch?.batch_number || 'BAT';
@@ -273,7 +314,7 @@ const NewButcheringOrder = () => {
         if (!selectedBatch) { toast.error('Select a source batch first'); return; }
         if (cuts.length === 0) { toast.error('Add at least one cut output row'); return; }
         if (isOverAllocated) {
-            toast.error(`Cannot save: Total allocated (${allocated.toFixed(1)} kg) exceeds source weight (${parentWeight} kg) by ${(allocated - parentWeight).toFixed(1)} kg!`);
+            toast.error(`Cannot save: Total allocated (${allocated.toFixed(1)} kg) exceeds amount to butcher (${butcherAmt} kg)!`);
             return;
         }
         if (usableWeight <= 0) {
@@ -292,9 +333,85 @@ const NewButcheringOrder = () => {
         }
     };
 
+    // ═══════════════════════════════════════════
+    // SUCCESS SCREEN
+    // ═══════════════════════════════════════════
+    if (createdOrder) {
+        const order = createdOrder;
+        const childBatches = order.child_batches || [];
+
+        return (
+            <div className="butcher-page">
+                <div className="butcher-page-header">
+                    <div>
+                        <h1 className="butcher-page-title"><MdCheckCircle className="title-icon" style={{ color: '#22c55e' }} /> Butchering Complete</h1>
+                    </div>
+                </div>
+
+                <div className="butcher-panel" style={{ textAlign: 'center', padding: 40 }}>
+                    <div style={{ fontSize: 56, marginBottom: 12 }}>✅</div>
+                    <h2 style={{ color: 'var(--color-primary)', marginBottom: 8, fontFamily: 'var(--font-heading)' }}>
+                        Order {order.order_no}
+                    </h2>
+                    <p style={{ color: 'var(--color-text-muted)', marginBottom: 4 }}>
+                        {childBatches.length} child batches created • Yield: {order.yield_pct}%
+                    </p>
+                    <p style={{ color: 'var(--color-text-muted)', fontSize: 13 }}>
+                        Input: {order.input_weight_kg} kg → Usable: {order.output_weight_kg} kg • Waste: {order.waste_weight_kg} kg
+                    </p>
+
+                    <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 24 }}>
+                        <button className="btn btn-primary btn-md" onClick={() => { setCreatedOrder(null); load(); }}>
+                            <MdAdd /> New Butchering Order
+                        </button>
+                        <button className="btn btn-secondary btn-md" onClick={() => navigate('/butchering/history')}>
+                            View History
+                        </button>
+                    </div>
+                </div>
+
+                {/* QR Codes */}
+                {childBatches.length > 0 && (
+                    <div className="butcher-panel" style={{ marginTop: 24 }}>
+                        <h3 className="butcher-panel-title"><MdQrCodeScanner /> Generated QR Labels</h3>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16, marginTop: 12 }}>
+                            {childBatches.map(batch => (
+                                <div key={batch.id} style={{
+                                    background: 'var(--color-bg)', border: '1px solid var(--color-border)',
+                                    borderRadius: 'var(--radius-md)', padding: 16, textAlign: 'center',
+                                }}>
+                                    <QrCodeSvg value={batch.qr_code_data || batch.batch_number} size={140} />
+                                    <div style={{ marginTop: 8, fontWeight: 700, fontSize: 13, color: 'var(--color-primary)' }}>
+                                        {batch.batch_number}
+                                    </div>
+                                    <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
+                                        {batch.cut_name || batch.item_name} — {batch.quantity} kg
+                                        {batch.is_waste && <span style={{ color: '#ef4444' }}> (Waste)</span>}
+                                    </div>
+                                    <button className="btn btn-secondary btn-sm" style={{ marginTop: 8 }}
+                                        onClick={() => {
+                                            const el = document.createElement('a');
+                                            const svg = document.querySelector(`[data-batch="${batch.id}"]`);
+                                            if (svg) { /* Print logic can be added */ }
+                                            toast.success('Print from browser print dialog');
+                                            window.print();
+                                        }}>
+                                        <MdPrint size={12} /> Print Label
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+            </div>
+        );
+    }
+
+    // ═══════════════════════════════════════════
+    // MAIN FORM
+    // ═══════════════════════════════════════════
     return (
         <div className="butcher-page">
-            {/* Header */}
             <div className="butcher-page-header">
                 <div>
                     <button className="btn-back" onClick={() => navigate('/butchering/dashboard')}>
@@ -304,7 +421,7 @@ const NewButcheringOrder = () => {
                         <MdContentCut className="title-icon" /> New Butchering Order
                     </h1>
                     <p className="butcher-page-subtitle">
-                        Split a whole meat parent batch into child cut batches with QR tracking &amp; yield measurement
+                        Select meat from inventory, choose amount to butcher — cut weights auto-calculated from Cut Types Admin
                     </p>
                 </div>
             </div>
@@ -314,9 +431,9 @@ const NewButcheringOrder = () => {
             ) : batches.length === 0 ? (
                 <div className="butcher-panel" style={{ textAlign: 'center', padding: '40px 20px' }}>
                     <MdWarning size={48} color="var(--color-warning)" style={{ marginBottom: 12 }} />
-                    <h3 style={{ color: 'var(--color-text-primary)' }}>No Parent Meat Batches Available</h3>
+                    <h3 style={{ color: 'var(--color-text-primary)' }}>No Meat Available for Butchering</h3>
                     <p style={{ color: 'var(--color-text-muted)', marginBottom: 20 }}>
-                        There are no whole animal or raw meat batches awaiting processing in inventory.
+                        Receive a meat purchase order first, then the meat will appear here.
                     </p>
                     <button className="btn btn-primary btn-md" onClick={() => navigate('/butchering/purchase-order')}>
                         Create Meat Purchase Order
@@ -324,9 +441,9 @@ const NewButcheringOrder = () => {
                 </div>
             ) : (
                 <>
-                    {/* Section 1: Source Batch & Info */}
+                    {/* Section 1: Source Batch & Butcher Details */}
                     <div className="butcher-panel">
-                        <h3 className="butcher-panel-title">1. Select Source Batch &amp; Butcher Details</h3>
+                        <h3 className="butcher-panel-title">1. Select Source Batch & Butcher Details</h3>
                         <div className="form-row-3">
                             <div className="form-field">
                                 <label>Source Meat Batch *</label>
@@ -339,131 +456,149 @@ const NewButcheringOrder = () => {
                                 </select>
                             </div>
                             <div className="form-field">
-                                <label>Butcher Name *</label>
-                                <input className="form-input" type="text" value={butcherName} onChange={e => setButcherName(e.target.value)} placeholder="Enter butcher name" />
+                                <label>Butcher Name</label>
+                                <input className="form-input" type="text" value={butcherName}
+                                    onChange={e => setButcherName(e.target.value)} placeholder="Butcher name" />
                             </div>
                             <div className="form-field">
-                                <label>Processing Date *</label>
-                                <input className="form-input" type="date" value={date} onChange={e => setDate(e.target.value)} />
+                                <label>Date</label>
+                                <input className="form-input" type="date" value={date}
+                                    onChange={e => setDate(e.target.value)} />
                             </div>
                         </div>
 
+                        {/* Source Batch Info Cards */}
                         {selectedBatch && (
-                            <div className="source-batch-card">
-                                <div className="source-batch-card-header">
-                                    <div className="source-batch-title-group">
-                                        <span className="source-animal-badge">{currentAnimal === 'Seafood' ? '🦐' : '🥩'} {currentAnimal || 'Mixed / Other'}</span>
-                                        <span className="batch-code-badge">{selectedBatch.batch_number || selectedBatch.id}</span>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginTop: 16 }}>
+                                {[
+                                    { icon: <MdInventory2 />, label: 'Available', value: `${parentWeight} kg`, color: 'var(--color-success)' },
+                                    { icon: <MdStore />, label: 'Vendor', value: selectedBatch.vendor_name || selectedBatch.supplier || '—' },
+                                    { icon: <MdCalendarToday />, label: 'Animal Type', value: currentAnimal || 'Unknown', color: 'var(--color-primary)' },
+                                    ...(matchedAnimalMaster ? [{ icon: <MdInfo />, label: 'Template', value: `${matchedAnimalMaster.name} (${matchedAnimalMaster.base_weight} ${matchedAnimalMaster.base_unit})`, color: 'var(--color-primary)' }] : []),
+                                ].map((info, i) => (
+                                    <div key={i} style={{
+                                        background: 'var(--color-bg)', border: '1px solid var(--color-border)',
+                                        borderRadius: 'var(--radius-md)', padding: '10px 14px', fontSize: 12,
+                                    }}>
+                                        <div style={{ color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                                            {info.icon} {info.label}
+                                        </div>
+                                        <div style={{ fontWeight: 700, color: info.color || 'var(--color-text-primary)', marginTop: 4, fontSize: 13 }}>
+                                            {info.value}
+                                        </div>
                                     </div>
-                                    <div className="source-batch-status-chip">
-                                        <span className="chip-green">Raw Parent Carcass</span>
-                                    </div>
-                                </div>
-
-                                <div className="source-batch-card-grid">
-                                    <div className="source-grid-item">
-                                        <div className="source-grid-label"><MdInventory2 className="icon" /> Product Name</div>
-                                        <div className="source-grid-value main-product-name">{selectedBatch.item_name}</div>
-                                    </div>
-
-                                    <div className="source-grid-item">
-                                        <div className="source-grid-label"><MdScale className="icon" /> Total Input Weight</div>
-                                        <div className="source-grid-value weight-value">{parentWeight} <span className="unit">kg</span></div>
-                                    </div>
-
-                                    <div className="source-grid-item">
-                                        <div className="source-grid-label"><MdStore className="icon" /> Vendor / Supplier</div>
-                                        <div className="source-grid-value">{selectedBatch.vendor_name || selectedBatch.supplier || 'Al-Safa Meats'}</div>
-                                    </div>
-
-                                    <div className="source-grid-item">
-                                        <div className="source-grid-label"><MdCalendarToday className="icon" /> Expiry Date</div>
-                                        <div className="source-grid-value expiry-value">{selectedBatch.expiry_date || '—'}</div>
-                                    </div>
-                                </div>
+                                ))}
                             </div>
                         )}
                     </div>
 
-                    {/* Section 2: Cut Output Rows */}
-                    <div className="butcher-panel">
-                        <div className="butcher-panel-header">
-                            <div>
-                                <h3 className="butcher-panel-title">2. Define Cut Types &amp; Output Weights</h3>
-                                <p style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 2 }}>
-                                    Showing cut types for <strong>{currentAnimal || 'All Types'}</strong> &nbsp;
-                                    <button
-                                        className="btn-text-link"
-                                        style={{ fontSize: 11, cursor: 'pointer' }}
-                                        onClick={() => setShowAllCuts(v => !v)}
-                                    >
-                                        {showAllCuts ? '(Show Filtered Only)' : '(Show All Animals)'}
-                                    </button>
-                                </p>
+                    {/* Section 2: Amount to Butcher */}
+                    <div className="butcher-panel" style={{ marginTop: 20 }}>
+                        <h3 className="butcher-panel-title">2. Amount to Butcher</h3>
+                        <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                            <div className="form-field" style={{ maxWidth: 200 }}>
+                                <label>How much to butcher (kg) *</label>
+                                <input
+                                    className="form-input"
+                                    type="number"
+                                    step="0.1"
+                                    min="0.1"
+                                    max={parentWeight}
+                                    value={amountToButcher}
+                                    onChange={e => handleAmountChange(e.target.value)}
+                                    style={{ fontSize: 18, fontWeight: 700, textAlign: 'center' }}
+                                />
                             </div>
-                            <button className="btn btn-secondary btn-sm" onClick={addRow}>
-                                <MdAdd /> Add Row
-                            </button>
+                            <div style={{ fontSize: 13, color: 'var(--color-text-muted)', paddingBottom: 10 }}>
+                                out of <strong style={{ color: 'var(--color-success)' }}>{parentWeight} kg</strong> available
+                                {butcherAmt > parentWeight && (
+                                    <span style={{ color: '#ef4444', marginLeft: 8 }}>⚠️ Exceeds available!</span>
+                                )}
+                            </div>
+                            {matchedAnimalMaster && (
+                                <div style={{
+                                    fontSize: 12, color: 'var(--color-primary)', background: 'var(--color-primary-muted)',
+                                    padding: '8px 14px', borderRadius: 'var(--radius-md)', marginBottom: 6,
+                                }}>
+                                    📐 Cut weights auto-calculated from <strong>{matchedAnimalMaster.name}</strong> template
+                                    ({matchedAnimalMaster.base_weight} {matchedAnimalMaster.base_unit} base → {matchedAnimalMaster.cut_types?.length || 0} cuts)
+                                </div>
+                            )}
                         </div>
+                        {(matchedAnimalMaster?.allowed_butchering_quantities || []).length > 0 && (
+                            <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', fontSize: 12 }}>
+                                <span style={{ color: 'var(--color-text-muted)' }}>Suggested quantities:</span>
+                                {matchedAnimalMaster.allowed_butchering_quantities.filter(q => Number(q) <= parentWeight).map(q => (
+                                    <button key={q} type="button" className="btn btn-secondary btn-sm" onClick={() => handleAmountChange(String(q))}>{q} kg</button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
 
-                        {/* Over-allocation warning banner */}
-                        {isOverAllocated ? (
-                            <div className="weight-warning-banner red">
-                                <MdWarning size={20} />
-                                <span>
-                                    <strong>Over-Allocated Weight Error:</strong> Total cuts ({allocated.toFixed(1)} kg) exceed the source carcass weight ({parentWeight} kg) by <strong>{(allocated - parentWeight).toFixed(1)} kg</strong>! Adjust cut weights to continue.
-                                </span>
+                    {/* Section 3: Cut Output Rows */}
+                    <div className="butcher-panel" style={{ marginTop: 20 }}>
+                        <div className="butcher-panel-header">
+                            <h3 className="butcher-panel-title">3. Cut Output — {cuts.length} rows</h3>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                                <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', color: 'var(--color-text-muted)' }}>
+                                    <input type="checkbox" checked={showAllCuts} onChange={e => setShowAllCuts(e.target.checked)} />
+                                    Show all cut types
+                                </label>
+                                <button className="btn btn-secondary btn-sm" onClick={addRow}><MdAdd /> Add Cut</button>
                             </div>
-                        ) : remaining > 0 ? (
-                            <div className="weight-warning-banner amber">
-                                <MdInfo size={18} />
-                                <span>
-                                    <strong>Unallocated Carcass Weight:</strong> {remaining.toFixed(1)} kg remaining out of {parentWeight} kg.
-                                </span>
-                            </div>
-                        ) : null}
+                        </div>
 
                         <div className="butcher-table-wrap">
                             <table className="butcher-table">
                                 <thead>
                                     <tr>
-                                        <th style={{ width: '32%' }}>Cut Type</th>
-                                        <th style={{ width: '15%' }}>Weight (kg)</th>
-                                        <th style={{ width: '15%' }}>Is Waste?</th>
-                                        <th style={{ width: '30%' }}>Child Batch No</th>
-                                        <th style={{ width: '8%' }}></th>
+                                        <th style={{ width: '28%' }}>CUT TYPE</th>
+                                        <th style={{ width: '14%' }}>WEIGHT (kg)</th>
+                                        <th style={{ width: '10%' }}>SHELF LIFE</th>
+                                        <th style={{ width: '10%' }}>TYPE</th>
+                                        <th style={{ width: '22%' }}>CHILD BATCH #</th>
+                                        <th style={{ width: 40 }}></th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {cuts.map(row => (
-                                        <tr key={row.id} className={row.is_waste ? 'waste-row' : ''}>
+                                    {cuts.map(cut => (
+                                        <tr key={cut.id} className={cut.is_waste ? 'waste-row' : ''}>
                                             <td>
-                                                <select className="table-cell-select" value={row.cut_name} onChange={e => updateRow(row.id, 'cut_name', e.target.value)}>
+                                                <select className="table-cell-select" style={{ width: '100%' }}
+                                                    value={cut.cut_name}
+                                                    onChange={e => updateRow(cut.id, 'cut_name', e.target.value)}>
                                                     {getAvailableCutTypes().map(c => (
-                                                        <option key={c.id} value={c.name}>
-                                                            {c.name} ({c.animal_type}){c.is_waste ? ' [Waste]' : ''}
+                                                        <option key={c.name} value={c.name}>
+                                                            {c.name} {c.is_waste ? '(Waste)' : ''}
                                                         </option>
                                                     ))}
                                                 </select>
                                             </td>
                                             <td>
-                                                <input
-                                                    type="number" step="0.1" min="0"
-                                                    className="table-cell-input"
-                                                    value={row.weight_kg}
-                                                    onChange={e => updateRow(row.id, 'weight_kg', Number(e.target.value))}
-                                                />
+                                                <input type="number" className="table-cell-input" style={{ width: '100%' }}
+                                                    step="0.1" min="0" value={cut.weight_kg}
+                                                    onChange={e => updateRow(cut.id, 'weight_kg', e.target.value)} />
                                             </td>
                                             <td>
-                                                <label className="checkbox-row">
-                                                    <input type="checkbox" checked={row.is_waste} onChange={e => updateRow(row.id, 'is_waste', e.target.checked)} />
-                                                    {row.is_waste ? <span className="chip-red">Waste</span> : <span className="chip-green">Usable</span>}
+                                                <input type="number" className="table-cell-input" style={{ width: '100%' }}
+                                                    min="1" value={cut.shelf_life_days}
+                                                    onChange={e => updateRow(cut.id, 'shelf_life_days', e.target.value)} />
+                                            </td>
+                                            <td>
+                                                <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 12 }}>
+                                                    <input type="checkbox" checked={cut.is_waste}
+                                                        onChange={e => updateRow(cut.id, 'is_waste', e.target.checked)} />
+                                                    {cut.is_waste ? <span className="chip-red">Waste</span> : <span className="chip-green">Usable</span>}
                                                 </label>
                                             </td>
-                                            <td><span className="batch-code" style={{ fontSize: 11 }}>{row.child_batch_no}</span></td>
                                             <td>
-                                                <button className="btn-icon-danger" onClick={() => removeRow(row.id)} title="Remove row">
-                                                    <MdDelete size={15} />
+                                                <input type="text" className="table-cell-input" style={{ width: '100%', fontFamily: 'var(--font-mono, monospace)', fontSize: 11 }}
+                                                    value={cut.child_batch_no}
+                                                    onChange={e => updateRow(cut.id, 'child_batch_no', e.target.value)} />
+                                            </td>
+                                            <td style={{ textAlign: 'center' }}>
+                                                <button className="btn-icon-danger" onClick={() => removeRow(cut.id)}>
+                                                    <MdDelete size={14} />
                                                 </button>
                                             </td>
                                         </tr>
@@ -472,159 +607,50 @@ const NewButcheringOrder = () => {
                             </table>
                         </div>
 
-                        {/* Weight Progress Bar */}
-                        <div className="weight-progress-section">
-                            <div className="weight-progress-row">
-                                <span>Weight Allocation</span>
-                                <strong style={{ color: isOverAllocated ? 'var(--color-danger)' : 'var(--color-text-primary)' }}>
-                                    {allocated.toFixed(1)} kg / {parentWeight} kg
-                                </strong>
-                            </div>
-                            <div className="weight-progress-track">
-                                <div className="weight-fill-usable" style={{ width: `${Math.min(100, (usableWeight / parentWeight) * 100)}%` }} />
-                                <div className="weight-fill-waste" style={{ width: `${Math.min(100, (wasteWeight / parentWeight) * 100)}%` }} />
-                            </div>
-                            <div className="weight-legend">
-                                <span><span className="legend-dot" style={{ background: 'var(--color-success)' }} />Usable Cuts ({usableWeight.toFixed(1)} kg)</span>
-                                <span><span className="legend-dot" style={{ background: 'var(--color-danger)' }} />Waste/Bones ({wasteWeight.toFixed(1)} kg)</span>
-                                <span><span className="legend-dot" style={{ background: 'var(--color-border-strong)' }} />Unallocated ({remaining.toFixed(1)} kg)</span>
-                            </div>
+                        {/* Yield Dashboard */}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 12, marginTop: 20 }}>
+                            {[
+                                { label: 'To Butcher', value: `${butcherAmt} kg`, color: 'var(--color-text-primary)' },
+                                { label: 'Usable Cuts', value: `${usableWeight.toFixed(1)} kg`, color: '#22c55e' },
+                                { label: 'Waste', value: `${wasteWeight.toFixed(1)} kg`, color: '#ef4444' },
+                                { label: 'Allocated', value: `${allocated.toFixed(1)} kg`, color: isOverAllocated ? '#ef4444' : 'var(--color-primary)' },
+                                { label: 'Remaining', value: `${remaining.toFixed(1)} kg`, color: remaining > 0 ? '#f59e0b' : '#22c55e' },
+                                { label: 'Yield', value: `${yieldPct}%`, color: yieldPct >= 80 ? '#22c55e' : yieldPct >= 60 ? '#f59e0b' : '#ef4444' },
+                            ].map((m, i) => (
+                                <div key={i} style={{
+                                    background: 'var(--color-bg)', border: '1px solid var(--color-border)',
+                                    borderRadius: 'var(--radius-md)', padding: '10px 14px', textAlign: 'center',
+                                }}>
+                                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{m.label}</div>
+                                    <div style={{ fontSize: 18, fontWeight: 700, color: m.color }}>{m.value}</div>
+                                </div>
+                            ))}
                         </div>
-                    </div>
 
-                    {/* Section 3: Yield Summary + QR Previews */}
-                    <div className="butcher-col-2">
-                        {/* Yield Summary */}
-                        <div className="butcher-panel">
-                            <h3 className="butcher-panel-title"><MdTrendingUp /> Yield Summary</h3>
-                            <div className="yield-cards-row">
-                                <div className="yield-card">
-                                    <div className="yield-card-label">Source Weight</div>
-                                    <div className="yield-card-value">{parentWeight} kg</div>
-                                </div>
-                                <div className="yield-card">
-                                    <div className="yield-card-label">Usable Output</div>
-                                    <div className="yield-card-value" style={{ color: isYieldInvalid ? 'var(--color-danger)' : 'var(--color-success)' }}>
-                                        {usableWeight.toFixed(1)} kg
-                                    </div>
-                                </div>
-                                <div className="yield-card">
-                                    <div className="yield-card-label">Waste &amp; Bones</div>
-                                    <div className="yield-card-value" style={{ color: 'var(--color-danger)' }}>{wasteWeight.toFixed(1)} kg</div>
-                                </div>
-                                <div className="yield-card highlight">
-                                    <div className="yield-card-label">Yield Rate</div>
-                                    <div className="yield-card-value" style={{ color: isYieldInvalid ? 'var(--color-danger)' : yieldPct >= 90 ? 'var(--color-success)' : 'var(--color-warning)' }}>
-                                        {isYieldInvalid ? 'INVALID (>100%)' : `${yieldPct}%`}
-                                    </div>
-                                </div>
+                        {isOverAllocated && (
+                            <div style={{ marginTop: 12, padding: '10px 16px', background: 'rgba(239,68,68,0.1)', borderRadius: 'var(--radius-md)', color: '#ef4444', fontSize: 13, border: '1px solid rgba(239,68,68,0.3)' }}>
+                                <MdWarning style={{ verticalAlign: 'middle', marginRight: 6 }} />
+                                Over-allocated by <strong>{(allocated - butcherAmt).toFixed(1)} kg</strong>. Reduce cut weights before saving.
                             </div>
-                            <div style={{ marginTop: 16 }}>
-                                <div className="form-field">
-                                    <label>Butchering Notes</label>
-                                    <textarea className="form-textarea" rows="2" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Quality notes, yield observations..." />
-                                </div>
+                        )}
+
+                        {/* Notes & Submit */}
+                        <div style={{ marginTop: 20 }}>
+                            <div className="form-field" style={{ maxWidth: 500 }}>
+                                <label>Notes</label>
+                                <textarea className="form-textarea" rows={2} value={notes}
+                                    onChange={e => setNotes(e.target.value)} placeholder="Optional notes..." />
                             </div>
                         </div>
 
-                        {/* QR Previews */}
-                        <div className="butcher-panel">
-                            <h3 className="butcher-panel-title"><MdQrCodeScanner /> Child Batch QR Previews</h3>
-                            <div className="qr-preview-list">
-                                {cuts.map((c, i) => (
-                                    <div key={i} className="qr-preview-item">
-                                        <QrCodeSvg value={buildBatchQrText({
-                                            batchNo: c.child_batch_no,
-                                            cutName: c.cut_name,
-                                            weightKg: c.weight_kg,
-                                            isWaste: c.is_waste,
-                                            parentBatchNo: selectedBatch?.batch_number || selectedBatch?.id || '—',
-                                            parentProduct: selectedBatch?.item_name || '—',
-                                            parentWeight: parentWeight,
-                                            vendor: selectedBatch?.vendor_name || selectedBatch?.supplier || 'Meat Supplier',
-                                            butcherName: butcherName,
-                                            date: date,
-                                            yieldPct: yieldPct,
-                                            expiry: '—',
-                                            orderNo: null,
-                                        })} size={70} color="#C9A96E" bg="#1A1D2E" />
-                                        <div>
-                                            <div className="qr-item-name">{c.cut_name}</div>
-                                            <div className="qr-item-batch">{c.child_batch_no}</div>
-                                            <div className="qr-item-weight">
-                                                {c.weight_kg} kg &nbsp;•&nbsp;
-                                                {c.is_waste ? <span className="chip-red">Waste</span> : <span className="chip-green">Usable</span>}
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--color-border)' }}>
+                            <button className="btn btn-secondary btn-md" onClick={() => navigate('/butchering/dashboard')}>Cancel</button>
+                            <button className="btn btn-primary btn-md" onClick={handleSave} disabled={saving || isOverAllocated}>
+                                <MdSave /> {saving ? 'Creating Order...' : 'Create Butchering Order'}
+                            </button>
                         </div>
-                    </div>
-
-                    {/* Submit */}
-                    <div className="action-footer">
-                        <button className="btn btn-secondary btn-md" onClick={() => navigate('/butchering/dashboard')}>Cancel</button>
-                        <button className="btn btn-primary btn-md" onClick={handleSave} disabled={saving || isOverAllocated || usableWeight <= 0}>
-                            <MdSave /> {saving ? 'Creating Batches...' : isOverAllocated ? 'Over-Allocated (Fix Weights)' : 'Save Order & Generate Child Batches'}
-                        </button>
                     </div>
                 </>
-            )}
-
-            {/* Success Modal with QR Labels */}
-            {createdOrder && (
-                <div className="butcher-modal-overlay">
-                    <div className="butcher-modal">
-                        <div className="modal-head">
-                            <h2><MdCheckCircle color="var(--color-success)" style={{ fontSize: 22 }} /> Order Created: {createdOrder.order_no}</h2>
-                            <button className="modal-close" onClick={() => setCreatedOrder(null)}>×</button>
-                        </div>
-                        <div className="modal-body-scroll">
-                            <p style={{ color: 'var(--color-text-secondary)', marginBottom: 20 }}>
-                                Batch <strong style={{ color: 'var(--color-primary)' }}>{createdOrder.source_batch_no}</strong> has been split into{' '}
-                                <strong>{createdOrder.child_batches?.length || 0}</strong> child batches with{' '}
-                                <strong style={{ color: 'var(--color-success)' }}>{createdOrder.yield_pct}% yield</strong>.
-                            </p>
-                            <h4 style={{ color: 'var(--color-text-secondary)', marginBottom: 12, fontSize: 13 }}>PHYSICAL QR LABELS</h4>
-                            <div className="qr-print-grid">
-                                {createdOrder.child_batches?.map((cb, idx) => (
-                                    <div key={idx} className="qr-label-box">
-                                        <div className="qr-label-header">WATAN CENTRAL KITCHEN</div>
-                                        <div className="qr-label-body">
-                                            <QrCodeSvg value={cb.qr_code_data || buildBatchQrText({
-                                                batchNo: cb.batch_number,
-                                                cutName: cb.cut_name || cb.item_name,
-                                                weightKg: cb.quantity,
-                                                isWaste: cb.is_waste,
-                                                parentBatchNo: cb.parent_batch_no || createdOrder.source_batch_no,
-                                                parentProduct: createdOrder.source_product,
-                                                parentWeight: createdOrder.input_weight_kg,
-                                                vendor: cb.vendor_name || 'Meat Supplier',
-                                                butcherName: createdOrder.butcher_name,
-                                                date: createdOrder.date,
-                                                yieldPct: createdOrder.yield_pct,
-                                                expiry: cb.expiry_date,
-                                                orderNo: createdOrder.order_no,
-                                            })} size={80} />
-                                            <div className="qr-label-info">
-                                                <div className="qr-label-product">{cb.item_name}</div>
-                                                <div>Batch: <strong>{cb.batch_number}</strong></div>
-                                                <div>Weight: <strong>{cb.quantity} kg</strong></div>
-                                                <div>Expiry: <strong>{cb.expiry_date}</strong></div>
-                                                <div>Parent: {cb.parent_batch_no}</div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                        <div className="modal-foot">
-                            <button className="btn btn-secondary btn-md" onClick={() => window.print()}><MdPrint /> Print Labels</button>
-                            <button className="btn btn-primary btn-md" onClick={() => navigate('/traceability')}>View Traceability Tree</button>
-                        </div>
-                    </div>
-                </div>
             )}
         </div>
     );

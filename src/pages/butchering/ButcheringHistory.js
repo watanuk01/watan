@@ -15,8 +15,14 @@ import './ButcheringModule.css';
 const sanitize = (obj) => {
     if (!obj || typeof obj !== 'object') return obj;
     if (Array.isArray(obj)) return obj.map(sanitize);
-    if (obj.seconds !== undefined && obj.nanoseconds !== undefined) {
+    if (obj.seconds !== undefined) {
         return new Date(obj.seconds * 1000).toLocaleDateString('en-GB');
+    }
+    if (obj._methodName || (obj.constructor && obj.constructor.name === 'FieldValue')) {
+        return new Date().toLocaleDateString('en-GB');
+    }
+    if (obj instanceof Date) {
+        return obj.toLocaleDateString('en-GB');
     }
     const result = {};
     for (const key of Object.keys(obj)) { result[key] = sanitize(obj[key]); }
