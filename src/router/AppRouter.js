@@ -62,6 +62,15 @@ import InvoicesPage from '../pages/invoices/InvoicesPage';
 // Waste Management
 import WasteManagement from '../pages/waste/WasteManagement';
 
+// Butchering & Traceability
+import ButcherDashboard from '../pages/butchering/ButcherDashboard';
+import NewButcheringOrder from '../pages/butchering/NewButcheringOrder';
+import ButcheringHistory from '../pages/butchering/ButcheringHistory';
+import BatchTraceability from '../pages/butchering/BatchTraceability';
+import CutTypesAdmin from '../pages/butchering/CutTypesAdmin';
+import ButcherPurchaseOrder from '../pages/butchering/ButcherPurchaseOrder';
+import ButcherInventory from '../pages/butchering/ButcherInventory';
+
 // Notifications
 import NotificationsPage from '../pages/notifications/NotificationsPage';
 
@@ -314,6 +323,72 @@ const AppRouter = () => {
                             </ProtectedRoute>
                         }
                     />
+
+                    {/* ─── Butchering & Traceability Modules ─── */}
+                    <Route
+                        path="/butchering"
+                        element={
+                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef', 'butcher']}>
+                                <ButcherDashboard />
+                            </ProtectedRoute>
+                        }
+                    />
+                    <Route
+                        path="/butchering/dashboard"
+                        element={
+                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef', 'butcher']}>
+                                <ButcherDashboard />
+                            </ProtectedRoute>
+                        }
+                    />
+                    <Route
+                        path="/butchering/new"
+                        element={
+                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef', 'butcher']}>
+                                <NewButcheringOrder />
+                            </ProtectedRoute>
+                        }
+                    />
+                    <Route
+                        path="/butchering/history"
+                        element={
+                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef', 'butcher']}>
+                                <ButcheringHistory />
+                            </ProtectedRoute>
+                        }
+                    />
+                    <Route
+                        path="/traceability"
+                        element={
+                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef', 'butcher', 'restaurant_manager', 'restaurant_manager_non_managed']}>
+                                <BatchTraceability />
+                            </ProtectedRoute>
+                        }
+                    />
+                    <Route
+                        path="/butchering/cut-types"
+                        element={
+                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef', 'butcher']}>
+                                <CutTypesAdmin />
+                            </ProtectedRoute>
+                        }
+                    />
+                    <Route
+                        path="/butchering/purchase-order"
+                        element={
+                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef', 'butcher']}>
+                                <ButcherPurchaseOrder />
+                            </ProtectedRoute>
+                        }
+                    />
+                    <Route
+                        path="/butchering/inventory"
+                        element={
+                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef', 'butcher']}>
+                                <ButcherInventory />
+                            </ProtectedRoute>
+                        }
+                    />
                     <Route
                         path="/restaurants/*"
                         element={
@@ -355,7 +430,7 @@ const AppRouter = () => {
                     <Route
                         path="/reports/*"
                         element={
-                            <ProtectedRoute allowedRoles={['admin', 'ck_staff']}>
+                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'butcher']}>
                                 <ReportsPage />
                             </ProtectedRoute>
                         }

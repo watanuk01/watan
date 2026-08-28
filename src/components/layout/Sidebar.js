@@ -24,6 +24,8 @@ import {
     MdExpandLess,
     MdPool,
     MdSync,
+    MdContentCut,
+    MdQrCodeScanner,
 } from 'react-icons/md';
 import { isSouthallBranch } from '../../router/ProtectedRoute';
 import './Sidebar.css';
@@ -77,6 +79,18 @@ const Sidebar = () => {
                             { label: 'In Progress', path: '/production/in-progress' },
                             { label: 'Production History', path: '/production/history' },
                             { label: 'Production Invoices', path: '/production/invoices' },
+                        ]
+                    },
+                    {
+                        type: 'submenu', label: 'Butchering', icon: MdContentCut, key: 'butchering',
+                        children: [
+                            { label: 'Butcher Dashboard', path: '/butchering/dashboard' },
+                            { label: 'Cut Types Admin', path: '/butchering/cut-types' },
+                            { label: 'Meat Purchase Order', path: '/butchering/purchase-order' },
+                            { label: 'Butcher Inventory', path: '/butchering/inventory' },
+                            { label: 'New Butchering Order', path: '/butchering/new' },
+                            { label: 'Butchering History', path: '/butchering/history' },
+                            { label: 'Batch Traceability & QR', path: '/traceability' },
                         ]
                     },
                     {
@@ -145,6 +159,18 @@ const Sidebar = () => {
                         ]
                     },
                     {
+                        type: 'submenu', label: 'Butchering', icon: MdContentCut, key: 'butchering',
+                        children: [
+                            { label: 'Butcher Dashboard', path: '/butchering/dashboard' },
+                            { label: 'Cut Types Admin', path: '/butchering/cut-types' },
+                            { label: 'Meat Purchase Order', path: '/butchering/purchase-order' },
+                            { label: 'Butcher Inventory', path: '/butchering/inventory' },
+                            { label: 'New Butchering Order', path: '/butchering/new' },
+                            { label: 'Butchering History', path: '/butchering/history' },
+                            { label: 'Batch Traceability & QR', path: '/traceability' },
+                        ]
+                    },
+                    {
                         type: 'submenu', label: 'Orders', icon: MdReceipt, key: 'orders',
                         children: [
                             { label: "Today's Orders", path: '/orders/today' },
@@ -159,6 +185,28 @@ const Sidebar = () => {
                     },
                     { type: 'divider' },
                     { type: 'item', label: 'Notifications', icon: MdNotifications, path: '/notifications' },
+                ];
+
+            case 'butcher':
+                return [
+                    { type: 'item', label: 'Dashboard', icon: MdDashboard, path: '/butchering/dashboard' },
+                    { type: 'divider' },
+                    { type: 'section', label: 'Butchering Operations' },
+                    {
+                        type: 'submenu', label: 'Butchering', icon: MdContentCut, key: 'butchering',
+                        children: [
+                            { label: 'Butcher Dashboard', path: '/butchering/dashboard' },
+                            { label: 'Cut Types Admin', path: '/butchering/cut-types' },
+                            { label: 'Meat Purchase Order', path: '/butchering/purchase-order' },
+                            { label: 'Butcher Inventory', path: '/butchering/inventory' },
+                            { label: 'New Butchering Order', path: '/butchering/new' },
+                            { label: 'Butchering History', path: '/butchering/history' },
+                            { label: 'Batch Traceability & QR', path: '/traceability' },
+                        ]
+                    },
+                    { type: 'divider' },
+                    { type: 'section', label: 'Analytics' },
+                    { type: 'item', label: 'Reports & Analytics', icon: MdBarChart, path: '/reports' },
                 ];
 
             case 'restaurant_manager':

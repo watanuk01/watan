@@ -15,9 +15,24 @@ import {
     MdCancel,
     MdLocalShipping,
     MdWarning,
+    MdCropFree,
 } from 'react-icons/md';
 import toast from 'react-hot-toast';
 import './Purchase.css';
+
+const getTodayDateStr = () => new Date().toISOString().substring(0, 10);
+const getCurrentTimeStr = () => {
+    const d = new Date();
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return `${hh}:${mm}`;
+};
+const generateAutoInvoiceNo = () => {
+    const today = new Date();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    return `INV-${today.getFullYear()}-${mm}${dd}`;
+};
 
 const PendingOrders = () => {
     const navigate = useNavigate();
@@ -43,8 +58,21 @@ const PendingOrders = () => {
 
     useEffect(() => { fetchOrders(); }, [fetchOrders]);
 
+    const [receiveVendor, setReceiveVendor] = useState('ABC Meat Suppliers');
+    const [invoiceNo, setInvoiceNo] = useState(generateAutoInvoiceNo());
+    const [invoiceDate, setInvoiceDate] = useState(getTodayDateStr());
+    const [receiveDate, setReceiveDate] = useState(getTodayDateStr());
+    const [receiveTime, setReceiveTime] = useState(getCurrentTimeStr());
+    const [receiveNotes, setReceiveNotes] = useState('');
+
     const openReceiveModal = (order) => {
         setReceiveModal(order);
+        setReceiveVendor(order.vendor || 'ABC Meat Suppliers');
+        setInvoiceNo(order.po_number?.replace('PO', 'INV') || generateAutoInvoiceNo());
+        setInvoiceDate(getTodayDateStr());
+        setReceiveDate(getTodayDateStr());
+        setReceiveTime(getCurrentTimeStr());
+        setReceiveNotes(order.notes || '');
         setReceiveData(order.items.map(item => ({
             item_id: item.item_id,
             item_name: item.item_name,
@@ -259,16 +287,78 @@ const PendingOrders = () => {
                             </button>
                         </div>
                         <div className="modal-body">
-                            <div style={{
-                                background: 'var(--color-bg)',
-                                padding: 'var(--space-3)',
-                                borderRadius: 'var(--radius-md)',
-                                marginBottom: 'var(--space-4)',
-                                fontSize: 'var(--text-sm)',
-                                color: 'var(--color-text-secondary)',
-                            }}>
-                                <strong>Vendor:</strong> {receiveModal.vendor || 'N/A'} &nbsp;•&nbsp;
-                                <strong>Expected:</strong> {formatDate(receiveModal.expected_delivery_date)}
+                            {/* Vendor & Invoice Details */}
+                            <div className="vendor-invoice-card" style={{ marginBottom: 20 }}>
+                                <h3 className="vendor-invoice-title">Vendor &amp; Invoice Details</h3>
+
+                                <div className="vendor-invoice-grid">
+                                    <div className="form-group">
+                                        <label className="form-label">Vendor <span className="required" style={{ color: 'var(--color-danger)' }}>*</span></label>
+                                        <select
+                                            className="form-input"
+                                            value={receiveVendor}
+                                            onChange={e => setReceiveVendor(e.target.value)}
+                                        >
+                                            <option value="ABC Meat Suppliers">ABC Meat Suppliers</option>
+                                            <option value="Al-Safa Premium Meats Ltd">Al-Safa Premium Meats Ltd</option>
+                                            <option value="Halal Quality Poultry Wholesalers">Halal Quality Poultry Wholesalers</option>
+                                        </select>
+                                    </div>
+
+                                    <div className="form-group">
+                                        <label className="form-label">Invoice No <span className="required" style={{ color: 'var(--color-danger)' }}>*</span></label>
+                                        <input
+                                            type="text"
+                                            className="form-input"
+                                            value={invoiceNo}
+                                            onChange={e => setInvoiceNo(e.target.value)}
+                                            placeholder="INV-2026-0618"
+                                        />
+                                    </div>
+
+                                    <div className="form-group">
+                                        <label className="form-label">Invoice Date</label>
+                                        <input
+                                            type="date"
+                                            className="form-input"
+                                            value={invoiceDate}
+                                            onChange={e => setInvoiceDate(e.target.value)}
+                                        />
+                                    </div>
+
+                                    <div className="form-group">
+                                        <label className="form-label">Receive Date</label>
+                                        <input
+                                            type="date"
+                                            className="form-input"
+                                            value={receiveDate}
+                                            onChange={e => setReceiveDate(e.target.value)}
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="vendor-invoice-row-2">
+                                    <div className="form-group">
+                                        <label className="form-label">Receive Time</label>
+                                        <input
+                                            type="time"
+                                            className="form-input"
+                                            value={receiveTime}
+                                            onChange={e => setReceiveTime(e.target.value)}
+                                        />
+                                    </div>
+
+                                    <div className="form-group">
+                                        <label className="form-label">Notes</label>
+                                        <input
+                                            type="text"
+                                            className="form-input"
+                                            value={receiveNotes}
+                                            onChange={e => setReceiveNotes(e.target.value)}
+                                            placeholder="Vehicle no, driver name, remarks..."
+                                        />
+                                    </div>
+                                </div>
                             </div>
 
                             <div style={{
