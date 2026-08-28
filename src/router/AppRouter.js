@@ -430,7 +430,7 @@ const AppRouter = () => {
                     <Route
                         path="/reports/*"
                         element={
-                            <ProtectedRoute allowedRoles={['admin', 'ck_staff']}>
+                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'butcher']}>
                                 <ReportsPage />
                             </ProtectedRoute>
                         }

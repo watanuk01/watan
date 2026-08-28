@@ -20,6 +20,7 @@ import {
     where,
     serverTimestamp,
     writeBatch,
+    increment,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -101,9 +102,7 @@ export const getCutTypes = async () => {
     await seedCutTypesIfEmpty();
     try {
         const snap = await getDocs(collection(db, CUT_TYPES));
-        //get all the documents from firestore map it to an array every object in array has its own id and data field [{},{}]
         const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        //sort by animal name
         return list.sort((a, b) => (a.animal_type || '').localeCompare(b.animal_type || ''));
     } catch (err) {
         console.error('Error fetching cut types:', err);
@@ -272,7 +271,6 @@ export const updateAnimal = async (id, data) => {
 
 /** Delete an Animal master record and its synced cut types */
 export const deleteAnimal = async (id) => {
-    // Delete synced cut types
     try {
         const snap = await getDocs(query(collection(db, CUT_TYPES), where('animal_id', '==', id)));
         for (const d of snap.docs) {
@@ -296,16 +294,8 @@ export const getUnbutcheredBatches = async () => {
 
         // Filter batches that are raw_meat or whole animals, not depleted, and not already cut
         return allBatches.filter(b => {
-            //might become issue suggestions:
-            //const isParentBatch =b.is_cut !== true &&!b.parent_batch_id;
-            //and ideally use an explicit field such as:
-            //b.batch_stage: 'whole'
-            //or:
-            //b.is_parent_batch: true
             const isMeat = (b.item_type === 'raw_meat' || b.item_name?.toLowerCase().includes('whole') || b.category?.toLowerCase().includes('meat'));
             const hasStock = (Number(b.quantity || b.remaining_weight_kg || b.initial_quantity) > 0);
-            // //might become issue suggestions:
-            //const isNotChild =b.is_cut !== true &&!b.parent_batch_id;
             const isNotChild = !b.parent_batch_id;
             const notFullyButchered = b.butchered_status !== 'completed';
             return isMeat && hasStock && isNotChild && notFullyButchered;
@@ -324,17 +314,22 @@ export const createButcheringOrder = async (orderData) => {
         date,
         cuts,             // array of { cut_type_id, cut_name, weight_kg, is_waste, child_batch_no }
         notes,
+        processing_weight_kg,
     } = orderData;
 
     if (!sourceBatch || !cuts?.length) {
         throw new Error('Source batch and at least one cut output are required');
     }
 
-    const inputWeight = Number(sourceBatch.weight_kg || sourceBatch.quantity || sourceBatch.initial_quantity) || 0;
+    const availableWeight = Number(sourceBatch.remaining_weight_kg ?? sourceBatch.quantity ?? sourceBatch.weight_kg ?? sourceBatch.initial_quantity) || 0;
+    const inputWeight = Number(processing_weight_kg ?? availableWeight) || 0;
     const totalOutputWeight = cuts.filter(c => !c.is_waste).reduce((sum, c) => sum + (Number(c.weight_kg) || 0), 0);
     const wasteWeight = cuts.filter(c => c.is_waste).reduce((sum, c) => sum + (Number(c.weight_kg) || 0), 0);
     const totalProcessed = totalOutputWeight + wasteWeight;
     const yieldPct = inputWeight > 0 ? Math.round((totalOutputWeight / inputWeight) * 1000) / 10 : 0;
+
+    if (inputWeight <= 0 || inputWeight > availableWeight + 0.001) throw new Error('Processing weight must be within the available batch weight');
+    if (totalProcessed <= 0 || totalProcessed > inputWeight + 0.05) throw new Error('Cut outputs cannot exceed the processing weight');
 
     // Generate Butchering Order Number e.g. BUT-260807-001
     const dateCode = new Date().toISOString().substring(2, 10).replace(/-/g, '');
@@ -360,13 +355,17 @@ export const createButcheringOrder = async (orderData) => {
         const expiryDate = new Date();
         expiryDate.setDate(expiryDate.getDate() + (Number(cut.shelf_life_days) || 5));
 
+        const isMappedToCK = Boolean(cut.destination_item_id) && !cut.is_waste;
+
         const childData = {
             batch_number: childBatchNo,
-            item_name: `${cut.cut_name} (${sourceBatch.item_name || 'Meat'})`,
+            item_id: isMappedToCK ? cut.destination_item_id : null,
+            item_name: isMappedToCK && cut.destination_item_name ? cut.destination_item_name : `${cut.cut_name} (${sourceBatch.item_name || 'Meat'})`,
             item_type: 'raw_meat',
             category: 'Raw Meat',
             cut_name: cut.cut_name,
             quantity: Number(cut.weight_kg) || 0,
+            remaining_qty: cut.is_waste ? 0 : (Number(cut.weight_kg) || 0),
             remaining_weight_kg: Number(cut.weight_kg) || 0,
             unit: 'kg',
             parent_batch_id: sourceBatch.id,
@@ -377,6 +376,9 @@ export const createButcheringOrder = async (orderData) => {
             created_at: serverTimestamp(),
             is_cut: true,
             is_waste: Boolean(cut.is_waste),
+            is_butcher_inventory: !isMappedToCK,
+            source: isMappedToCK ? 'butcher_cut_mapping' : 'butchering',
+            status: cut.is_waste ? 'waste' : 'available',
             butcher_name: butcherName || 'Central Kitchen Butcher',
             qr_code_data: [
                 `WATAN CENTRAL KITCHEN`,
@@ -405,6 +407,14 @@ export const createButcheringOrder = async (orderData) => {
             ].join('\n'),
         };
 
+        // If mapped to CK item, increment the stock in inventory_items
+        if (isMappedToCK) {
+            batchRef.update(doc(db, ITEMS, cut.destination_item_id), {
+                current_stock: increment(Number(cut.weight_kg) || 0),
+                updated_at: serverTimestamp(),
+            });
+        }
+
         batchRef.set(childRef, childData);
         childBatchIds.push(childRef.id);
         childBatchDocs.push({ id: childRef.id, ...childData });
@@ -413,9 +423,9 @@ export const createButcheringOrder = async (orderData) => {
     // 3. Mark/Deduct Parent Batch
     const parentDocRef = doc(db, BATCHES, sourceBatch.id);
     batchRef.update(parentDocRef, {
-        quantity: Math.max(0, inputWeight - totalProcessed),
-        remaining_weight_kg: Math.max(0, inputWeight - totalProcessed),
-        butchered_status: 'completed',
+        quantity: Math.max(0, availableWeight - totalProcessed),
+        remaining_weight_kg: Math.max(0, availableWeight - totalProcessed),
+        butchered_status: availableWeight - totalProcessed <= 0.05 ? 'completed' : 'partial',
         butchered_at: serverTimestamp(),
         child_batch_ids: childBatchIds,
     });
@@ -773,13 +783,18 @@ export const getButcherInventory = async () => {
             };
         });
         return allBatches.filter(b => {
-            const isButcherBatch = b.is_butcher_inventory === true;
+            const isButcherBatch = b.is_butcher_inventory === true || b.is_butcher_po === true;
             const isNotChild = !b.parent_batch_id;
             const isNotCut = b.is_cut !== true;
-            const notCompleted = b.butchered_status !== 'completed';
-            const hasStock = (Number(b.quantity || b.remaining_weight_kg || b.initial_quantity) > 0);
-            return isButcherBatch && isNotChild && isNotCut && notCompleted && hasStock;
-        }).sort((a, b) => {
+            const hasStock = (Number(b.remaining_weight_kg ?? b.quantity ?? b.initial_quantity) > 0);
+            return isButcherBatch && isNotChild && isNotCut && hasStock;
+        }).map(b => ({
+            ...b,
+            // Older orders incorrectly saved a completed status while retaining
+            // a positive parent balance. Treat those as partial so old data is
+            // immediately usable without a manual database migration.
+            butchered_status: b.butchered_status === 'completed' ? 'partial' : (b.butchered_status || 'pending'),
+        })).sort((a, b) => {
             const tA = new Date(a.created_at || 0).getTime();
             const tB = new Date(b.created_at || 0).getTime();
             return tB - tA;
@@ -790,3 +805,151 @@ export const getButcherInventory = async () => {
     }
 };
 
+/** Cut batches produced by butchering which still have usable stock. */
+export const getButcherCutInventory = async () => {
+    try {
+        const snap = await getDocs(collection(db, BATCHES));
+        return snap.docs.map(d => {
+            const data = d.data();
+            return {
+                id: d.id,
+                ...data,
+                created_at: data.created_at?.toDate?.() ? data.created_at.toDate().toISOString() : data.created_at,
+                expiry_date: data.expiry_date?.toDate?.() ? data.expiry_date.toDate().toISOString().substring(0, 10) : data.expiry_date,
+            };
+        }).filter(batch => (
+            batch.is_cut === true &&
+            batch.is_waste !== true &&
+            (batch.is_butcher_inventory === true || !batch.item_id) &&
+            batch.status !== 'mapped_to_ck' &&
+            Number(batch.remaining_qty ?? batch.remaining_weight_kg ?? batch.quantity ?? 0) > 0.001
+        )).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+    } catch (err) {
+        console.error('Error fetching butcher cut inventory:', err);
+        return [];
+    }
+};
+
+/**
+ * Map/transfer a butchered cut meat batch into Central Kitchen (CK) inventory.
+ * 
+ * 1. Deducts specified weight (kg) from the source cut batch (remaining_qty and remaining_weight_kg).
+ * 2. Increments destination item's current_stock in `inventory_items`.
+ * 3. Creates a traceable batch in `inventory_batches` for the CK item.
+ * 
+ * @param {Object} params
+ * @param {Object} params.cutBatch - The source cut meat batch object
+ * @param {Object} params.destinationItem - The selected CK inventory item object
+ * @param {number} params.transferWeightKg - Quantity to map in kg
+ * @param {string} [params.notes] - Optional transfer notes
+ */
+export const mapCutToCKInventory = async ({ cutBatch, destinationItem, transferWeightKg, notes = '' }) => {
+    if (!cutBatch || !cutBatch.id) {
+        throw new Error('Valid source cut batch is required');
+    }
+    if (!destinationItem || !destinationItem.id) {
+        throw new Error('Valid destination CK inventory item is required');
+    }
+
+    const availableWeight = Number(cutBatch.remaining_qty ?? cutBatch.remaining_weight_kg ?? cutBatch.quantity) || 0;
+    const transferQty = Number(transferWeightKg);
+
+    if (isNaN(transferQty) || transferQty <= 0) {
+        throw new Error('Transfer amount must be greater than 0 kg');
+    }
+    if (transferQty > availableWeight + 0.001) {
+        throw new Error(`Transfer amount (${transferQty.toFixed(2)} kg) exceeds available cut weight (${availableWeight.toFixed(2)} kg)`);
+    }
+
+    const newRemaining = Math.max(0, Math.round((availableWeight - transferQty) * 100) / 100);
+    const isFullyDepleted = newRemaining <= 0.001;
+
+    const bRef = writeBatch(db);
+
+    // 1. Update source cut batch
+    const sourceDocRef = doc(db, BATCHES, cutBatch.id);
+    const existingTransfers = Array.isArray(cutBatch.mapped_transfers) ? cutBatch.mapped_transfers : [];
+    const transferRecord = {
+        transferred_at: new Date().toISOString(),
+        transfer_kg: transferQty,
+        destination_item_id: destinationItem.id,
+        destination_item_name: destinationItem.name,
+        destination_item_sku: destinationItem.sku || '',
+        notes: notes || '',
+    };
+
+    bRef.update(sourceDocRef, {
+        remaining_qty: newRemaining,
+        remaining_weight_kg: newRemaining,
+        status: isFullyDepleted ? 'mapped_to_ck' : (cutBatch.status || 'available'),
+        mapped_transfers: [...existingTransfers, transferRecord],
+        last_mapped_at: serverTimestamp(),
+        updated_at: serverTimestamp(),
+    });
+
+    // 2. Increment destination item current_stock
+    const destItemDocRef = doc(db, ITEMS, destinationItem.id);
+    bRef.update(destItemDocRef, {
+        current_stock: increment(transferQty),
+        updated_at: serverTimestamp(),
+    });
+
+    // 3. Create traceable CK inventory batch
+    const newCkBatchRef = doc(collection(db, BATCHES));
+    const baseCode = (cutBatch.batch_number || cutBatch.id).replace(/-CK$/, '');
+    const ckBatchNo = `${baseCode}-CK`;
+
+    // Calculate expiry date if date object / string
+    let expiryDateValue = null;
+    if (cutBatch.expiry_date) {
+        expiryDateValue = typeof cutBatch.expiry_date === 'string'
+            ? cutBatch.expiry_date
+            : (cutBatch.expiry_date.seconds ? new Date(cutBatch.expiry_date.seconds * 1000).toISOString().substring(0, 10) : new Date().toISOString().substring(0, 10));
+    } else {
+        const defaultDays = destinationItem.default_expiry_days || 5;
+        const exp = new Date();
+        exp.setDate(exp.getDate() + defaultDays);
+        expiryDateValue = exp.toISOString().substring(0, 10);
+    }
+
+    const ckBatchData = {
+        batch_number: ckBatchNo,
+        item_id: destinationItem.id,
+        item_name: destinationItem.name,
+        item_type: destinationItem.item_type || 'raw_meat',
+        category: destinationItem.category_name || 'Raw Meat',
+        cut_name: cutBatch.cut_name || cutBatch.item_name || destinationItem.name,
+        quantity: transferQty,
+        remaining_qty: transferQty,
+        remaining_weight_kg: transferQty,
+        unit: destinationItem.unit || 'kg',
+        cost_price: destinationItem.cost_price || 0,
+        vendor_name: cutBatch.vendor_name || cutBatch.supplier || 'Central Kitchen Butcher',
+        supplier: cutBatch.supplier || cutBatch.vendor_name || 'Central Kitchen Butcher',
+        parent_batch_id: cutBatch.id,
+        parent_batch_no: cutBatch.batch_number || cutBatch.id,
+        source: 'butcher_cut_mapping',
+        source_ref: cutBatch.batch_number || cutBatch.id,
+        is_cut: true,
+        is_butcher_inventory: false, // CK inventory item
+        status: 'available',
+        expiry_date: expiryDateValue,
+        manufactured_date: new Date().toISOString().substring(0, 10),
+        received_at: cutBatch.received_at || new Date().toISOString(),
+        qr_code_data: cutBatch.qr_code_data || '',
+        notes: notes || `Mapped from cut meat batch ${cutBatch.batch_number || cutBatch.id} (${cutBatch.cut_name || ''})`,
+        created_at: serverTimestamp(),
+    };
+
+    bRef.set(newCkBatchRef, ckBatchData);
+
+    await bRef.commit();
+
+    return {
+        success: true,
+        transferred_kg: transferQty,
+        new_remaining_kg: newRemaining,
+        ck_batch_id: newCkBatchRef.id,
+        ck_batch_no: ckBatchNo,
+    };
+};

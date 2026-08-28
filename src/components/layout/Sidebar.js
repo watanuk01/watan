@@ -204,8 +204,9 @@ const Sidebar = () => {
                             { label: 'Batch Traceability & QR', path: '/traceability' },
                         ]
                     },
-                    { type: 'item', label: 'Current Stock', icon: MdInventory2, path: '/inventory/stock' },
-                    { type: 'item', label: 'Batches', icon: MdHistory, path: '/inventory/batches' },
+                    { type: 'divider' },
+                    { type: 'section', label: 'Analytics' },
+                    { type: 'item', label: 'Reports & Analytics', icon: MdBarChart, path: '/reports' },
                 ];
 
             case 'restaurant_manager':
