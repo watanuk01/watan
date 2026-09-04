@@ -274,7 +274,12 @@ const InvoiceDetail = ({ invoice, onClose, supplierDetails, onUpdated }) => {
 
     // ─── DISPLAY DATA ───
     const isProduction = invoice.type === 'production';
-    const supplier = invoice.supplier || supplierDetails || { name: 'Watan Central Kitchen' };
+    const rawSupplier = invoice.supplier || supplierDetails || {};
+    const supplierName = (!rawSupplier.name || rawSupplier.name === 'Watan Central Kitchen') ? 'CATERING SPICE LTD' : rawSupplier.name;
+    const supplier = {
+        ...rawSupplier,
+        name: supplierName,
+    };
     const customer = isProduction ? { name: 'Internal Production' } : (invoice.customer || { name: '—' });
 
     const lineItems = editing ? editItems : (

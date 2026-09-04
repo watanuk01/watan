@@ -366,8 +366,8 @@ const ProductionInvoices = () => {
                                 <div className="invoice-preview">
                                     <div className="invoice-header">
                                         <div>
-                                            <div className="company-name">وطن WATAN</div>
-                                            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>Central Kitchen</div>
+                                            <div className="company-name">CATERING SPICE LTD</div>
+                                            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>Central Kitchen, London, UK</div>
                                         </div>
                                         <div className="invoice-title">
                                             <h2>Production Invoice</h2>

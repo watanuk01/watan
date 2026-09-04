@@ -41,7 +41,7 @@ const APP_SETTINGS = 'app_settings';
 // ═══════════════════════════════════════════════════════
 
 const DEFAULT_SUPPLIER = {
-    name: 'Watan Central Kitchen',
+    name: 'CATERING SPICE LTD',
     address: 'Central Kitchen, London, UK',
     vat_number: '',
     phone: '',
@@ -56,7 +56,9 @@ export const getSupplierDetails = async () => {
     try {
         const snap = await getDoc(doc(db, APP_SETTINGS, 'supplier'));
         if (snap.exists()) {
-            return { ...DEFAULT_SUPPLIER, ...snap.data() };
+            const data = snap.data();
+            const name = (!data.name || data.name === 'Watan Central Kitchen') ? 'CATERING SPICE LTD' : data.name;
+            return { ...DEFAULT_SUPPLIER, ...data, name };
         }
     } catch (err) {
         console.error('Failed to load supplier settings:', err);
