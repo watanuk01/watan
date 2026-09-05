@@ -783,9 +783,9 @@ const PurchaseHistory = () => {
                             </button>
                         </div>
                         <div className="modal-body" style={{ padding: '24px' }}>
-                            {/* Vendor & Invoice Details */}
+                            {/* Vendor & Order Details */}
                             <div className="vendor-invoice-card" style={{ marginBottom: 'var(--space-5)' }}>
-                                <h3 className="vendor-invoice-title">Vendor & Invoice Details</h3>
+                                <h3 className="vendor-invoice-title">Vendor & Order Details</h3>
                                 <div className="vendor-invoice-grid">
                                     <div className="form-group">
                                         <label className="form-label">Vendor</label>
@@ -800,15 +800,6 @@ const PurchaseHistory = () => {
                                             )}
                                             {vendors.map(v => <option key={v} value={v}>{v}</option>)}
                                         </select>
-                                    </div>
-                                    <div className="form-group">
-                                        <label className="form-label">Invoice No.</label>
-                                        <input
-                                            type="text"
-                                            className="form-input"
-                                            value={editData.invoice_no}
-                                            onChange={(e) => setEditData({ ...editData, invoice_no: e.target.value })}
-                                        />
                                     </div>
                                     <div className="form-group">
                                         <label className="form-label">Invoice Date</label>
@@ -848,7 +839,7 @@ const PurchaseHistory = () => {
                                             onChange={(e) => setEditData({ ...editData, receive_time: e.target.value })}
                                         />
                                     </div>
-                                    <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                                    <div className="form-group">
                                         <label className="form-label">Notes</label>
                                         <input
                                             type="text"
