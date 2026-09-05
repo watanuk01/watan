@@ -6,6 +6,8 @@ import {
     getUniqueVendors,
     PO_STATUSES,
     getStatusInfo,
+    updateReceivedPurchaseReview,
+    updatePurchaseOrder,
 } from '../../services/purchaseService';
 import {
     MdHistory,
@@ -18,6 +20,8 @@ import {
     MdSearch,
     MdShoppingCart,
     MdPictureAsPdf,
+    MdEdit,
+    MdSave,
 } from 'react-icons/md';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -38,8 +42,18 @@ const PurchaseHistory = () => {
         search: '',
     });
     const [detailModal, setDetailModal] = useState(null);
+    const [reviewModal, setReviewModal] = useState(null);
+    const [reviewData, setReviewData] = useState(null);
+    const [editModal, setEditModal] = useState(null);
+    const [editData, setEditData] = useState(null);
+    const [savingEdit, setSavingEdit] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
     const [itemsPerPage, setItemsPerPage] = useState(10);
+    const toDateInput = (value) => {
+        if (!value) return '';
+        const date = value?.toDate ? value.toDate() : new Date(value);
+        return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
+    };
 
     // ── Company Info ──
     const COMPANY = {
@@ -315,6 +329,65 @@ const PurchaseHistory = () => {
 
     const hasFilters = filters.status || filters.vendor || filters.dateFrom || filters.dateTo;
 
+    // ── Edit PO helpers ──
+    const openEditModal = (order) => {
+        setEditModal(order);
+        setEditData({
+            vendor: order.vendor || '',
+            invoice_no: order.invoice_no || '',
+            invoice_date: toDateInput(order.invoice_date),
+            receive_date: toDateInput(order.receive_date),
+            receive_time: order.receive_time || '',
+            expected_delivery_date: toDateInput(order.expected_delivery_date),
+            notes: order.notes || '',
+            items: (order.items || []).map(i => ({
+                item_id: i.item_id,
+                item_name: i.item_name,
+                item_type: i.item_type,
+                category_name: i.category_name || '',
+                unit: i.unit,
+                quantity: i.quantity || 0,
+                unit_price: i.unit_price || 0,
+                received_quantity: i.received_quantity || 0,
+                received_price: i.received_price ?? i.unit_price ?? 0,
+                batch_id: i.batch_id || null,
+            })),
+        });
+    };
+
+    const handleSaveEdit = async () => {
+        if (!editModal || !editData) return;
+        setSavingEdit(true);
+        try {
+            const updated = await updatePurchaseOrder(editModal.id, editData);
+            setOrders(prev => prev.map(o => o.id === updated.id ? { ...o, ...updated } : o));
+            setEditModal(null);
+            setEditData(null);
+            toast.success('Purchase order updated successfully');
+        } catch (err) {
+            console.error('Failed to update PO:', err);
+            toast.error(err.message || 'Failed to update purchase order');
+        } finally {
+            setSavingEdit(false);
+        }
+    };
+
+    const updateEditItem = (index, field, value) => {
+        setEditData(prev => ({
+            ...prev,
+            items: prev.items.map((item, i) =>
+                i === index ? { ...item, [field]: value } : item
+            ),
+        }));
+    };
+
+    const editOrderTotal = editData
+        ? editData.items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0)
+        : 0;
+    const editReceivedTotal = editData
+        ? editData.items.reduce((s, i) => s + (Number(i.received_quantity) || 0) * (Number(i.received_price) || 0), 0)
+        : 0;
+
     // Stats
     const totalSpent = orders.filter(o => o.status === 'received').reduce((s, o) => s + (o.received_total || o.total_amount || 0), 0);
     const pendingCount = orders.filter(o => o.status === 'pending').length;
@@ -489,6 +562,16 @@ const PurchaseHistory = () => {
                                                     >
                                                         <MdVisibility size={22} />
                                                     </button>
+                                                    {order.status !== 'cancelled' && (
+                                                        <button
+                                                            className="btn btn-ghost btn-sm"
+                                                            onClick={(e) => { e.stopPropagation(); openEditModal(order); }}
+                                                            title="Edit Purchase Order"
+                                                            style={{ color: 'var(--color-primary)' }}
+                                                        >
+                                                            <MdEdit size={21} />
+                                                        </button>
+                                                    )}
                                                     <button
                                                         className="btn btn-ghost btn-sm"
                                                         onClick={(e) => { e.stopPropagation(); generatePOPdf(order); }}
@@ -681,6 +764,226 @@ const PurchaseHistory = () => {
                     </div>
                 )
             }
+            {reviewModal && reviewData && <div className="modal-overlay" onClick={() => setReviewModal(null)}><div className="modal modal-lg" onClick={e => e.stopPropagation()}><div className="modal-header"><h2>Review Received Order — {reviewModal.po_number}</h2><button className="modal-close" onClick={() => setReviewModal(null)}><MdClose /></button></div><div className="modal-body"><div className="vendor-invoice-card"><h3 className="vendor-invoice-title">Vendor &amp; Invoice Details</h3><div className="vendor-invoice-grid"><div className="form-group"><label>Vendor</label><select className="form-input" value={reviewData.vendor} onChange={e => setReviewData({ ...reviewData, vendor: e.target.value })}>{reviewData.vendor && !vendors.includes(reviewData.vendor) && <option value={reviewData.vendor}>{reviewData.vendor}</option>}{vendors.map(v => <option key={v} value={v}>{v}</option>)}</select></div><div className="form-group"><label>Invoice No.</label><input className="form-input" value={reviewData.invoice_no} onChange={e => setReviewData({ ...reviewData, invoice_no: e.target.value })} /></div><div className="form-group"><label>Invoice Date</label><input className="form-input" type="date" value={reviewData.invoice_date} onChange={e => setReviewData({ ...reviewData, invoice_date: e.target.value })} /></div></div><div className="form-group"><label>Notes</label><input className="form-input" value={reviewData.receive_notes} onChange={e => setReviewData({ ...reviewData, receive_notes: e.target.value })} /></div></div><div className="data-table-wrapper" style={{ marginTop: 16 }}><table className="data-table"><thead><tr><th>Item</th><th>Received Qty</th><th>Received Price</th></tr></thead><tbody>{reviewData.items.map((item, index) => <tr key={item.item_id}><td>{item.item_name}</td><td>{item.received_quantity}</td><td><input className="form-input" type="number" min="0" step="0.01" value={item.received_price} onChange={e => setReviewData({ ...reviewData, items: reviewData.items.map((i, n) => n === index ? { ...i, received_price: e.target.value } : i) })} /></td></tr>)}</tbody></table></div></div><div className="modal-footer"><button className="btn btn-secondary" onClick={() => setReviewModal(null)}>Cancel</button><button className="btn btn-primary" onClick={async () => { try { const updated = await updateReceivedPurchaseReview(reviewModal.id, reviewData); setOrders(prev => prev.map(o => o.id === updated.id ? updated : o)); setReviewModal(null); toast.success('Received order review saved'); } catch (err) { toast.error(err.message || 'Could not save review'); } }}>Save Review</button></div></div></div>}
+
+            {/* ── Edit PO Modal ── */}
+            {editModal && editData && (
+                <div className="modal-overlay" onClick={() => { setEditModal(null); setEditData(null); }}>
+                    <div className="modal modal-lg" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 1000, maxHeight: '92vh', overflow: 'auto', borderRadius: 16 }}>
+                        <div className="modal-header" style={{ borderBottom: '1px solid var(--color-border)', padding: '20px 24px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                <MdEdit size={22} style={{ color: 'var(--color-primary)' }} />
+                                <h2 style={{ margin: 0, fontSize: '1.15rem' }}>Edit Purchase Order — {editModal.po_number}</h2>
+                                <span className={`po-status-badge ${editModal.status}`} style={{ fontSize: 11 }}>
+                                    {getStatusInfo(editModal.status).icon} {getStatusInfo(editModal.status).label}
+                                </span>
+                            </div>
+                            <button className="modal-close" onClick={() => { setEditModal(null); setEditData(null); }}>
+                                <MdClose />
+                            </button>
+                        </div>
+                        <div className="modal-body" style={{ padding: '24px' }}>
+                            {/* Vendor & Order Details */}
+                            <div className="vendor-invoice-card" style={{ marginBottom: 'var(--space-5)' }}>
+                                <h3 className="vendor-invoice-title">Vendor & Order Details</h3>
+                                <div className="vendor-invoice-grid">
+                                    <div className="form-group">
+                                        <label className="form-label">Vendor</label>
+                                        <select
+                                            className="form-input"
+                                            value={editData.vendor}
+                                            onChange={(e) => setEditData({ ...editData, vendor: e.target.value })}
+                                        >
+                                            <option value="">Select Vendor</option>
+                                            {editData.vendor && !vendors.includes(editData.vendor) && (
+                                                <option value={editData.vendor}>{editData.vendor}</option>
+                                            )}
+                                            {vendors.map(v => <option key={v} value={v}>{v}</option>)}
+                                        </select>
+                                    </div>
+                                    <div className="form-group">
+                                        <label className="form-label">Invoice Date</label>
+                                        <input
+                                            type="date"
+                                            className="form-input"
+                                            value={editData.invoice_date}
+                                            onChange={(e) => setEditData({ ...editData, invoice_date: e.target.value })}
+                                        />
+                                    </div>
+                                    <div className="form-group">
+                                        <label className="form-label">Expected Delivery</label>
+                                        <input
+                                            type="date"
+                                            className="form-input"
+                                            value={editData.expected_delivery_date}
+                                            onChange={(e) => setEditData({ ...editData, expected_delivery_date: e.target.value })}
+                                        />
+                                    </div>
+                                </div>
+                                <div className="vendor-invoice-grid" style={{ marginTop: 'var(--space-3)' }}>
+                                    <div className="form-group">
+                                        <label className="form-label">Receive Date</label>
+                                        <input
+                                            type="date"
+                                            className="form-input"
+                                            value={editData.receive_date}
+                                            onChange={(e) => setEditData({ ...editData, receive_date: e.target.value })}
+                                        />
+                                    </div>
+                                    <div className="form-group">
+                                        <label className="form-label">Receive Time</label>
+                                        <input
+                                            type="time"
+                                            className="form-input"
+                                            value={editData.receive_time}
+                                            onChange={(e) => setEditData({ ...editData, receive_time: e.target.value })}
+                                        />
+                                    </div>
+                                    <div className="form-group">
+                                        <label className="form-label">Notes</label>
+                                        <input
+                                            type="text"
+                                            className="form-input"
+                                            value={editData.notes}
+                                            onChange={(e) => setEditData({ ...editData, notes: e.target.value })}
+                                            placeholder="Vehicle no, driver name, remarks..."
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Items Table */}
+                            <h4 style={{ margin: '0 0 var(--space-3)', fontSize: 'var(--text-sm)', fontWeight: 700, color: 'var(--color-text-secondary)' }}>
+                                📦 Order Items ({editData.items.length})
+                            </h4>
+                            <div className="data-table-wrapper" style={{ maxHeight: 400, overflow: 'auto' }}>
+                                <table className="data-table" style={{ fontSize: 'var(--text-sm)' }}>
+                                    <thead>
+                                        <tr>
+                                            <th>Item</th>
+                                            <th>Type</th>
+                                            <th>Unit</th>
+                                            <th style={{ width: 100 }}>Ordered Qty</th>
+                                            <th style={{ width: 100 }}>Unit Price (£)</th>
+                                            <th style={{ width: 100 }}>Received Qty</th>
+                                            <th style={{ width: 100 }}>Recv Price (£)</th>
+                                            <th style={{ textAlign: 'right' }}>Line Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {editData.items.map((item, idx) => (
+                                            <tr key={item.item_id || idx}>
+                                                <td style={{ fontWeight: 600 }}>
+                                                    {item.item_type === 'raw_meat' ? '🥩' : '🛒'} {item.item_name}
+                                                </td>
+                                                <td>
+                                                    <span className="badge badge-info" style={{ fontSize: 'var(--text-xs)' }}>
+                                                        {item.item_type}
+                                                    </span>
+                                                </td>
+                                                <td>{item.unit}</td>
+                                                <td>
+                                                    <input
+                                                        type="number"
+                                                        className="form-input"
+                                                        min="0"
+                                                        step="0.01"
+                                                        value={item.quantity}
+                                                        onChange={(e) => updateEditItem(idx, 'quantity', e.target.value)}
+                                                        style={{ width: 90, padding: '6px 8px', textAlign: 'right' }}
+                                                    />
+                                                </td>
+                                                <td>
+                                                    <input
+                                                        type="number"
+                                                        className="form-input"
+                                                        min="0"
+                                                        step="0.01"
+                                                        value={item.unit_price}
+                                                        onChange={(e) => updateEditItem(idx, 'unit_price', e.target.value)}
+                                                        style={{ width: 90, padding: '6px 8px', textAlign: 'right' }}
+                                                    />
+                                                </td>
+                                                <td>
+                                                    <input
+                                                        type="number"
+                                                        className="form-input"
+                                                        min="0"
+                                                        step="0.01"
+                                                        value={item.received_quantity}
+                                                        onChange={(e) => updateEditItem(idx, 'received_quantity', e.target.value)}
+                                                        style={{
+                                                            width: 90,
+                                                            padding: '6px 8px',
+                                                            textAlign: 'right',
+                                                            borderColor: Number(item.received_quantity) >= Number(item.quantity) ? 'var(--color-success)' : undefined,
+                                                        }}
+                                                    />
+                                                </td>
+                                                <td>
+                                                    <input
+                                                        type="number"
+                                                        className="form-input"
+                                                        min="0"
+                                                        step="0.01"
+                                                        value={item.received_price}
+                                                        onChange={(e) => updateEditItem(idx, 'received_price', e.target.value)}
+                                                        style={{ width: 90, padding: '6px 8px', textAlign: 'right' }}
+                                                    />
+                                                </td>
+                                                <td style={{ textAlign: 'right', fontWeight: 600 }}>
+                                                    £{((Number(item.quantity) || 0) * (Number(item.unit_price) || 0)).toFixed(2)}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            {/* Totals */}
+                            <div style={{
+                                display: 'flex',
+                                justifyContent: 'flex-end',
+                                gap: 'var(--space-6)',
+                                marginTop: 'var(--space-4)',
+                                padding: 'var(--space-4)',
+                                background: 'var(--color-bg)',
+                                borderRadius: 'var(--radius-md)',
+                            }}>
+                                <div style={{ textAlign: 'right' }}>
+                                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>
+                                        Order Total
+                                    </div>
+                                    <div style={{ fontSize: 'var(--text-lg)', fontWeight: 700 }}>
+                                        £{editOrderTotal.toFixed(2)}
+                                    </div>
+                                </div>
+                                <div style={{ textAlign: 'right' }}>
+                                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>
+                                        Received Total
+                                    </div>
+                                    <div style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: 'var(--color-primary)' }}>
+                                        £{editReceivedTotal.toFixed(2)}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-3)', padding: '16px 24px', borderTop: '1px solid var(--color-border)' }}>
+                            <button className="btn btn-secondary btn-md" onClick={() => { setEditModal(null); setEditData(null); }}>
+                                Cancel
+                            </button>
+                            <button
+                                className="btn btn-primary btn-md"
+                                onClick={handleSaveEdit}
+                                disabled={savingEdit}
+                                style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                            >
+                                <MdSave size={18} /> {savingEdit ? 'Saving...' : 'Save Changes'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div >
     );
 };

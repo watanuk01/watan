@@ -5,6 +5,7 @@ import {
     receivePurchaseOrder,
     cancelPurchaseOrder,
     getStatusInfo,
+    getUniqueVendors,
 } from '../../services/purchaseService';
 import {
     MdShoppingCart,
@@ -33,6 +34,11 @@ const generateAutoInvoiceNo = () => {
     const dd = String(today.getDate()).padStart(2, '0');
     return `INV-${today.getFullYear()}-${mm}${dd}`;
 };
+const toDateInput = (value) => {
+    if (!value) return '';
+    const date = value?.toDate ? value.toDate() : new Date(value);
+    return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
+};
 
 const PendingOrders = () => {
     const navigate = useNavigate();
@@ -59,20 +65,27 @@ const PendingOrders = () => {
     useEffect(() => { fetchOrders(); }, [fetchOrders]);
 
     const [receiveVendor, setReceiveVendor] = useState('ABC Meat Suppliers');
+    const [vendors, setVendors] = useState([]);
+    const [isCustomVendor, setIsCustomVendor] = useState(false);
     const [invoiceNo, setInvoiceNo] = useState(generateAutoInvoiceNo());
     const [invoiceDate, setInvoiceDate] = useState(getTodayDateStr());
     const [receiveDate, setReceiveDate] = useState(getTodayDateStr());
     const [receiveTime, setReceiveTime] = useState(getCurrentTimeStr());
     const [receiveNotes, setReceiveNotes] = useState('');
 
+    useEffect(() => {
+        getUniqueVendors().then(setVendors).catch(() => setVendors([]));
+    }, []);
+
     const openReceiveModal = (order) => {
         setReceiveModal(order);
         setReceiveVendor(order.vendor || 'ABC Meat Suppliers');
-        setInvoiceNo(order.po_number?.replace('PO', 'INV') || generateAutoInvoiceNo());
-        setInvoiceDate(getTodayDateStr());
-        setReceiveDate(getTodayDateStr());
-        setReceiveTime(getCurrentTimeStr());
-        setReceiveNotes(order.notes || '');
+        setIsCustomVendor(false);
+        setInvoiceNo(order.invoice_no || order.po_number?.replace('PO', 'INV') || generateAutoInvoiceNo());
+        setInvoiceDate(toDateInput(order.invoice_date) || getTodayDateStr());
+        setReceiveDate(toDateInput(order.receive_date) || getTodayDateStr());
+        setReceiveTime(order.receive_time || getCurrentTimeStr());
+        setReceiveNotes(order.receive_notes || order.notes || '');
         setReceiveData(order.items.map(item => ({
             item_id: item.item_id,
             item_name: item.item_name,
@@ -115,7 +128,9 @@ const PendingOrders = () => {
         try {
             const result = await receivePurchaseOrder(
                 receiveModal.id,
-                receiveData.filter(r => Number(r.received_quantity) > 0),
+                receiveData.filter(r => Number(r.received_quantity) > 0).map(item => ({ ...item, vendor: receiveVendor })),
+                '',
+                { vendor: receiveVendor, invoice_no: invoiceNo, invoice_date: invoiceDate, receive_date: receiveDate, receive_time: receiveTime, receive_notes: receiveNotes },
             );
             toast.success(`Order ${receiveModal.po_number} — ${result.status === 'received' ? 'Fully Received' : 'Partially Received'}`);
             setReceiveModal(null);
@@ -294,15 +309,21 @@ const PendingOrders = () => {
                                 <div className="vendor-invoice-grid">
                                     <div className="form-group">
                                         <label className="form-label">Vendor <span className="required" style={{ color: 'var(--color-danger)' }}>*</span></label>
-                                        <select
-                                            className="form-input"
-                                            value={receiveVendor}
-                                            onChange={e => setReceiveVendor(e.target.value)}
-                                        >
-                                            <option value="ABC Meat Suppliers">ABC Meat Suppliers</option>
-                                            <option value="Al-Safa Premium Meats Ltd">Al-Safa Premium Meats Ltd</option>
-                                            <option value="Halal Quality Poultry Wholesalers">Halal Quality Poultry Wholesalers</option>
-                                        </select>
+                                        {isCustomVendor ? (
+                                            <div style={{ display: 'flex', gap: 8 }}>
+                                                <input className="form-input" value={receiveVendor} onChange={e => setReceiveVendor(e.target.value)} placeholder="Enter vendor name" autoFocus />
+                                                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setIsCustomVendor(false)}>List</button>
+                                            </div>
+                                        ) : (
+                                            <select className="form-input" value={receiveVendor} onChange={e => {
+                                                if (e.target.value === '__custom__') setIsCustomVendor(true);
+                                                else setReceiveVendor(e.target.value);
+                                            }}>
+                                                {receiveVendor && !vendors.includes(receiveVendor) && <option value={receiveVendor}>{receiveVendor}</option>}
+                                                {vendors.map(v => <option key={v} value={v}>{v}</option>)}
+                                                <option value="__custom__">+ Enter new vendor name…</option>
+                                            </select>
+                                        )}
                                     </div>
 
                                     <div className="form-group">

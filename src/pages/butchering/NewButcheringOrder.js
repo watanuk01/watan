@@ -191,7 +191,8 @@ const NewButcheringOrder = () => {
             const sanitizedBatches = (batchList || []).map(sanitize);
             const sanitizedCuts = (cutList || []).map(sanitize);
             const sanitizedAnimals = animalList || [];
-            const activeCkItems = itemsList || [];
+            // A butchered cut must map to a meat item, never grocery inventory.
+            const activeCkItems = (itemsList || []).filter(item => ['raw_meat', 'cooked_meat'].includes(item.item_type));
 
             setBatches(sanitizedBatches);
             setCutMaster(sanitizedCuts);
@@ -641,20 +642,16 @@ const NewButcheringOrder = () => {
                                                 {cut.is_waste ? (
                                                     <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>— Waste / Non-stock —</span>
                                                 ) : (
-                                                    <select
-                                                        className="table-cell-select"
-                                                        style={{ width: '100%', borderColor: cut.destination_item_id ? 'var(--color-primary)' : 'var(--color-border)' }}
-                                                        value={cut.destination_item_id || ''}
-                                                        onChange={e => {
-                                                            const selId = e.target.value;
-                                                            const found = ckItems.find(item => item.id === selId);
-                                                            setCuts(p => p.map(c => c.id === cut.id ? {
-                                                                ...c,
-                                                                destination_item_id: selId,
-                                                                destination_item_name: found?.name || '',
-                                                            } : c));
-                                                        }}
-                                                    >
+                                                    <div style={{ display: 'grid', gap: 4 }}>
+                                                    <input className="table-cell-input" list={`ck-map-search-${cut.id}`} value={cut.destination_item_name || ''} placeholder="Search CK meat item…" aria-label="Search CK meat inventory" onChange={e => {
+                                                        const name = e.target.value;
+                                                        const found = ckItems.find(item => item.name.toLowerCase() === name.toLowerCase());
+                                                        setCuts(p => p.map(c => c.id === cut.id ? { ...c, destination_item_name: name, destination_item_id: found?.id || '' } : c));
+                                                    }} />
+                                                    <datalist id={`ck-map-search-${cut.id}`}>{ckItems.map(item => <option key={item.id} value={item.name}>{item.item_type === 'raw_meat' ? 'Raw meat' : 'Cooked meat'} · {item.sku || item.category_name || 'CK inventory'}</option>)}</datalist>
+                                                    <select className="table-cell-select" title="Select a CK meat item"
+                                                        style={{ width: '100%', borderColor: cut.destination_item_id ? 'var(--color-primary)' : 'var(--color-border)' }} value={cut.destination_item_id || ''}
+                                                        onChange={e => { const selId = e.target.value; const found = ckItems.find(item => item.id === selId); setCuts(p => p.map(c => c.id === cut.id ? { ...c, destination_item_id: selId, destination_item_name: found?.name || '' } : c)); }}>
                                                         <option value="">— Butcher Cut Meat Inventory Storage —</option>
                                                         {ckItems.map(item => (
                                                             <option key={item.id} value={item.id}>
@@ -662,6 +659,7 @@ const NewButcheringOrder = () => {
                                                             </option>
                                                         ))}
                                                     </select>
+                                                    </div>
                                                 )}
                                             </td>
                                             <td>

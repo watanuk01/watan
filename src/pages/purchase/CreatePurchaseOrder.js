@@ -246,6 +246,10 @@ const CreatePurchaseOrder = () => {
             const result = await createPurchaseOrder({
                 items: selectedItems,
                 vendor: finalVendor,
+                invoice_no: invoiceNo,
+                invoice_date: invoiceDate,
+                receive_date: receiveDate,
+                receive_time: receiveTime,
                 expected_delivery_date: expectedDate,
                 notes,
             });

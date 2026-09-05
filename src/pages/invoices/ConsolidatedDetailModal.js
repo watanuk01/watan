@@ -61,7 +61,16 @@ const ConsolidatedDetailModal = ({
             setSavingStatus(false);
         }
     };
-    const supplier = supplierDetails || { name: 'Watan Central Kitchen', address: '', email: '', phone: '', vat_number: '' };
+    const rawSupplier = supplierDetails || {};
+    const supplierName = (!rawSupplier.name || rawSupplier.name === 'Watan Central Kitchen') ? 'CATERING SPICE LTD' : rawSupplier.name;
+    const supplier = {
+        ...rawSupplier,
+        name: supplierName,
+        address: rawSupplier.address || '',
+        email: rawSupplier.email || '',
+        phone: rawSupplier.phone || '',
+        vat_number: rawSupplier.vat_number || '',
+    };
     const customer = !isProduction
         ? { name: restaurantName, email: restaurantEmail, address: restaurantAddress || '', phone: restaurantPhone || '' }
         : { name: 'Internal Production', email: 'watanuk01@gmail.com', address: 'Central Kitchen, London, UK', phone: '' };

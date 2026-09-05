@@ -70,6 +70,10 @@ export const createPurchaseOrder = async (data) => {
     const orderData = {
         po_number: poNumber,
         vendor: data.vendor || '',
+        invoice_no: data.invoice_no || '',
+        invoice_date: data.invoice_date || null,
+        receive_date: data.receive_date || null,
+        receive_time: data.receive_time || '',
         expected_delivery_date: data.expected_delivery_date
             ? (typeof data.expected_delivery_date === 'string'
                 ? new Date(data.expected_delivery_date)
@@ -179,7 +183,7 @@ export const getPurchaseOrderById = async (id) => {
  *   { item_id, item_type, received_quantity, received_price?, expiry_date?, vendor? }
  * @param {string} receivedBy — user who received
  */
-export const receivePurchaseOrder = async (orderId, receivedItems, receivedBy = '') => {
+export const receivePurchaseOrder = async (orderId, receivedItems, receivedBy = '', receiptDetails = {}) => {
     const orderRef = doc(db, PURCHASE_ORDERS, orderId);
     const orderSnap = await getDoc(orderRef);
     if (!orderSnap.exists()) throw new Error('Purchase order not found');
@@ -218,6 +222,7 @@ export const receivePurchaseOrder = async (orderId, receivedItems, receivedBy = 
                 quantity: receivedQty,
                 unit: lineItem.unit,
                 vendor: received.vendor || orderData.vendor || '',
+                cost_price: received.received_price != null ? Number(received.received_price) : Number(lineItem.unit_price || 0),
                 purchase_order_id: orderId,
                 manufactured_date: new Date(),
                 expiry_date: received.expiry_date
@@ -232,6 +237,7 @@ export const receivePurchaseOrder = async (orderId, receivedItems, receivedBy = 
             // Grocery: directly increment stock
             await updateDoc(doc(db, 'inventory_items', lineItem.item_id), {
                 current_stock: increment(receivedQty),
+                cost_price: received.received_price != null ? Number(received.received_price) : Number(lineItem.unit_price || 0),
                 updated_at: serverTimestamp(),
             });
         }
@@ -252,11 +258,170 @@ export const receivePurchaseOrder = async (orderId, receivedItems, receivedBy = 
         status: newStatus,
         received_total: receivedTotal,
         received_by: receivedBy,
+        vendor: receiptDetails.vendor || orderData.vendor || '',
+        invoice_no: receiptDetails.invoice_no ?? orderData.invoice_no ?? '',
+        invoice_date: receiptDetails.invoice_date ?? orderData.invoice_date ?? null,
+        receive_date: receiptDetails.receive_date || null,
+        receive_time: receiptDetails.receive_time || '',
+        receive_notes: receiptDetails.receive_notes || '',
         received_at: serverTimestamp(),
         updated_at: serverTimestamp(),
     });
 
     return { status: newStatus, createdBatches, receivedTotal };
+};
+
+// Review a completed receipt without changing inventory quantities. Quantity corrections
+// must be handled through a stock adjustment so the audit trail and raw-meat batches stay accurate.
+export const updateReceivedPurchaseReview = async (orderId, { vendor, invoice_no, invoice_date, receive_notes, items }) => {
+    const ref = doc(db, PURCHASE_ORDERS, orderId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) throw new Error('Purchase order not found');
+    const order = snap.data();
+    if (!['received', 'partially_received'].includes(order.status)) throw new Error('Only received orders can be reviewed');
+    const updatedItems = (order.items || []).map(line => {
+        const review = items?.find(i => i.item_id === line.item_id);
+        return review ? { ...line, received_price: Number(review.received_price ?? line.received_price ?? line.unit_price) } : line;
+    });
+    const receivedTotal = updatedItems.reduce((sum, item) => sum + Number(item.received_quantity || 0) * Number(item.received_price ?? item.unit_price ?? 0), 0);
+    await Promise.all(updatedItems.filter(i => i.item_id).map(item => updateDoc(doc(db, 'inventory_items', item.item_id), {
+        cost_price: Number(item.received_price ?? item.unit_price ?? 0),
+        updated_at: serverTimestamp(),
+    })));
+    await updateDoc(ref, { vendor: vendor || order.vendor || '', invoice_no: invoice_no || '', invoice_date: invoice_date || null, receive_notes: receive_notes || '', items: updatedItems, received_total: receivedTotal, receipt_reviewed_at: serverTimestamp(), updated_at: serverTimestamp() });
+    return { ...order, id: orderId, vendor, invoice_no, invoice_date, receive_notes, items: updatedItems, received_total: receivedTotal };
+};
+
+// ═══════════════════════════════════════════
+// UPDATE (EDIT) PURCHASE ORDER
+// ═══════════════════════════════════════════
+
+/**
+ * Update an existing purchase order (full edit).
+ * Adjusts inventory stock deltas when received quantities change on
+ * already-received orders.
+ */
+export const updatePurchaseOrder = async (orderId, editData) => {
+    const ref = doc(db, PURCHASE_ORDERS, orderId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) throw new Error('Purchase order not found');
+    const order = snap.data();
+
+    if (order.status === 'cancelled') throw new Error('Cannot edit a cancelled order');
+
+    const oldItems = order.items || [];
+    const newItems = (editData.items || []).map((incoming) => {
+        const oldLine = oldItems.find(o => o.item_id === incoming.item_id) || {};
+        return {
+            ...oldLine,
+            quantity: Number(incoming.quantity) || 0,
+            unit_price: Number(incoming.unit_price) || 0,
+            total: (Number(incoming.quantity) || 0) * (Number(incoming.unit_price) || 0),
+            received_quantity: Number(incoming.received_quantity) || 0,
+            received_price: incoming.received_price != null
+                ? Number(incoming.received_price)
+                : (oldLine.received_price ?? oldLine.unit_price ?? 0),
+        };
+    });
+
+    // Inventory delta adjustments (only for items that were already received)
+    const wasReceived = ['received', 'partially_received'].includes(order.status);
+
+    for (const newLine of newItems) {
+        const oldLine = oldItems.find(o => o.item_id === newLine.item_id);
+        if (!oldLine) continue;
+        const oldRecvQty = Number(oldLine.received_quantity) || 0;
+        const newRecvQty = Number(newLine.received_quantity) || 0;
+        const delta = newRecvQty - oldRecvQty;
+
+        if (delta === 0) continue;
+        if (!wasReceived && oldRecvQty === 0) continue;
+
+        if (newLine.item_type === 'raw_meat') {
+            if (newLine.batch_id) {
+                try {
+                    await updateDoc(doc(db, 'inventory_batches', newLine.batch_id), {
+                        quantity: increment(delta),
+                        updated_at: serverTimestamp(),
+                    });
+                } catch (e) {
+                    console.error('Failed to adjust batch quantity:', e);
+                }
+            }
+            try {
+                await updateDoc(doc(db, 'inventory_items', newLine.item_id), {
+                    current_stock: increment(delta),
+                    cost_price: Number(newLine.received_price ?? newLine.unit_price ?? 0),
+                    updated_at: serverTimestamp(),
+                });
+            } catch (e) {
+                console.error('Failed to adjust raw meat item stock:', e);
+            }
+        } else {
+            try {
+                await updateDoc(doc(db, 'inventory_items', newLine.item_id), {
+                    current_stock: increment(delta),
+                    cost_price: Number(newLine.received_price ?? newLine.unit_price ?? 0),
+                    updated_at: serverTimestamp(),
+                });
+            } catch (e) {
+                console.error('Failed to adjust grocery stock:', e);
+            }
+        }
+    }
+
+    // Recalculate totals
+    const totalAmount = newItems.reduce(
+        (sum, i) => sum + (i.quantity * i.unit_price), 0
+    );
+    const receivedTotal = newItems.reduce(
+        (sum, i) => sum + ((i.received_quantity || 0) * (i.received_price ?? i.unit_price ?? 0)), 0
+    );
+
+    // Re-evaluate status
+    const allReceived = newItems.every(i => i.received_quantity >= i.quantity);
+    const someReceived = newItems.some(i => i.received_quantity > 0);
+    let newStatus = order.status;
+    if (wasReceived || someReceived) {
+        newStatus = allReceived ? 'received' : (someReceived ? 'partially_received' : 'pending');
+    }
+
+    const expectedDeliveryDate = editData.expected_delivery_date
+        ? (typeof editData.expected_delivery_date === 'string'
+            ? new Date(editData.expected_delivery_date)
+            : editData.expected_delivery_date)
+        : order.expected_delivery_date;
+
+    await updateDoc(ref, {
+        vendor: editData.vendor || order.vendor || '',
+        invoice_no: editData.invoice_no ?? order.invoice_no ?? '',
+        invoice_date: editData.invoice_date ?? order.invoice_date ?? null,
+        receive_date: editData.receive_date ?? order.receive_date ?? null,
+        receive_time: editData.receive_time ?? order.receive_time ?? '',
+        expected_delivery_date: expectedDeliveryDate,
+        notes: editData.notes ?? order.notes ?? '',
+        items: newItems,
+        total_amount: totalAmount,
+        received_total: receivedTotal,
+        status: newStatus,
+        updated_at: serverTimestamp(),
+    });
+
+    return {
+        id: orderId,
+        ...order,
+        vendor: editData.vendor || order.vendor || '',
+        invoice_no: editData.invoice_no ?? order.invoice_no ?? '',
+        invoice_date: editData.invoice_date ?? order.invoice_date ?? null,
+        receive_date: editData.receive_date ?? order.receive_date ?? null,
+        receive_time: editData.receive_time ?? order.receive_time ?? '',
+        expected_delivery_date: expectedDeliveryDate,
+        notes: editData.notes ?? order.notes ?? '',
+        items: newItems,
+        total_amount: totalAmount,
+        received_total: receivedTotal,
+        status: newStatus,
+    };
 };
 
 // ═══════════════════════════════════════════
@@ -268,8 +433,8 @@ export const cancelPurchaseOrder = async (orderId, reason = '') => {
     const orderSnap = await getDoc(orderRef);
     if (!orderSnap.exists()) throw new Error('Purchase order not found');
 
-    const data = orderSnap.data();
-    if (data.status === 'received') throw new Error('Cannot cancel a received order');
+    const orderData = orderSnap.data();
+    if (orderData.status === 'received') throw new Error('Cannot cancel a received order');
 
     await updateDoc(orderRef, {
         status: 'cancelled',

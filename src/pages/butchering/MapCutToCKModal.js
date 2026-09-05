@@ -63,7 +63,8 @@ const MapCutToCKModal = ({ cutBatch, isOpen, onClose, onSuccess }) => {
         getItems({ status: 'active' })
             .then(data => {
                 if (isMounted) {
-                    const activeList = data || [];
+                    // Butchered cuts belong in meat inventory; hide unrelated groceries.
+                    const activeList = (data || []).filter(i => ['raw_meat', 'cooked_meat'].includes(i.item_type));
                     setItems(activeList);
 
                     // Try to auto-select best matching raw meat item
@@ -243,7 +244,7 @@ const MapCutToCKModal = ({ cutBatch, isOpen, onClose, onSuccess }) => {
                                 <input
                                     type="text"
                                     className="form-input"
-                                    placeholder="Search CK items by name or SKU..."
+                                    placeholder="Smart search: cut name, meat type, SKU or category..."
                                     value={searchTerm}
                                     onChange={(e) => setSearchTerm(e.target.value)}
                                     style={{ paddingLeft: 34, height: 38, fontSize: 13 }}
