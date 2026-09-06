@@ -383,7 +383,7 @@ const NewButcheringOrder = () => {
                         {childBatches.length} child batches created • Yield: {order.yield_pct}%
                     </p>
                     <p style={{ color: 'var(--color-text-muted)', fontSize: 13 }}>
-                        Input: {order.input_weight_kg} kg → Usable: {order.output_weight_kg} kg • Waste: {order.waste_weight_kg} kg
+                        Input: {Number(order.input_weight_kg).toFixed(2)} kg → Usable: {Number(order.output_weight_kg).toFixed(2)} kg • Waste: {Number(order.waste_weight_kg).toFixed(2)} kg
                     </p>
 
                     <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 24 }}>

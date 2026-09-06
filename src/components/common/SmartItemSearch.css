@@ -1,0 +1,300 @@
+/* ═══════════════════════════════════════════
+   SMART ITEM SEARCH — Autocomplete Component
+   ═══════════════════════════════════════════ */
+
+.sis-wrapper {
+    position: relative;
+    width: 100%;
+}
+
+/* ── Input ── */
+.sis-input-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.sis-input-icon {
+    position: absolute;
+    left: 12px;
+    font-size: 18px;
+    color: var(--color-text-muted, #6b7280);
+    pointer-events: none;
+    z-index: 1;
+}
+
+.sis-input {
+    width: 100%;
+    padding: 10px 36px 10px 38px;
+    background: var(--color-bg, #0f1117);
+    border: 1px solid var(--color-border, #2a2d42);
+    border-radius: var(--radius-md, 8px);
+    color: var(--color-text-primary, #f0f0f0);
+    font-size: var(--text-sm, 14px);
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.sis-input:focus {
+    border-color: var(--color-primary, #c9a96e);
+    box-shadow: 0 0 0 3px rgba(201, 169, 110, 0.15);
+    outline: none;
+}
+
+.sis-input::placeholder {
+    color: var(--color-text-muted, #6b7280);
+}
+
+.sis-clear {
+    position: absolute;
+    right: 8px;
+    background: none;
+    border: none;
+    color: var(--color-text-muted, #6b7280);
+    cursor: pointer;
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    border-radius: 50%;
+    transition: color 0.15s, background 0.15s;
+}
+
+.sis-clear:hover {
+    color: var(--color-text-primary, #f0f0f0);
+    background: rgba(255, 255, 255, 0.08);
+}
+
+/* ── Dropdown ── */
+.sis-dropdown {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    background: var(--color-bg-elevated, #1a1d2e);
+    border: 1px solid var(--color-border, #2a2d42);
+    border-radius: var(--radius-md, 8px);
+    max-height: 420px;
+    overflow-y: auto;
+    z-index: 1000;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+    animation: sisSlideIn 0.15s ease-out;
+}
+
+@keyframes sisSlideIn {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.sis-dropdown::-webkit-scrollbar {
+    width: 6px;
+}
+
+.sis-dropdown::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.sis-dropdown::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 3px;
+}
+
+/* ── Option ── */
+.sis-option {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    cursor: pointer;
+    transition: background 0.12s;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.sis-option:last-child {
+    border-bottom: none;
+}
+
+.sis-option:hover,
+.sis-option--active {
+    background: rgba(201, 169, 110, 0.08);
+}
+
+.sis-option-info {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.sis-option-name {
+    font-weight: 600;
+    color: var(--color-text-primary, #f0f0f0);
+    font-size: var(--text-sm, 14px);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sis-highlight {
+    color: var(--color-primary, #c9a96e);
+    font-weight: 700;
+}
+
+.sis-option-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+}
+
+.sis-tag {
+    background: rgba(201, 169, 110, 0.12);
+    color: var(--color-primary, #c9a96e);
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-weight: 500;
+    font-size: 10px;
+    letter-spacing: 0.3px;
+}
+
+.sis-unit {
+    color: var(--color-text-muted, #6b7280);
+    font-size: 11px;
+}
+
+.sis-option-right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+    flex-shrink: 0;
+    margin-left: 12px;
+}
+
+.sis-price {
+    font-weight: 600;
+    color: var(--color-text-secondary, #9ca3af);
+    font-size: 12px;
+}
+
+.sis-stock {
+    font-size: 11px;
+    color: #22c55e;
+    font-weight: 500;
+}
+
+.sis-stock--out {
+    color: #ef4444;
+}
+
+/* ── Add New Option ── */
+.sis-option--new {
+    color: var(--color-primary, #c9a96e);
+    font-weight: 600;
+    font-size: var(--text-sm, 14px);
+    gap: 8px;
+    justify-content: flex-start;
+    border-top: 1px solid rgba(201, 169, 110, 0.15);
+}
+
+.sis-add-icon {
+    font-size: 18px;
+    flex-shrink: 0;
+}
+
+.sis-no-results {
+    padding: 16px;
+    text-align: center;
+    color: var(--color-text-muted, #6b7280);
+    font-size: var(--text-sm, 14px);
+}
+
+/* ── Modal Overlay for Add New Item ── */
+.sis-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(4px);
+    z-index: 99999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    animation: sisFadeIn 0.15s ease-out;
+}
+
+@keyframes sisFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.sis-modal-card {
+    background: var(--color-bg-elevated, #1a1d2e);
+    border: 1px solid var(--color-primary, #c9a96e);
+    border-radius: 12px;
+    width: 100%;
+    max-width: 480px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.75);
+    overflow: hidden;
+    animation: sisScaleIn 0.15s ease-out;
+}
+
+@keyframes sisScaleIn {
+    from { opacity: 0; transform: scale(0.95); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+.sis-new-form-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.sis-new-form-body {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.sis-new-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: 1;
+}
+
+.sis-new-field label {
+    font-size: 11px;
+    color: var(--color-text-muted, #9ca3af);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 700;
+}
+
+.sis-new-field input,
+.sis-new-field select {
+    padding: 10px 12px;
+    background: var(--color-bg, #0f1117);
+    border: 1px solid var(--color-border, #2a2d42);
+    border-radius: var(--radius-sm, 6px);
+    color: var(--color-text-primary, #f0f0f0);
+    font-size: var(--text-sm, 14px);
+    transition: border-color 0.15s;
+}
+
+.sis-new-field input:focus,
+.sis-new-field select:focus {
+    border-color: var(--color-primary, #c9a96e);
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(201, 169, 110, 0.2);
+}
+
+.sis-new-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+}

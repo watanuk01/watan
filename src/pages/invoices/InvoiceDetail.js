@@ -4,6 +4,7 @@ import {
     MdEdit, MdSave, MdCancel, MdEmail, MdSync,
 } from 'react-icons/md';
 import { updateInvoice, updateInvoiceStatus } from '../../services/invoiceService';
+import { applyCreditsToInvoice, getAvailableCredits } from '../../services/stockTransferService';
 import toast from 'react-hot-toast';
 import './Invoices.css';
 
@@ -17,6 +18,8 @@ const InvoiceDetail = ({ invoice, onClose, supplierDetails, onUpdated }) => {
     const [savingStatus, setSavingStatus] = useState(false);
     const [sendingEmail, setSendingEmail] = useState(false);
     const [syncingXero, setSyncingXero] = useState(false);
+    const [credits, setCredits] = useState([]);
+    const [showCredits, setShowCredits] = useState(false);
 
     const handleSaveStatus = async () => {
         const targetId = invoice?.id || invoice?.doc_id || invoice?.invoice_id;
@@ -50,6 +53,34 @@ const InvoiceDetail = ({ invoice, onClose, supplierDetails, onUpdated }) => {
         }
     }, [invoice]);
 
+    const loadCredits = (restaurantId) => {
+        if (restaurantId) {
+            getAvailableCredits(restaurantId)
+                .then(list => setCredits(list.map(c => ({ ...c, selected: false }))))
+                .catch(() => setCredits([]));
+        }
+    };
+
+    useEffect(() => {
+        loadCredits(invoice?.customer?.restaurant_id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [invoice]);
+
+    const handleApplyCredits = async () => {
+        const selected = credits.filter(c => c.selected);
+        if (!selected.length) { toast.error('Select at least one credit'); return; }
+        try {
+            const creditsWithAmount = selected.map(c => ({ ...c, apply_amount: c.remaining_amount }));
+            const amount = await applyCreditsToInvoice(invoice.id, creditsWithAmount);
+            toast.success(`£${amount.toFixed(2)} credit applied to invoice`);
+            setShowCredits(false);
+            const newCreditApplied = Math.round(((invoice.credit_applied || 0) + amount) * 100) / 100;
+            onUpdated?.({ ...invoice, credit_applied: newCreditApplied });
+            // Refresh credits list after apply
+            loadCredits(invoice?.customer?.restaurant_id);
+        } catch (err) { toast.error(err.message); }
+    };
+
     if (!invoice) return null;
 
     const formatDate = (date) => {
@@ -66,6 +97,9 @@ const InvoiceDetail = ({ invoice, onClose, supplierDetails, onUpdated }) => {
         if (!printRef.current) return;
         // Clone content and set explicit width for full-width PDF rendering
         const clone = printRef.current.cloneNode(true);
+        // Remove interactive elements like dropdowns and credit selectors from PDF
+        clone.querySelectorAll('.pdf-hide, .pdf-hide-select').forEach(el => el.remove());
+
         // Optimize width for A4 scale (A4 is ~210mm, 800px gives good readability scaling)
         clone.style.width = '800px';
         clone.style.padding = '20px';
@@ -224,10 +258,19 @@ const InvoiceDetail = ({ invoice, onClose, supplierDetails, onUpdated }) => {
             const { getFunctions, httpsCallable } = await import('firebase/functions');
             const functions = getFunctions();
             const sendInvoiceEmail = httpsCallable(functions, 'sendInvoiceEmail');
+
+            // Clone and strip interactive controls (.pdf-hide, .pdf-hide-select)
+            let emailHtml = '';
+            if (printRef.current) {
+                const clone = printRef.current.cloneNode(true);
+                clone.querySelectorAll('.pdf-hide, .pdf-hide-select').forEach(el => el.remove());
+                emailHtml = clone.innerHTML;
+            }
+
             await sendInvoiceEmail({
                 invoiceId: invoice.id,
                 recipientEmail,
-                invoiceHtml: printRef.current?.innerHTML || '',
+                invoiceHtml: emailHtml,
             });
             toast.success(`Invoice emailed to ${recipientEmail}`);
         } catch (err) {
@@ -302,6 +345,9 @@ const InvoiceDetail = ({ invoice, onClose, supplierDetails, onUpdated }) => {
     const discountAmt = editing ? editTotals.discountAmount : (invoice.discount_amount || 0);
     const grandTotal = editing ? editTotals.grandTotal : (isProduction ? invoice.total_with_vat : invoice.grand_total);
     const hasDiscount = discountAmt > 0;
+    const creditApplied = Number(invoice.credit_applied || 0);
+    const hasCreditApplied = creditApplied > 0;
+    const amountDue = Math.max(0, Math.round(((grandTotal || 0) - creditApplied) * 100) / 100);
 
     return (
         <div className="modal-overlay" onClick={onClose}>
@@ -600,8 +646,84 @@ const InvoiceDetail = ({ invoice, onClose, supplierDetails, onUpdated }) => {
                                         <span style={{ fontSize: 18, fontWeight: 700, color: '#111' }}>Invoice Total</span>
                                         <span style={{ fontSize: 18, fontWeight: 700, color: '#111' }}>{formatCurrency(grandTotal)}</span>
                                     </div>
+                                    {hasCreditApplied && (
+                                        <div className="row" style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #d4af3730', fontSize: 14, color: '#16a34a' }}>
+                                            <span style={{ fontWeight: 600 }}>Credits Applied (Stock Transfer)</span>
+                                            <span style={{ fontWeight: 600 }}>-{formatCurrency(creditApplied)}</span>
+                                        </div>
+                                    )}
+                                    {hasCreditApplied && (
+                                        <div className="row grand" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 12, marginTop: 4, borderTop: '3px solid #d4af37' }}>
+                                            <span style={{ fontSize: 20, fontWeight: 800, color: '#d4af37' }}>Amount Due</span>
+                                            <span style={{ fontSize: 20, fontWeight: 800, color: '#d4af37' }}>{formatCurrency(amountDue)}</span>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
+
+                            {invoice.customer?.restaurant_id && (
+                                <div className="pdf-hide" style={{ marginTop: 20, padding: '18px 20px', background: '#1a1f2e', border: '1px solid #d4af3740', borderRadius: 10 }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: showCredits ? 14 : 0 }}>
+                                        <div>
+                                            <div style={{ fontSize: 13, fontWeight: 700, color: '#d4af37', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 }}>Stock Transfer Credits</div>
+                                            <div style={{ fontSize: 12, color: '#9ca3af' }}>{credits.length} credit{credits.length !== 1 ? 's' : ''} available{hasCreditApplied ? ` · £${creditApplied.toFixed(2)} already applied` : ''}</div>
+                                        </div>
+                                        {credits.length > 0 && (
+                                            <button
+                                                onClick={() => setShowCredits(!showCredits)}
+                                                style={{ background: showCredits ? '#374151' : '#d4af37', color: showCredits ? '#9ca3af' : '#111', border: 'none', borderRadius: 6, padding: '7px 14px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
+                                            >
+                                                {showCredits ? 'Cancel' : 'Apply Credits'}
+                                            </button>
+                                        )}
+                                    </div>
+                                    {showCredits && (
+                                        <div>
+                                            {credits.length === 0 ? (
+                                                <div style={{ color: '#6b7280', fontSize: 13, padding: '8px 0' }}>No available transfer credits.</div>
+                                            ) : (
+                                                <>
+                                                    {credits.map((credit, index) => (
+                                                        <div key={credit.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid #374151' }}>
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={credit.selected}
+                                                                onChange={e => setCredits(credits.map((c, n) => n === index ? { ...c, selected: e.target.checked } : c))}
+                                                                style={{ width: 16, height: 16, accentColor: '#d4af37', cursor: 'pointer', flexShrink: 0 }}
+                                                            />
+                                                            <div style={{ flex: 1 }}>
+                                                                <div style={{ fontSize: 13, fontWeight: 600, color: '#e5e7eb' }}>Stock Transfer Credit</div>
+                                                                <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>From: {credit.restaurant_name || 'Branch'} · Transfer #{(credit.transfer_id || '').slice(-8)}</div>
+                                                            </div>
+                                                            <div style={{ fontSize: 15, fontWeight: 700, color: '#d4af37' }}>£{Number(credit.remaining_amount).toFixed(2)}</div>
+                                                        </div>
+                                                    ))}
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14 }}>
+                                                        <div style={{ fontSize: 13, color: '#9ca3af' }}>
+                                                            {credits.filter(c => c.selected).length > 0
+                                                                ? `Selected: £${credits.filter(c => c.selected).reduce((s, c) => s + Number(c.remaining_amount), 0).toFixed(2)}`
+                                                                : 'Select credits to apply'
+                                                            }
+                                                        </div>
+                                                        <button
+                                                            onClick={handleApplyCredits}
+                                                            disabled={!credits.some(c => c.selected)}
+                                                            style={{
+                                                                background: credits.some(c => c.selected) ? '#d4af37' : '#374151',
+                                                                color: credits.some(c => c.selected) ? '#111' : '#6b7280',
+                                                                border: 'none', borderRadius: 6, padding: '8px 20px',
+                                                                fontSize: 13, fontWeight: 700, cursor: credits.some(c => c.selected) ? 'pointer' : 'not-allowed'
+                                                            }}
+                                                        >
+                                                            Apply Selected Credits
+                                                        </button>
+                                                    </div>
+                                                </>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
 
                             {/* Footer */}
                             <div className="footer" style={{ marginTop: 64, textAlign: 'center', fontSize: 12, color: '#6b7280', paddingTop: 16, borderTop: '1px solid #e5e7eb' }}>

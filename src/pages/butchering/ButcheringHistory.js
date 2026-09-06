@@ -149,9 +149,9 @@ const ButcheringHistory = () => {
                                             <div style={{ fontWeight: 600 }}>{o.source_batch_no}</div>
                                             <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{o.source_product}</div>
                                         </td>
-                                        <td>{safeNum(o.input_weight_kg)} kg</td>
-                                        <td>{safeNum(o.output_weight_kg)} kg</td>
-                                        <td><span style={{ color: 'var(--color-danger)' }}>{safeNum(o.waste_weight_kg)} kg</span></td>
+                                        <td>{safeNum(o.input_weight_kg).toFixed(2)} kg</td>
+                                        <td>{safeNum(o.output_weight_kg).toFixed(2)} kg</td>
+                                        <td><span style={{ color: 'var(--color-danger)' }}>{safeNum(o.waste_weight_kg).toFixed(2)} kg</span></td>
                                         <td>
                                             <span className={`yield-badge ${safeNum(o.yield_pct) >= 90 ? 'high' : 'medium'}`}>
                                                 {safeNum(o.yield_pct)}%

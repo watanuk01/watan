@@ -21,7 +21,6 @@ import {
     query,
     where,
     serverTimestamp,
-    increment,
     writeBatch,
 } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -33,28 +32,85 @@ const ITEMS = 'inventory_items';
 const CATEGORIES = 'inventory_categories';
 const USERS = 'users';
 
+// ─── Cache for user directory resolution (60 second TTL) ───
+let userDirectoryCache = { data: null, timestamp: 0 };
+
+/**
+ * Resolve all candidate identifiers for a restaurant (UID, slug, name).
+ * Ensures queries match regardless of whether restaurant_inventory uses
+ * user UID, restaurant_id slug (e.g. 'mehman_khana'), or restaurant_name.
+ */
+export const resolveRestaurantIds = async (restaurantId, restaurantName = '') => {
+    if (!restaurantId && !restaurantName) return [];
+    const ids = new Set();
+    if (restaurantId) ids.add(String(restaurantId));
+    if (restaurantName) ids.add(String(restaurantName));
+
+    try {
+        const now = Date.now();
+        let usersDocs = userDirectoryCache.data;
+        if (!usersDocs || now - userDirectoryCache.timestamp > 60000) {
+            const usersSnap = await getDocs(collection(db, USERS));
+            usersDocs = usersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+            userDirectoryCache = { data: usersDocs, timestamp: now };
+        }
+
+        usersDocs.forEach(u => {
+            const matches =
+                u.id === restaurantId ||
+                u.restaurant_id === restaurantId ||
+                (restaurantName && (u.restaurant_name === restaurantName || u.name === restaurantName)) ||
+                (u.restaurant_name && (u.restaurant_name === restaurantId || u.restaurant_name?.toLowerCase() === String(restaurantId).toLowerCase())) ||
+                (u.name && (u.name === restaurantId || u.name?.toLowerCase() === String(restaurantId).toLowerCase()));
+            if (matches) {
+                ids.add(u.id);
+                if (u.restaurant_id) ids.add(String(u.restaurant_id));
+                if (u.restaurant_name) ids.add(String(u.restaurant_name));
+                if (u.name) ids.add(String(u.name));
+            }
+        });
+    } catch (err) {
+        console.warn('resolveRestaurantIds error:', err);
+    }
+
+    return Array.from(ids);
+};
+
 // ═══════════════════════════════════════════
 // GET RESTAURANT INVENTORY
 // ═══════════════════════════════════════════
 
 /**
  * Fetch all inventory items for a restaurant.
- * @param {string} restaurantId — user UID of the restaurant
+ * @param {string} restaurantId — user UID of the restaurant or restaurant_id slug
  * @param {Object} [filters]
  * @param {string} [filters.item_type] — 'grocery' | 'raw_meat' | 'menu_item'
  * @param {string} [filters.search] — name search
  */
 export const getRestaurantInventory = async (restaurantId, filters = {}) => {
-    const constraints = [where('restaurant_id', '==', restaurantId)];
+    const candidateIds = await resolveRestaurantIds(restaurantId);
+    const queryIds = candidateIds.length > 0 ? candidateIds : [restaurantId];
+    let docs = [];
 
-    if (filters.item_type) {
-        constraints.push(where('item_type', '==', filters.item_type));
+    for (const rId of queryIds) {
+        try {
+            const constraints = [where('restaurant_id', '==', rId)];
+            if (filters.item_type) {
+                constraints.push(where('item_type', '==', filters.item_type));
+            }
+            const q = query(collection(db, REST_INVENTORY), ...constraints);
+            const snap = await getDocs(q);
+            snap.docs.forEach(d => {
+                if (!docs.some(x => x.id === d.id)) {
+                    docs.push(d);
+                }
+            });
+        } catch (e) {
+            console.warn('Error querying restaurant_inventory for rId:', rId, e);
+        }
     }
 
-    const q = query(collection(db, REST_INVENTORY), ...constraints);
-    const snap = await getDocs(q);
-
-    let items = snap.docs.map(d => ({
+    let items = docs.map(d => ({
         id: d.id,
         ...d.data(),
         last_updated: d.data().last_updated?.toDate?.() || null,
@@ -125,17 +181,88 @@ export const getRestaurantInventory = async (restaurantId, filters = {}) => {
 
 /**
  * Get a single restaurant inventory item.
+ * Searches by doc ID, item_id field, and item_name across all candidate restaurant IDs.
+ * Highly optimized for fast execution without heavy category enrichments.
+ *
+ * @param {string} restaurantId
+ * @param {string|Object} itemOrId — itemId string or item object { id, item_id, item_name, name }
+ * @param {string} [itemNameHint] — optional item name fallback
  */
-export const getRestaurantItem = async (restaurantId, itemId) => {
-    const constraints = [
-        where('restaurant_id', '==', restaurantId),
-        where('item_id', '==', itemId),
-    ];
-    const q = query(collection(db, REST_INVENTORY), ...constraints);
-    const snap = await getDocs(q);
-    if (snap.empty) return null;
-    const d = snap.docs[0];
-    return { id: d.id, ...d.data() };
+export const getRestaurantItem = async (restaurantId, itemOrId, itemNameHint = '') => {
+    if (!restaurantId || !itemOrId) return null;
+
+    const targetId = typeof itemOrId === 'string' ? itemOrId : (itemOrId?.item_id || itemOrId?.id || '');
+    const targetDocId = typeof itemOrId === 'object' ? (itemOrId?.id || '') : (typeof itemOrId === 'string' ? itemOrId : '');
+    const targetName = (
+        typeof itemOrId === 'object'
+            ? (itemOrId?.item_name || itemOrId?.name || itemNameHint)
+            : itemNameHint
+    ).trim().toLowerCase();
+
+    // 1. Direct doc lookup if targetDocId exists
+    if (targetDocId) {
+        try {
+            const directDoc = await getDoc(doc(db, REST_INVENTORY, targetDocId));
+            if (directDoc.exists()) {
+                const data = directDoc.data();
+                const candidateIds = await resolveRestaurantIds(restaurantId);
+                if (!data.restaurant_id || candidateIds.includes(data.restaurant_id)) {
+                    return { id: directDoc.id, ...data };
+                }
+            }
+        } catch (e) { /* ignore */ }
+    }
+
+    // 2. Fetch inventory for this restaurant directly without heavy category enrichment
+    const candidateRestIds = await resolveRestaurantIds(restaurantId);
+    const queryIds = candidateRestIds.length > 0 ? candidateRestIds : [restaurantId];
+    let restItems = [];
+    for (const rId of queryIds) {
+        try {
+            const snap = await getDocs(query(collection(db, REST_INVENTORY), where('restaurant_id', '==', rId)));
+            snap.docs.forEach(d => {
+                if (!restItems.some(x => x.id === d.id)) {
+                    restItems.push({ id: d.id, ...d.data() });
+                }
+            });
+        } catch (e) { /* ignore */ }
+    }
+
+    if (!restItems || restItems.length === 0) return null;
+
+    // Priority A: doc id match
+    if (targetDocId) {
+        const found = restItems.find(i => i.id === targetDocId);
+        if (found) return found;
+    }
+
+    // Priority B: item_id field match
+    if (targetId) {
+        const found = restItems.find(i => i.item_id === targetId || i.id === targetId);
+        if (found) return found;
+    }
+
+    // Priority C: exact item_name match (case-insensitive, trimmed)
+    if (targetName) {
+        const found = restItems.find(i =>
+            (i.item_name || i.name || '').trim().toLowerCase() === targetName
+        );
+        if (found) return found;
+    }
+
+    // Priority D: normalized item_name match (alphanumeric only)
+    if (targetName) {
+        const cleanTarget = targetName.replace(/[^a-z0-9]/g, '');
+        if (cleanTarget) {
+            const found = restItems.find(i => {
+                const cleanName = (i.item_name || i.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                return cleanName && (cleanName === cleanTarget || cleanName.includes(cleanTarget) || cleanTarget.includes(cleanName));
+            });
+            if (found) return found;
+        }
+    }
+
+    return null;
 };
 
 // ═══════════════════════════════════════════
@@ -155,16 +282,21 @@ export const getRestaurantItem = async (restaurantId, itemId) => {
 export const addStockFromDelivery = async (restaurantId, orderItems, orderNumber = '') => {
     const batch = writeBatch(db);
     const results = [];
+    const candidateRestIds = await resolveRestaurantIds(restaurantId);
+    const primaryRestId = candidateRestIds[0] || restaurantId;
 
     for (const item of orderItems) {
         // Check if this item already exists in restaurant inventory
-        const existing = await getRestaurantItem(restaurantId, item.item_id);
+        const existing = await getRestaurantItem(restaurantId, item, item.item_name);
+        const itemQty = Math.round(Number(item.quantity || 0) * 100) / 100;
 
         if (existing) {
-            // Increment existing stock
+            // Increment existing stock with 2-decimal precision
+            const currentStock = Number(existing.current_stock || 0);
+            const newStock = Math.round((currentStock + itemQty) * 100) / 100;
             const ref = doc(db, REST_INVENTORY, existing.id);
             batch.update(ref, {
-                current_stock: increment(item.quantity),
+                current_stock: newStock,
                 cost_price: item.cost_price || existing.cost_price || 0,
                 selling_price: item.selling_price || existing.selling_price || 0,
                 category_name: item.category_name || existing.category_name || '',
@@ -172,20 +304,20 @@ export const addStockFromDelivery = async (restaurantId, orderItems, orderNumber
                 last_delivery_order: orderNumber,
                 last_updated: serverTimestamp(),
             });
-            results.push({ item_id: item.item_id, action: 'incremented', quantity: item.quantity });
+            results.push({ item_id: item.item_id, action: 'incremented', quantity: itemQty, newStock });
         } else {
             // Create new inventory record
             const ref = doc(collection(db, REST_INVENTORY));
             batch.set(ref, {
-                restaurant_id: restaurantId,
-                item_id: item.item_id,
+                restaurant_id: primaryRestId,
+                item_id: item.item_id || ref.id,
                 item_name: item.item_name || '',
                 item_type: item.item_type || 'grocery',
                 category_name: item.category_name || '',
                 unit: item.unit || 'kg',
                 base_unit: item.base_unit || item.unit || 'kg',
                 unit_conversion: item.unit_conversion || { has_conversion: false, levels: [], base_factor: 1 },
-                current_stock: item.quantity,
+                current_stock: itemQty,
                 cost_price: item.cost_price || 0,
                 selling_price: item.selling_price || 0,
                 vat_rate: item.vat_rate || 0,
@@ -196,7 +328,7 @@ export const addStockFromDelivery = async (restaurantId, orderItems, orderNumber
                 last_updated: serverTimestamp(),
                 created_at: serverTimestamp(),
             });
-            results.push({ item_id: item.item_id, action: 'created', quantity: item.quantity });
+            results.push({ item_id: item.item_id, action: 'created', quantity: itemQty });
         }
     }
 
@@ -261,25 +393,19 @@ export const adjustRestaurantStock = async (restaurantId, restInventoryDocId, ad
 // DEDUCT STOCK (for waste / EPOS)
 // ═══════════════════════════════════════════
 
-/**
- * Deduct stock from restaurant inventory (waste, EPOS sales).
- *
- * @param {string} restaurantId
- * @param {string} itemId — the master item_id
- * @param {number} quantity — amount to deduct (positive number)
- * @param {string} reason — audit reason
- */
-export const deductRestaurantStock = async (restaurantId, itemId, quantity, reason = '') => {
-    const existing = await getRestaurantItem(restaurantId, itemId);
+export const deductRestaurantStock = async (restaurantId, itemOrId, quantity, reason = '', itemNameHint = '') => {
+    const existing = await getRestaurantItem(restaurantId, itemOrId, itemNameHint);
     if (!existing) throw new Error(`Item not found in restaurant inventory`);
 
-    const newStock = Math.max(0, (existing.current_stock || 0) - quantity);
+    const currentStock = Number(existing.current_stock || 0);
+    const deductQty = Math.round(Number(quantity || 0) * 100) / 100;
+    const newStock = Math.round(Math.max(0, currentStock - deductQty) * 100) / 100;
     await updateDoc(doc(db, REST_INVENTORY, existing.id), {
         current_stock: newStock,
         last_updated: serverTimestamp(),
     });
 
-    return { newStock, item_name: existing.item_name };
+    return { id: existing.id, newStock, item_name: existing.item_name || itemNameHint };
 };
 
 // ═══════════════════════════════════════════

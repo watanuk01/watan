@@ -268,8 +268,8 @@ const ButcherDashboard = () => {
                                         <tr key={o.id}>
                                             <td><span className="batch-code">{o.order_no}</span></td>
                                             <td style={{ color: 'var(--color-text-secondary)' }}>{o.source_batch_no || 'Whole Meat'}</td>
-                                            <td>{safeNum(o.input_weight_kg)} kg</td>
-                                            <td>{safeNum(o.output_weight_kg)} kg</td>
+                                            <td>{safeNum(o.input_weight_kg).toFixed(2)} kg</td>
+                                            <td>{safeNum(o.output_weight_kg).toFixed(2)} kg</td>
                                             <td>
                                                 <span className={`yield-badge ${safeNum(o.yield_pct) >= 90 ? 'high' : 'medium'}`}>
                                                     {safeNum(o.yield_pct)}%

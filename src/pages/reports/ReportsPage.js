@@ -10,7 +10,7 @@ import {
     MdInventory2, MdRefresh, MdWarning, MdFilterList,
     MdPictureAsPdf, MdEmail, MdClose, MdExpandMore,
     MdExpandLess, MdSearch, MdTrendingUp, MdTrendingDown,
-    MdContentCut,
+    MdContentCut, MdSync,
 } from 'react-icons/md';
 import {
     fetchRestaurantComparison,
@@ -24,6 +24,8 @@ import {
     startOfDay,
     endOfDay,
 } from '../../services/analyticsService';
+import { getPettyCashAnalytics } from '../../services/pettyCashService';
+import { getStockTransferAnalytics } from '../../services/stockTransferService';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -41,6 +43,8 @@ const TABS = [
     { id: 'vendors', label: 'Vendor Performance', icon: MdInventory2 },
     { id: 'batches', label: 'Batch Analytics', icon: MdBarChart },
     { id: 'butcher', label: 'Butchering & Yield', icon: MdContentCut },
+    { id: 'transfers', label: 'Stock Transfers', icon: MdSync },
+    { id: 'petty-cash', label: 'Petty Cash', icon: MdShoppingCart },
 ];
 
 // Report-specific date presets
@@ -86,6 +90,9 @@ const KpiCard = ({ label, value, sub, color }) => (
         {sub && <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4 }}>{sub}</div>}
     </div>
 );
+
+const TransferReport = ({ data }) => <div><div className="kpi-grid"><KpiCard label="Total Borrowed Value" value={formatCurrency(data?.totalBorrowedValue || 0)} /><KpiCard label="Net Credits Earned" value={formatCurrency(data?.netCreditsEarned || 0)} color="#22c55e" /></div><div className="card"><h3>Most Borrowed Items</h3>{data?.mostBorrowed?.length ? <ul>{data.mostBorrowed.map(i => <li key={i.name}>{i.name}: {i.quantity}</li>)}</ul> : <p>No completed stock transfers yet.</p>}</div></div>;
+const PettyCashReport = ({ data }) => <div><div className="kpi-grid"><KpiCard label="Total Spent" value={formatCurrency(data?.total || 0)} /><KpiCard label="Cash" value={formatCurrency(data?.cash || 0)} /><KpiCard label="Card" value={formatCurrency(data?.card || 0)} /></div><div className="card"><h3>Category Breakdown</h3>{data?.categories?.map(c => <div key={c.name} style={{ display: 'flex', justifyContent: 'space-between', padding: 6 }}><span>{c.name}</span><strong>{formatCurrency(c.value)}</strong></div>) || <p>No purchases yet.</p>}</div></div>;
 
 // ─── custom label for pie ───
 const renderPieLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
@@ -735,9 +742,9 @@ const ButcheringYieldTab = ({ data }) => {
                                                 {o.animal_type || 'Lamb'}
                                             </span>
                                         </td>
-                                        <td style={{ fontWeight: 600 }}>{o.input_weight_kg} kg</td>
-                                        <td style={{ fontWeight: 700, color: 'var(--color-success)' }}>{o.output_weight_kg} kg</td>
-                                        <td style={{ color: 'var(--color-danger)' }}>{o.waste_weight_kg} kg</td>
+                                        <td style={{ fontWeight: 600 }}>{Number(o.input_weight_kg).toFixed(2)} kg</td>
+                                        <td style={{ fontWeight: 700, color: 'var(--color-success)' }}>{Number(o.output_weight_kg).toFixed(2)} kg</td>
+                                        <td style={{ color: 'var(--color-danger)' }}>{Number(o.waste_weight_kg).toFixed(2)} kg</td>
                                         <td>
                                             <span className={`yield-badge ${o.yield_pct >= 85 ? 'high' : o.yield_pct >= 70 ? 'medium' : 'low'}`}>
                                                 {o.yield_pct}%
@@ -770,6 +777,8 @@ const ReportsPage = () => {
     const [vendors, setVendors] = useState(null);
     const [batches, setBatches] = useState(null);
     const [butcheringData, setButcheringData] = useState(null);
+    const [transferData, setTransferData] = useState(null);
+    const [pettyCashData, setPettyCashData] = useState(null);
 
     // Filter state
     const [datePreset, setDatePreset] = useState('today');
@@ -831,6 +840,10 @@ const ReportsPage = () => {
                 setBatches(await fetchBatchAnalytics(filters));
             } else if (t === 'butcher') {
                 setButcheringData(await fetchButcheringAnalytics(filters));
+            } else if (t === 'transfers') {
+                setTransferData(await getStockTransferAnalytics());
+            } else if (t === 'petty-cash') {
+                setPettyCashData(await getPettyCashAnalytics());
             }
         } catch (e) {
             toast.error('Failed to load analytics data');
@@ -1050,9 +1063,9 @@ const ReportsPage = () => {
                             o.order_no || 'BUT-RUN',
                             o.source_batch_no || '—',
                             o.animal_type || 'Lamb',
-                            `${o.input_weight_kg} kg`,
-                            `${o.output_weight_kg} kg`,
-                            `${o.waste_weight_kg} kg`,
+                            `${Number(o.input_weight_kg).toFixed(2)} kg`,
+                            `${Number(o.output_weight_kg).toFixed(2)} kg`,
+                            `${Number(o.waste_weight_kg).toFixed(2)} kg`,
                             `${o.yield_pct}%`,
                             o.butcher_name || 'Butcher',
                             o.date || (o.created_at ? new Date(o.created_at).toLocaleDateString('en-GB') : '—'),
@@ -1426,6 +1439,8 @@ const ReportsPage = () => {
                         {tab === 'vendors' && <VendorPerformance data={vendors} />}
                         {tab === 'batches' && <BatchAnalyticsTab data={batches} />}
                         {tab === 'butcher' && <ButcheringYieldTab data={butcheringData} />}
+                        {tab === 'transfers' && <TransferReport data={transferData} />}
+                        {tab === 'petty-cash' && <PettyCashReport data={pettyCashData} />}
                     </>
                 )}
             </div>

@@ -32,6 +32,8 @@ import BulkUpload from '../pages/inventory/BulkUpload';
 import CreatePurchaseOrder from '../pages/purchase/CreatePurchaseOrder';
 import PendingOrders from '../pages/purchase/PendingOrders';
 import PurchaseHistory from '../pages/purchase/PurchaseHistory';
+import QuickPurchase from '../pages/purchase/QuickPurchase';
+import PettyCashHistory from '../pages/purchase/PettyCashHistory';
 
 // Production
 import StartProduction from '../pages/production/StartProduction';
@@ -50,6 +52,7 @@ import RestaurantInventory from '../pages/restaurant/RestaurantInventory';
 import RestaurantInvoices from '../pages/restaurant/RestaurantInvoices';
 import MenuManagement from '../pages/restaurant/MenuManagement';
 import EposMapping from '../pages/restaurant/EposMapping';
+import StockTransfers from '../pages/restaurant/StockTransfers';
 
 // Delivery
 import DeliveryOrders from '../pages/delivery/DeliveryOrders';
@@ -235,6 +238,8 @@ const AppRouter = () => {
                             </ProtectedRoute>
                         }
                     />
+                    <Route path="/purchase/quick" element={<ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef']}><QuickPurchase /></ProtectedRoute>} />
+                    <Route path="/purchase/petty-cash-history" element={<ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef']}><PettyCashHistory /></ProtectedRoute>} />
                     <Route
                         path="/production/start"
                         element={
@@ -472,6 +477,7 @@ const AppRouter = () => {
                             </ProtectedRoute>
                         }
                     />
+                    <Route path="/restaurant/stock-transfers" element={<ProtectedRoute allowedRoles={['restaurant_manager', 'restaurant_manager_non_managed']}><StockTransfers /></ProtectedRoute>} />
                     <Route
                         path="/restaurant/orders/*"
                         element={

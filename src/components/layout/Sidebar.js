@@ -70,6 +70,8 @@ const Sidebar = () => {
                             { label: 'Create Order', path: '/purchase/create' },
                             { label: 'Pending Orders', path: '/purchase/pending' },
                             { label: 'Purchase History', path: '/purchase/history' },
+                            { label: 'Quick Purchase', path: '/purchase/quick' },
+                            { label: 'Petty Cash History', path: '/purchase/petty-cash-history' },
                         ]
                     },
                     {
@@ -148,6 +150,8 @@ const Sidebar = () => {
                             { label: 'Create Order', path: '/purchase/create' },
                             { label: 'Pending Orders', path: '/purchase/pending' },
                             { label: 'Purchase History', path: '/purchase/history' },
+                            { label: 'Quick Purchase', path: '/purchase/quick' },
+                            { label: 'Petty Cash History', path: '/purchase/petty-cash-history' },
                         ]
                     },
                     {
@@ -218,6 +222,7 @@ const Sidebar = () => {
                     { type: 'section', label: 'Operations' },
                     { type: 'item', label: 'Order from CK', icon: MdShoppingCart, path: '/restaurant/order' },
                     { type: 'item', label: 'My Inventory', icon: MdInventory2, path: '/restaurant/inventory' },
+                    { type: 'item', label: 'Stock Transfers', icon: MdSync, path: '/restaurant/stock-transfers' },
                     { type: 'item', label: 'Order History', icon: MdHistory, path: '/restaurant/orders' },
                     { type: 'item', label: 'Waste Management', icon: MdDelete, path: '/waste' },
                     { type: 'item', label: 'Menu Management', icon: MdMenuBook, path: '/restaurant/menu' },
@@ -235,6 +240,7 @@ const Sidebar = () => {
                     { type: 'section', label: 'Operations' },
                     { type: 'item', label: 'Order from CK', icon: MdShoppingCart, path: '/restaurant/order' },
                     { type: 'item', label: 'My Inventory', icon: MdInventory2, path: '/restaurant/inventory' },
+                    { type: 'item', label: 'Stock Transfers', icon: MdSync, path: '/restaurant/stock-transfers' },
                     { type: 'item', label: 'Order History', icon: MdHistory, path: '/restaurant/orders' },
                     { type: 'item', label: 'Waste Management', icon: MdDelete, path: '/waste' },
                     { type: 'divider' },

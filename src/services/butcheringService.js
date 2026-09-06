@@ -322,10 +322,10 @@ export const createButcheringOrder = async (orderData) => {
     }
 
     const availableWeight = Number(sourceBatch.remaining_weight_kg ?? sourceBatch.quantity ?? sourceBatch.weight_kg ?? sourceBatch.initial_quantity) || 0;
-    const inputWeight = Number(processing_weight_kg ?? availableWeight) || 0;
-    const totalOutputWeight = cuts.filter(c => !c.is_waste).reduce((sum, c) => sum + (Number(c.weight_kg) || 0), 0);
-    const wasteWeight = cuts.filter(c => c.is_waste).reduce((sum, c) => sum + (Number(c.weight_kg) || 0), 0);
-    const totalProcessed = totalOutputWeight + wasteWeight;
+    const inputWeight = Math.round((Number(processing_weight_kg ?? availableWeight) || 0) * 100) / 100;
+    const totalOutputWeight = Math.round(cuts.filter(c => !c.is_waste).reduce((sum, c) => sum + (Number(c.weight_kg) || 0), 0) * 100) / 100;
+    const wasteWeight = Math.round(cuts.filter(c => c.is_waste).reduce((sum, c) => sum + (Number(c.weight_kg) || 0), 0) * 100) / 100;
+    const totalProcessed = Math.round((totalOutputWeight + wasteWeight) * 100) / 100;
     const yieldPct = inputWeight > 0 ? Math.round((totalOutputWeight / inputWeight) * 1000) / 10 : 0;
 
     if (inputWeight <= 0 || inputWeight > availableWeight + 0.001) throw new Error('Processing weight must be within the available batch weight');
@@ -766,6 +766,97 @@ export const getButcherPurchaseOrders = async () => {
         console.error('Error fetching butcher POs:', err);
         return [];
     }
+};
+
+/**
+ * Update/Review a received Butcher PO — edits vendor, notes, item quantities/prices
+ * and syncs the corresponding inventory batches.
+ */
+export const updateButcherPO = async (poId, editData) => {
+    const poSnap = await getDoc(doc(db, PURCHASE_ORDERS, poId));
+    if (!poSnap.exists()) throw new Error('PO not found');
+    const oldPO = poSnap.data();
+    const oldItems = oldPO.items || [];
+
+    const newItems = (editData.items || []).map(i => ({
+        ...i,
+        quantity: Math.round((Number(i.quantity) || 0) * 100) / 100,
+        unit_price: Math.round((Number(i.unit_price) || 0) * 100) / 100,
+        purchase_price: Math.round(((Number(i.quantity) || 0) * (Number(i.unit_price) || 0)) * 100) / 100,
+    }));
+
+    const totalQuantity = newItems.reduce((s, i) => s + i.quantity, 0);
+    const totalAmount = newItems.reduce((s, i) => s + i.purchase_price, 0);
+
+    // Find batches created by this PO
+    const batchSnap = await getDocs(query(collection(db, BATCHES), where('po_id', '==', poId)));
+    const batches = batchSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    const batchWriter = writeBatch(db);
+
+    // Update PO document
+    batchWriter.update(doc(db, PURCHASE_ORDERS, poId), {
+        vendor: editData.vendor || oldPO.vendor,
+        vendor_name: editData.vendor || oldPO.vendor,
+        notes: editData.notes ?? oldPO.notes,
+        items: newItems,
+        total_quantity: totalQuantity,
+        total_amount: totalAmount,
+        updated_at: serverTimestamp(),
+    });
+
+    // Sync batches — match by item_name since each PO item creates one batch
+    for (let i = 0; i < newItems.length; i++) {
+        const newItem = newItems[i];
+        const oldItem = oldItems[i] || {};
+        const itemName = newItem.item_name || '';
+
+        // Find matching batch by item_name + po_id
+        const batch = batches.find(b =>
+            (b.item_name || '').toLowerCase().trim() === itemName.toLowerCase().trim()
+        );
+
+        if (batch) {
+            const oldQty = Number(oldItem.quantity) || 0;
+            const newQty = newItem.quantity;
+            const delta = Math.round((newQty - oldQty) * 100) / 100;
+
+            batchWriter.update(doc(db, BATCHES, batch.id), {
+                quantity: Math.max(0, (Number(batch.quantity) || 0) + delta),
+                remaining_weight_kg: Math.max(0, (Number(batch.remaining_weight_kg) || 0) + delta),
+                weight_kg: Math.max(0, (Number(batch.weight_kg) || 0) + delta),
+                initial_quantity: newQty,
+                vendor_name: editData.vendor || oldPO.vendor,
+                supplier: editData.vendor || oldPO.vendor,
+                updated_at: serverTimestamp(),
+            });
+        }
+
+        // Update cost_price on inventory_items if the item exists
+        if (newItem.unit_price > 0) {
+            const itemSnap = await getDocs(query(collection(db, ITEMS), where('item_type', '==', 'raw_meat')));
+            const match = itemSnap.docs.find(d => (d.data().name || '').toLowerCase().trim() === itemName.toLowerCase().trim());
+            if (match) {
+                batchWriter.update(doc(db, ITEMS, match.id), {
+                    cost_price: newItem.unit_price,
+                    updated_at: serverTimestamp(),
+                });
+            }
+        }
+    }
+
+    await batchWriter.commit();
+
+    return {
+        id: poId,
+        ...oldPO,
+        vendor: editData.vendor || oldPO.vendor,
+        vendor_name: editData.vendor || oldPO.vendor,
+        notes: editData.notes ?? oldPO.notes,
+        items: newItems,
+        total_quantity: totalQuantity,
+        total_amount: totalAmount,
+    };
 };
 
 /** Get butcher inventory — received uncut meat batches */

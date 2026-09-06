@@ -38,6 +38,7 @@ import EposSalesTable from '../../components/epos/EposSalesTable';
 import toast from 'react-hot-toast';
 import { runFullSeed } from '../../services/seedService';
 import { syncCategoryNamesOnItems } from '../../services/inventoryService';
+import { getPettyCashAnalytics } from '../../services/pettyCashService';
 import './Dashboard.css';
 
 const CHART_COLORS = ['#c9a96e', '#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6', '#ef4444', '#14b8a6', '#f97316'];
@@ -202,6 +203,7 @@ const AdminDashboard = () => {
     const [restaurants, setRestaurants] = useState([]);
 
     const [metrics, setMetrics] = useState(null);
+    const [pettyCash, setPettyCash] = useState({ total: 0, cash: 0, card: 0 });
     const [invByCategory, setInvByCategory] = useState([]);
     const [dailyVolume, setDailyVolume] = useState([]);
     const [topItems, setTopItems] = useState([]);
@@ -336,6 +338,7 @@ const AdminDashboard = () => {
     useEffect(() => {
         loadMetrics(filters);
         loadCharts(filters);
+        getPettyCashAnalytics().then(setPettyCash).catch(() => { });
     }, []); // eslint-disable-line
 
     // Re-load when filters change
@@ -433,6 +436,7 @@ const AdminDashboard = () => {
                         color="info"
                         onClick={() => navigate('/production/start')}
                     />
+                    <StatCard label="Petty Cash Spent" value={formatCurrency(pettyCash.total)} sub={`Cash ${formatCurrency(pettyCash.cash)} · Card ${formatCurrency(pettyCash.card)}`} icon={MdShoppingCart} color="warning" onClick={() => navigate('/purchase/petty-cash-history')} />
                 </div>
             )}
 
