@@ -265,15 +265,18 @@ export const subscribeToOrders = (callback) => {
  * @returns {Function} unsubscribe
  */
 export const subscribeToRestaurantOrders = (restaurantId, callback) => {
-    const q = query(
-        collection(db, ORDERS),
-        where('restaurant_id', '==', restaurantId),
-        orderBy('created_at', 'desc')
-    );
+    const constraints = [];
+    if (restaurantId && restaurantId !== 'all') {
+        constraints.push(where('restaurant_id', '==', restaurantId));
+    }
+    const q = query(collection(db, ORDERS), ...constraints);
+
     return onSnapshot(q, (snap) => {
         const orders = snap.docs.map(mapOrderDoc);
         orders.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
         callback(orders);
+    }, (err) => {
+        console.error('subscribeToRestaurantOrders error:', err);
     });
 };
 
@@ -341,6 +344,72 @@ export const markReadyForPickup = async (orderId) => {
         }
     }
 
+    // ── Build dispatch QR items with traceability ──
+    const dispatchQrItems = [];
+    const BATCHES_COLL = 'inventory_batches';
+
+    for (const alloc of batchAllocations) {
+        const batchNumbers = [];
+        const traceability = [];
+
+        for (const b of (alloc.batches || [])) {
+            batchNumbers.push(b.batch_number || b.batch_id);
+            try {
+                const bSnap = await getDoc(doc(db, BATCHES_COLL, b.batch_id));
+                if (bSnap.exists()) {
+                    const bData = bSnap.data();
+                    const prodNumber = bData.production_number || null;
+                    const prodBatch = bData.batch_number || b.batch_number;
+                    const prodItem = bData.item_name || alloc.item_name;
+                    const prodQty = bData.initial_quantity || bData.quantity || null;
+
+                    // If the batch has stored traceability_chain (from production), use it
+                    if (bData.traceability_chain?.length) {
+                        const enriched = bData.traceability_chain.map(tc => ({
+                            ...tc,
+                            production_number: tc.production_number || prodNumber,
+                            production_batch: tc.production_batch || prodBatch,
+                            production_item: tc.product_name || prodItem,
+                            production_quantity: tc.production_quantity || prodQty,
+                        }));
+                        traceability.push(...enriched);
+                    } else if (prodNumber) {
+                        traceability.push({
+                            vendor: bData.vendor_name || bData.supplier || 'Central Kitchen',
+                            production_number: prodNumber,
+                            production_batch: prodBatch,
+                            production_item: prodItem,
+                            production_quantity: prodQty,
+                            batch_number: prodBatch,
+                        });
+                    } else {
+                        // Build basic traceability from batch data
+                        traceability.push({
+                            vendor: bData.vendor_name || bData.supplier || bData.vendor || 'Supplier',
+                            batch_number: bData.batch_number,
+                            item_name: bData.item_name,
+                            source: bData.source || 'purchase',
+                            production_number: bData.production_number || null,
+                            po_number: bData.po_number || null,
+                        });
+                    }
+                }
+            } catch (err) {
+                console.warn('QR traceability lookup failed:', err);
+            }
+        }
+
+        dispatchQrItems.push({
+            item_id: alloc.item_id,
+            item_name: alloc.item_name,
+            quantity: alloc.quantity,
+            unit: (order.items.find(i => i.item_id === alloc.item_id) || {}).unit || 'kg',
+            batch_numbers: batchNumbers,
+            qr_scan_url: `/scan?order=${orderId}&item=${alloc.item_id}`,
+            traceability,
+        });
+    }
+
     // Generate full invoice document (this returns the generated invoice_number)
     const invoice = await generateOrderInvoice(orderId);
 
@@ -349,13 +418,14 @@ export const markReadyForPickup = async (orderId) => {
     await updateDoc(orderRef, {
         status: 'ready_for_pickup',
         batch_allocations: batchAllocations,
+        dispatch_qr_items: dispatchQrItems,
         invoice_number: invoice.invoice_number,
         invoice_id: invoice.id,
         ready_at: serverTimestamp(),
         updated_at: serverTimestamp(),
     });
 
-    return { invoiceNumber: invoice.invoice_number, batchAllocations };
+    return { invoiceNumber: invoice.invoice_number, batchAllocations, dispatchQrItems };
 };
 
 /**

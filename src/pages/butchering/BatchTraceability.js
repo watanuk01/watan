@@ -11,6 +11,7 @@ import {
     MdInventory2,
     MdContentCut,
     MdRefresh,
+    MdCheckCircle,
 } from 'react-icons/md';
 import { getBatchGenealogyTree } from '../../services/butcheringService';
 import QrCodeSvg from '../../components/ui/QrCodeSvg';
@@ -32,6 +33,7 @@ const NODE_CONFIG = {
     child: { color: 'var(--color-success)', icon: MdQrCodeScanner },
     production: { color: '#ec4899', icon: MdOutlineKitchen },
     restaurant: { color: 'var(--color-success)', icon: MdStore },
+    delivery: { color: '#16a34a', icon: MdCheckCircle },
 };
 
 const TreeNode = ({ node, level = 0 }) => {
@@ -180,7 +182,7 @@ const BatchTraceability = () => {
                         <MdSearch className="search-icon" />
                         <input
                             type="text"
-                            placeholder="Enter batch number e.g. WL-260718-001..."
+                            placeholder="Search batch, production, or order number..."
                             value={searchTerm}
                             onChange={e => setSearchTerm(e.target.value)}
                             onKeyDown={e => e.key === 'Enter' && search()}
@@ -216,21 +218,38 @@ const BatchTraceability = () => {
                     <div className="butcher-panel">
                         <h3 className="butcher-panel-title"><MdPrint /> QR Print Labels</h3>
                         <div className="qr-print-grid">
-                            {flatBatches(genealogy).filter(n => n.batch_number).map((n, i) => (
-                                <div key={i} className="qr-label-box">
-                                    <div className="qr-label-header">WATAN CENTRAL KITCHEN</div>
-                                    <div className="qr-label-body">
-                                        <QrCodeSvg value={buildGenealogyQrText(n, genealogy)} size={80} />
-                                        <div className="qr-label-info">
-                                            <div className="qr-label-product">{n.name}</div>
-                                            <div>Batch: <strong>{n.batch_number}</strong></div>
-                                            {n.quantity && <div>Weight: <strong>{n.quantity} kg</strong></div>}
-                                            {n.date && <div>Date: <strong>{safeDate(n.date)}</strong></div>}
-                                            {n.info && <div><small>{n.info}</small></div>}
+                            {flatBatches(genealogy).filter(n => n.batch_number).map((n, i) => {
+                                const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+                                const scanHost = isLocal ? '192.168.31.162:3000' : window.location.host;
+                                const scanUrl = `${window.location.protocol}//${scanHost}/scan?batch=${encodeURIComponent(n.batch_number)}`;
+
+                                return (
+                                    <div key={i} className="qr-label-box">
+                                        <div className="qr-label-header">WATAN CENTRAL KITCHEN</div>
+                                        <div className="qr-label-body">
+                                            <a
+                                                href={scanUrl}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                title="Click or scan with Google Lens to view full interactive genealogy tree"
+                                                style={{ textDecoration: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center' }}
+                                            >
+                                                <QrCodeSvg value={scanUrl} size={90} />
+                                                <span style={{ fontSize: 10, color: 'var(--color-primary)', marginTop: 4, fontWeight: 700 }}>
+                                                    📱 Click or Scan
+                                                </span>
+                                            </a>
+                                            <div className="qr-label-info">
+                                                <div className="qr-label-product">{n.name}</div>
+                                                <div>Batch: <strong>{n.batch_number}</strong></div>
+                                                {n.quantity && <div>Weight: <strong>{n.quantity} kg</strong></div>}
+                                                {n.date && <div>Date: <strong>{safeDate(n.date)}</strong></div>}
+                                                {n.info && <div><small>{n.info}</small></div>}
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     </div>
                 </>

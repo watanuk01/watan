@@ -37,6 +37,8 @@ const PlaceOrder = () => {
         catch { return ''; }
     });
     const [submitting, setSubmitting] = useState(false);
+    const isAdmin = userProfile?.role === 'admin' || userProfile?.role === 'central_kitchen' || !userProfile?.restaurant_name;
+    const [selectedRestaurant, setSelectedRestaurant] = useState('Restaurant A');
 
     // Persist cart to localStorage
     useEffect(() => {
@@ -201,8 +203,11 @@ const PlaceOrder = () => {
 
         setSubmitting(true);
         try {
+            const targetRestaurantName = isAdmin ? selectedRestaurant : (userProfile?.restaurant_name || userProfile?.name || 'Restaurant A');
+            const targetRestaurantId = isAdmin ? selectedRestaurant.toLowerCase().replace(/\s+/g, '-') : (userProfile?.restaurant_id || currentUser.uid);
+
             // Check for existing pending order today (single order per day rule)
-            const existingOrder = await getTodaysPendingOrder(currentUser.uid);
+            const existingOrder = await getTodaysPendingOrder(targetRestaurantId);
 
             if (existingOrder) {
                 // Merge items into existing order
@@ -211,13 +216,13 @@ const PlaceOrder = () => {
             } else {
                 // Create new order
                 const result = await createOrder({
-                    restaurant_id: currentUser.uid,
-                    restaurant_name: userProfile?.restaurant_name || userProfile?.name || '',
+                    restaurant_id: targetRestaurantId,
+                    restaurant_name: targetRestaurantName,
                     items: cart,
                     created_by: currentUser.uid,
                     notes,
                 });
-                toast.success(`Order ${result.order_number} placed successfully!`);
+                toast.success(`Order ${result.order_number} placed for ${targetRestaurantName}!`);
             }
 
             // Reset cart and clear localStorage
@@ -242,11 +247,26 @@ const PlaceOrder = () => {
 
     return (
         <div className="page-content">
-            <div className="page-header">
+            <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
                 <div>
                     <h1 className="page-title">Order from Central Kitchen</h1>
                     <p className="page-subtitle">Browse items and add to your cart</p>
                 </div>
+                {isAdmin && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--color-surface)', padding: '6px 12px', borderRadius: 8, border: '1px solid var(--color-border)' }}>
+                        <span style={{ fontSize: 13, color: 'var(--color-text-secondary)', fontWeight: 600 }}>Ordering for:</span>
+                        <select
+                            value={selectedRestaurant}
+                            onChange={e => setSelectedRestaurant(e.target.value)}
+                            style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text-primary)', fontSize: 13, fontWeight: 600, outline: 'none' }}
+                        >
+                            <option value="Restaurant A">Restaurant A</option>
+                            <option value="Restaurant B">Restaurant B</option>
+                            <option value="Southall">Southall Branch</option>
+                            <option value="Ilford">Ilford Branch</option>
+                        </select>
+                    </div>
+                )}
             </div>
 
             <div className="place-order-layout">

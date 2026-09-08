@@ -491,129 +491,271 @@ export const getBatchGenealogyTree = async (searchTerm) => {
     try {
         const [batchesSnap, prodSnap, ordersSnap] = await Promise.all([
             getDocs(collection(db, BATCHES)).catch(() => ({ docs: [] })),
-            getDocs(collection(db, 'production_logs')).catch(() => ({ docs: [] })),
-            getDocs(collection(db, 'restaurant_orders')).catch(() => ({ docs: [] })),
+            getDocs(collection(db, 'productions')).catch(() => ({ docs: [] })),
+            getDocs(collection(db, 'orders')).catch(() => ({ docs: [] })),
         ]);
 
         const allBatches = batchesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
         const allProds = prodSnap.docs.map(d => ({ id: d.id, ...d.data() }));
         const allOrders = ordersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
 
-        // Find target batch
-        const target = allBatches.find(b =>
-            (b.batch_number || '').toLowerCase() === term ||
-            (b.id || '').toLowerCase() === term ||
-            (b.item_name || '').toLowerCase().includes(term)
+        // ── Helper: find batch by id or batch_number ──
+        const findBatch = (idOrNo) => allBatches.find(b =>
+            b.id === idOrNo || (b.batch_number || '').toLowerCase() === (idOrNo || '').toLowerCase()
         );
+
+        // ── Helper: find productions that consumed a given batch ──
+        const findProductionsUsingBatch = (batchId, batchNumber) =>
+            allProds.filter(p => {
+                const ings = p.ingredients || [];
+                return ings.some(ing =>
+                    (ing.consumed_batches || []).some(cb =>
+                        cb.batch_id === batchId || cb.batch_number === batchNumber
+                    )
+                );
+            });
+
+        // ── Helper: find orders that consumed a given batch (via batch_allocations or dispatch_qr_items) ──
+        const findOrdersUsingBatch = (batchId, batchNumber) =>
+            allOrders.filter(o => {
+                const allocs = o.batch_allocations || [];
+                return allocs.some(a =>
+                    (a.batches || []).some(b =>
+                        b.batch_id === batchId || b.batch_number === batchNumber
+                    )
+                );
+            });
+
+        // ── Helper: build order/delivery nodes for a batch ──
+        const buildOrderNodes = (batchId, batchNumber) => {
+            const orders = findOrdersUsingBatch(batchId, batchNumber);
+            return orders.map(o => {
+                const statusMap = {
+                    'pending': '⏳ Pending',
+                    'ready_for_pickup': '📦 Ready for Pickup',
+                    'assigned': '👤 Assigned',
+                    'out_for_delivery': '🚚 In Transit',
+                    'delivered': '✅ Delivered',
+                    'cancelled': '❌ Cancelled',
+                };
+                return {
+                    type: 'restaurant',
+                    name: o.restaurant_name || 'Restaurant',
+                    batch_number: o.order_number || '',
+                    info: `Order #${o.order_number || '—'} — ${statusMap[o.status] || o.status}`,
+                    date: o.delivered_at || o.dispatched_at || o.ready_at || o.created_at,
+                    quantity: o.items?.reduce((s, i) => s + (i.quantity || 0), 0),
+                    children: o.status === 'delivered' ? [{
+                        type: 'delivery',
+                        name: `Delivered to ${o.restaurant_name || 'Restaurant'}`,
+                        info: o.delivery_manager_name ? `Received by: ${o.delivery_manager_name}` : 'Delivery confirmed',
+                        date: o.delivered_at,
+                        children: [],
+                    }] : [],
+                };
+            });
+        };
+
+        // ── Helper: build production → output batch → orders chain for a consumed batch ──
+        const buildProductionChain = (batchId, batchNumber) => {
+            const productions = findProductionsUsingBatch(batchId, batchNumber);
+            return productions.map(prod => {
+                // Find the output batch created by this production
+                const outputBatch = allBatches.find(b =>
+                    b.production_id === prod.id || b.production_number === prod.production_number
+                );
+
+                const outputChildren = outputBatch
+                    ? buildOrderNodes(outputBatch.id, outputBatch.batch_number)
+                    : [];
+
+                return {
+                    type: 'production',
+                    name: prod.item_name || 'Production Run',
+                    batch_number: outputBatch?.batch_number || prod.production_number || '',
+                    quantity: prod.actual_output || prod.production_quantity,
+                    info: `${prod.production_number || 'Production'} — ${prod.status || 'completed'}${prod.chef_name ? ` by ${prod.chef_name}` : ''}`,
+                    date: prod.completed_at || prod.started_at,
+                    children: outputChildren,
+                };
+            });
+        };
+
+        // ── Find target batch ──
+        let target = allBatches.find(b =>
+            (b.batch_number || '').toLowerCase() === term ||
+            (b.id || '').toLowerCase() === term
+        );
+
+        // If not found by exact match, try partial item name match
+        if (!target) {
+            target = allBatches.find(b =>
+                (b.item_name || '').toLowerCase().includes(term)
+            );
+        }
+
+        // Also check if searchTerm matches a production number
+        if (!target) {
+            const prod = allProds.find(p =>
+                (p.production_number || '').toLowerCase() === term
+            );
+            if (prod && prod.output_batch_id) {
+                target = findBatch(prod.output_batch_id);
+            }
+        }
+
+        // Also check if searchTerm matches an order number or document ID
+        if (!target) {
+            const order = allOrders.find(o =>
+                (o.order_number || '').toLowerCase() === term ||
+                (o.id || '').toLowerCase() === term
+            );
+            if (order?.batch_allocations?.length) {
+                // Use the first allocated batch
+                const firstBatchId = order.batch_allocations[0]?.batches?.[0]?.batch_id;
+                const firstBatchNo = order.batch_allocations[0]?.batches?.[0]?.batch_number;
+                if (firstBatchId) target = findBatch(firstBatchId);
+                if (!target && firstBatchNo) target = findBatch(firstBatchNo);
+            }
+            if (!target && order?.dispatch_qr_items?.length) {
+                const bNo = order.dispatch_qr_items[0]?.batch_numbers?.[0];
+                if (bNo) target = findBatch(bNo);
+            }
+        }
 
         if (!target) return null;
 
-        // Find parent batch
-        let parentBatch = null;
-        if (target.parent_batch_id || target.parent_batch_no) {
-            parentBatch = allBatches.find(b =>
-                b.id === target.parent_batch_id ||
-                b.batch_number === target.parent_batch_no
-            );
+        // ── Walk UP: find the root ancestor ──
+        // If target is a production output batch, find the source butcher batches
+        let rootBatches = [target]; // may expand to multiple roots
+        let productionSource = null;
+
+        if (target.source === 'production' && target.source_batch_ids?.length) {
+            // Walk from production output → source butcher child batches
+            rootBatches = target.source_batch_ids
+                .map(id => findBatch(id))
+                .filter(Boolean);
+            productionSource = target;
+        } else if (target.source === 'production' && target.production_id) {
+            // Find the production, then its source batches
+            const prod = allProds.find(p => p.id === target.production_id);
+            if (prod) {
+                const sourceIds = [];
+                (prod.ingredients || []).forEach(ing => {
+                    (ing.consumed_batches || []).forEach(cb => {
+                        if (cb.batch_id) sourceIds.push(cb.batch_id);
+                    });
+                });
+                if (sourceIds.length) {
+                    rootBatches = sourceIds.map(id => findBatch(id)).filter(Boolean);
+                    productionSource = target;
+                }
+            }
         }
 
-        // Find child cut batches
-        const childCuts = allBatches.filter(b =>
-            b.parent_batch_id === target.id ||
-            b.parent_batch_no === target.batch_number
-        );
-
-        // Productions that used this batch
-        const productions = allProds.filter(p => {
-            const used = p.used_batches || p.ingredients || [];
-            return used.some(b =>
-                b.batch_id === target.id ||
-                b.batch_number === target.batch_number
-            );
-        });
-
-        // Restaurant orders that contain this batch
-        const deliveries = allOrders.filter(o => {
-            const items = o.items || [];
-            return items.some(i =>
-                i.batch_id === target.id ||
-                i.batch_number === target.batch_number
-            );
-        });
-
-        // Build vendor node
-        const vendorNode = {
-            type: 'vendor',
-            name: target.vendor_name || target.supplier || (parentBatch?.vendor_name) || 'Meat Supplier',
-            info: 'Supplier / Vendor Delivery',
-            children: [],
+        // For each root batch, walk up to find the ultimate parent
+        const walkUpToRoot = (batch) => {
+            const chain = [batch];
+            let current = batch;
+            while (current.parent_batch_id || current.parent_batch_no) {
+                const parentId = current.parent_batch_id;
+                const parentNo = current.parent_batch_no;
+                const parent = findBatch(parentId) ||
+                    allBatches.find(b => b.batch_number === parentNo);
+                if (!parent || chain.find(c => c.id === parent.id)) break;
+                chain.unshift(parent);
+                current = parent;
+            }
+            return chain;
         };
 
-        // Build parent batch node (if exists, it wraps the target)
-        const buildTargetNode = () => {
-            // Child cut nodes
-            const cutNodes = childCuts.map(cut => {
-                const prodNodes = productions
-                    .filter(p => (p.used_batches || p.ingredients || []).some(b => b.batch_number === cut.batch_number))
-                    .map(p => ({
-                        type: 'production',
-                        name: p.product_name || p.recipe_name || 'Production Run',
-                        info: `Qty: ${p.quantity_produced || '?'}`,
-                        date: p.production_date || p.date,
-                        children: deliveries.map(o => ({
-                            type: 'restaurant',
-                            name: o.restaurant_name || o.branch || 'Restaurant Branch',
-                            info: `Order #${o.order_number || o.id?.substring(0, 8) || '—'}`,
-                            date: o.order_date || o.created_at,
-                            children: [],
-                        })),
-                    }));
+        // ── Build the tree from the deepest root ──
+        // Take the first root batch and walk up
+        const primaryRoot = rootBatches[0] || target;
+        const ancestorChain = walkUpToRoot(primaryRoot);
+        const ultimateRoot = ancestorChain[0];
 
-                return {
-                    type: 'child',
-                    name: cut.item_name || cut.cut_name || 'Cut Batch',
-                    batch_number: cut.batch_number || cut.id,
-                    quantity: cut.quantity || cut.remaining_weight_kg,
-                    date: cut.expiry_date,
-                    info: cut.is_waste ? 'Waste/Trim' : 'Usable Cut',
-                    children: prodNodes,
-                };
-            });
+        // Vendor node
+        const vendorName = ultimateRoot.vendor_name || ultimateRoot.supplier ||
+            (ancestorChain.length > 1 ? ancestorChain[0].vendor_name : null) ||
+            'Meat Supplier';
+
+        // ── Build tree recursively from the root batch DOWN ──
+        const buildBatchNode = (batch, depth = 0) => {
+            // Find child cut batches
+            const childCuts = allBatches.filter(b =>
+                (b.parent_batch_id === batch.id || b.parent_batch_no === batch.batch_number) &&
+                b.id !== batch.id
+            );
+
+            const children = [];
+
+            if (childCuts.length > 0) {
+                // Has child cuts — build subtree for each
+                for (const cut of childCuts) {
+                    const cutChildren = [];
+
+                    // Find productions using this cut
+                    const prodChain = buildProductionChain(cut.id, cut.batch_number);
+                    cutChildren.push(...prodChain);
+
+                    // If no production but has order allocations directly
+                    if (prodChain.length === 0) {
+                        const orderNodes = buildOrderNodes(cut.id, cut.batch_number);
+                        cutChildren.push(...orderNodes);
+                    }
+
+                    children.push({
+                        type: 'child',
+                        name: cut.item_name || cut.cut_name || 'Cut Batch',
+                        batch_number: cut.batch_number || cut.id,
+                        quantity: cut.weight_kg || cut.quantity || cut.remaining_weight_kg,
+                        date: cut.created_at || cut.expiry_date,
+                        info: cut.is_waste ? 'Waste/Trim' : (cut.destination_item_name ? `→ ${cut.destination_item_name}` : 'Usable Cut'),
+                        children: cutChildren,
+                    });
+                }
+            } else {
+                // Leaf batch — check for productions and orders
+                const prodChain = buildProductionChain(batch.id, batch.batch_number);
+                children.push(...prodChain);
+
+                if (prodChain.length === 0) {
+                    const orderNodes = buildOrderNodes(batch.id, batch.batch_number);
+                    children.push(...orderNodes);
+                }
+            }
+
+            // If this is the production source batch we walked up from, ensure the production output is in the tree
+            if (productionSource && children.length === 0) {
+                const orderNodes = buildOrderNodes(productionSource.id, productionSource.batch_number);
+                if (orderNodes.length) children.push(...orderNodes);
+            }
+
+            const nodeType = batch.is_cut ? 'child' :
+                (batch.parent_batch_id ? 'child' :
+                    (batch.source === 'production' ? 'production' : 'parent'));
 
             return {
-                type: target.parent_batch_id ? 'parent' : 'butcher',
-                name: target.item_name || 'Whole Meat Batch',
-                batch_number: target.batch_number || target.id,
-                quantity: target.weight_kg || target.quantity || target.initial_quantity,
-                date: target.received_at ? (typeof target.received_at === 'string' ? target.received_at : undefined) : undefined,
-                info: target.is_cut ? 'Processed Cut' : 'Parent Batch',
-                children: cutNodes,
+                type: depth === 0 ? 'parent' : nodeType,
+                name: batch.item_name || 'Batch',
+                batch_number: batch.batch_number || batch.id,
+                quantity: batch.weight_kg || batch.quantity || batch.initial_quantity,
+                date: batch.received_at || batch.created_at,
+                info: batch.is_cut ? 'Processed Cut' :
+                    (batch.source === 'production' ? `Production: ${batch.production_number || ''}` : 'Parent Batch'),
+                children,
             };
         };
 
-        const targetNode = buildTargetNode();
-
-        if (parentBatch) {
-            return {
-                type: 'vendor',
-                name: vendorNode.name,
-                info: 'Supplier / Vendor Delivery',
-                children: [{
-                    type: 'parent',
-                    name: parentBatch.item_name || 'Whole Meat',
-                    batch_number: parentBatch.batch_number || parentBatch.id,
-                    quantity: parentBatch.weight_kg || parentBatch.quantity,
-                    info: 'Parent Batch',
-                    children: [targetNode],
-                }],
-            };
-        }
+        const rootNode = buildBatchNode(ultimateRoot, 0);
 
         return {
             type: 'vendor',
-            name: vendorNode.name,
+            name: vendorName,
             info: 'Supplier / Vendor Delivery',
-            children: [targetNode],
+            date: ultimateRoot.received_at,
+            children: [rootNode],
         };
     } catch (err) {
         console.error('Error fetching batch genealogy:', err);

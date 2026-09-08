@@ -1,0 +1,708 @@
+/* ──────────────────────────────────────────
+   QR SCAN PAGE — Public Traceability & Genealogy Tree
+   Mobile-first, premium dark-gold design
+   ────────────────────────────────────────── */
+
+.scan-page {
+    min-height: 100vh;
+    background: linear-gradient(135deg, #0b0d13 0%, #151824 50%, #0b0d13 100%);
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    color: #f3f4f6;
+}
+
+/* ─── Header ─── */
+.scan-header {
+    text-align: center;
+    padding: 36px 20px 20px;
+    background: linear-gradient(180deg, rgba(201, 169, 110, 0.15) 0%, transparent 100%);
+    border-bottom: 1px solid rgba(201, 169, 110, 0.15);
+}
+
+.scan-header-inner {
+    max-width: 800px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.scan-logo {
+    width: 60px;
+    height: 60px;
+    border-radius: 14px;
+    margin-bottom: 12px;
+    box-shadow: 0 8px 24px rgba(201, 169, 110, 0.25);
+    background: #fff;
+    padding: 4px;
+}
+
+.scan-badge-verified {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    color: #22c55e;
+    background: rgba(34, 197, 94, 0.12);
+    border: 1px solid rgba(34, 197, 94, 0.3);
+    padding: 4px 12px;
+    border-radius: 20px;
+    margin-bottom: 8px;
+}
+
+.scan-header h1 {
+    font-size: 24px;
+    font-weight: 800;
+    color: #e5c388;
+    margin: 0 0 6px;
+    letter-spacing: -0.3px;
+}
+
+.scan-header p {
+    font-size: 13px;
+    color: #9ca3af;
+    margin: 0;
+    max-width: 540px;
+    line-height: 1.4;
+}
+
+/* ─── Top Action Chips ─── */
+.scan-top-actions {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 16px;
+}
+
+.scan-chip-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #d1d5db;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    padding: 6px 14px;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.scan-chip-btn:hover {
+    background: rgba(201, 169, 110, 0.15);
+    border-color: rgba(201, 169, 110, 0.4);
+    color: #e5c388;
+}
+
+/* ─── Order Banner ─── */
+.scan-banner-wrapper {
+    max-width: 760px;
+    margin: 20px auto;
+    padding: 0 16px;
+}
+
+.scan-order-banner {
+    background: rgba(20, 24, 36, 0.85);
+    border: 1px solid rgba(201, 169, 110, 0.25);
+    border-radius: 14px;
+    padding: 18px 20px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(8px);
+}
+
+.scan-order-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding-bottom: 12px;
+    margin-bottom: 14px;
+}
+
+.scan-order-tag {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: #9ca3af;
+    letter-spacing: 0.5px;
+}
+
+.scan-order-title {
+    font-size: 20px;
+    font-weight: 800;
+    color: #fff;
+    margin: 2px 0 0;
+}
+
+.scan-status-pill {
+    padding: 4px 12px;
+    border-radius: 16px;
+    font-size: 12px;
+    font-weight: 700;
+    background: rgba(59, 130, 246, 0.15);
+    color: #60a5fa;
+    border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.scan-status-pill.delivered {
+    background: rgba(34, 197, 94, 0.15);
+    color: #4ade80;
+    border-color: rgba(34, 197, 94, 0.3);
+}
+
+.scan-order-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+}
+
+.scan-meta-box {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    padding: 10px 12px;
+}
+
+.scan-meta-lbl {
+    font-size: 11px;
+    color: #9ca3af;
+    text-transform: uppercase;
+    font-weight: 600;
+    margin-bottom: 3px;
+}
+
+.scan-meta-val {
+    font-size: 14px;
+    font-weight: 700;
+    color: #f3f4f6;
+}
+
+.scan-meta-val.gold {
+    color: #e5c388;
+}
+
+.scan-items-tabs {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    flex-wrap: wrap;
+}
+
+.scan-tabs-lbl {
+    font-size: 12px;
+    color: #9ca3af;
+    font-weight: 600;
+}
+
+.scan-item-tab {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 6px 12px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #d1d5db;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.scan-item-tab.active {
+    background: rgba(201, 169, 110, 0.2);
+    border-color: #c9a96e;
+    color: #e5c388;
+}
+
+/* ─── Search Bar ─── */
+.scan-search {
+    display: flex;
+    gap: 10px;
+    padding: 16px;
+    max-width: 640px;
+    margin: 0 auto;
+}
+
+.scan-search-wrap {
+    flex: 1;
+    position: relative;
+}
+
+.scan-search-icon {
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #9ca3af;
+    font-size: 20px;
+}
+
+.scan-search-wrap input {
+    width: 100%;
+    padding: 12px 14px 12px 44px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(201, 169, 110, 0.25);
+    border-radius: 10px;
+    color: #f3f4f6;
+    font-size: 14px;
+    outline: none;
+    box-sizing: border-box;
+}
+
+.scan-search-wrap input:focus {
+    border-color: #c9a96e;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.scan-search-btn {
+    padding: 12px 20px;
+    background: linear-gradient(135deg, #c9a96e, #b8944f);
+    color: #0b0d13;
+    font-weight: 700;
+    font-size: 14px;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+/* ─── View Mode Toggle ─── */
+.scan-view-toggle-bar {
+    max-width: 760px;
+    margin: 16px auto 8px;
+    padding: 0 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+.scan-view-toggle {
+    display: inline-flex;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 4px;
+    gap: 4px;
+}
+
+.toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 18px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 700;
+    border: none;
+    background: transparent;
+    color: #9ca3af;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.toggle-btn.active {
+    background: #c9a96e;
+    color: #0b0d13;
+    box-shadow: 0 2px 8px rgba(201, 169, 110, 0.3);
+}
+
+.scan-mobile-hint {
+    font-size: 11px;
+    color: #6b7280;
+    text-align: center;
+}
+
+/* ─── Tree View Styles ─── */
+.scan-tree-wrapper {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 24px 16px 40px;
+    box-sizing: border-box;
+}
+
+.scan-tree-container {
+    min-width: min-content;
+    margin: 0 auto;
+    display: flex;
+    justify-content: center;
+}
+
+.tree-branch-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.tree-node-wrapper {
+    display: flex;
+    justify-content: center;
+}
+
+.scan-tree-node {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    background: rgba(22, 26, 38, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-left: 4px solid #c9a96e;
+    border-radius: 12px;
+    padding: 14px 18px;
+    width: 320px;
+    box-sizing: border-box;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    text-align: left;
+    transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.scan-tree-node:hover {
+    transform: translateY(-2px);
+    border-color: rgba(201, 169, 110, 0.4);
+}
+
+.scan-tree-node-icon {
+    font-size: 24px;
+    padding-top: 2px;
+    flex-shrink: 0;
+}
+
+.scan-tree-node-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.scan-tree-node-tag {
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 4px;
+}
+
+.scan-tree-node-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #fff;
+    line-height: 1.3;
+    margin-bottom: 4px;
+    word-break: break-word;
+}
+
+.scan-tree-node-batch {
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 11px;
+    font-weight: 700;
+    color: #e5c388;
+    background: rgba(201, 169, 110, 0.12);
+    border: 1px solid rgba(201, 169, 110, 0.25);
+    padding: 2px 6px;
+    border-radius: 4px;
+    display: inline-block;
+    margin-bottom: 6px;
+}
+
+.scan-tree-node-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 4px;
+}
+
+.meta-pill {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 12px;
+}
+
+.meta-pill.qty {
+    background: rgba(59, 130, 246, 0.15);
+    color: #93c5fd;
+    border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.meta-pill.date {
+    background: rgba(255, 255, 255, 0.05);
+    color: #9ca3af;
+}
+
+.scan-tree-node-info {
+    font-size: 12px;
+    color: #9ca3af;
+    line-height: 1.3;
+    margin-top: 4px;
+}
+
+.scan-tree-connector {
+    width: 2px;
+    height: 24px;
+    background: linear-gradient(180deg, rgba(201, 169, 110, 0.4), rgba(201, 169, 110, 0.15));
+    margin: 0 auto;
+}
+
+.scan-tree-branches {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 16px;
+}
+
+/* ─── Timeline View Styles ─── */
+.scan-timeline {
+    max-width: 580px;
+    margin: 0 auto;
+    padding: 24px 20px 40px;
+}
+
+.scan-step {
+    display: flex;
+    gap: 16px;
+    position: relative;
+}
+
+.scan-step-line {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 36px;
+    flex-shrink: 0;
+}
+
+.scan-step-dot {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    z-index: 1;
+}
+
+.scan-step-connector {
+    width: 2px;
+    flex: 1;
+    min-height: 28px;
+    background: linear-gradient(180deg, rgba(201, 169, 110, 0.35), rgba(201, 169, 110, 0.08));
+}
+
+.scan-step-content {
+    flex: 1;
+    padding-bottom: 24px;
+}
+
+.scan-step-last .scan-step-content {
+    padding-bottom: 0;
+}
+
+.scan-step-tag {
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 3px;
+}
+
+.scan-step-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #f3f4f6;
+    margin-bottom: 3px;
+}
+
+.scan-step-batch {
+    font-family: monospace;
+    font-size: 11px;
+    color: #e5c388;
+    background: rgba(201, 169, 110, 0.1);
+    border: 1px solid rgba(201, 169, 110, 0.2);
+    padding: 2px 6px;
+    border-radius: 4px;
+    display: inline-block;
+    margin-bottom: 5px;
+}
+
+.scan-step-meta {
+    display: flex;
+    gap: 12px;
+    font-size: 12px;
+    color: #9ca3af;
+}
+
+.scan-step-info {
+    font-size: 12px;
+    color: #9ca3af;
+    margin-top: 4px;
+}
+
+/* ─── Loading & Error ─── */
+.scan-loading {
+    text-align: center;
+    padding: 60px 20px;
+}
+
+.scan-spinner {
+    width: 44px;
+    height: 44px;
+    border: 3px solid rgba(201, 169, 110, 0.15);
+    border-top-color: #c9a96e;
+    border-radius: 50%;
+    animation: scan-spin 0.8s linear infinite;
+    margin: 0 auto 16px;
+}
+
+@keyframes scan-spin {
+    to { transform: rotate(360deg); }
+}
+
+.scan-error {
+    text-align: center;
+    padding: 60px 20px;
+    max-width: 500px;
+    margin: 0 auto;
+}
+
+.scan-error h3 {
+    font-size: 18px;
+    font-weight: 700;
+    color: #f3f4f6;
+    margin: 12px 0 6px;
+}
+
+.scan-error p {
+    font-size: 14px;
+    color: #9ca3af;
+}
+
+/* ─── Scan Help Modal ─── */
+.scan-help-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    padding: 16px;
+}
+
+.scan-help-card {
+    background: #161a26;
+    border: 1px solid rgba(201, 169, 110, 0.3);
+    border-radius: 16px;
+    max-width: 460px;
+    width: 100%;
+    padding: 24px;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+}
+
+.scan-help-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding-bottom: 12px;
+    margin-bottom: 16px;
+}
+
+.scan-help-header h3 {
+    margin: 0;
+    font-size: 16px;
+    color: #e5c388;
+}
+
+.scan-help-close {
+    background: transparent;
+    border: none;
+    color: #9ca3af;
+    cursor: pointer;
+}
+
+.help-step {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+.help-num {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #c9a96e;
+    color: #0b0d13;
+    font-weight: 800;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.help-step strong {
+    font-size: 14px;
+    color: #f3f4f6;
+}
+
+.help-step p {
+    font-size: 12px;
+    color: #9ca3af;
+    margin: 2px 0 0;
+}
+
+/* ─── Footer ─── */
+.scan-footer {
+    text-align: center;
+    padding: 32px 20px;
+    border-top: 1px solid rgba(201, 169, 110, 0.12);
+    margin-top: 30px;
+    background: rgba(0, 0, 0, 0.2);
+}
+
+.scan-footer-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 700;
+    color: #e5c388;
+    margin-bottom: 6px;
+}
+
+.scan-footer p {
+    font-size: 12px;
+    color: #6b7280;
+    margin: 2px 0;
+}
+
+.scan-copyright {
+    font-size: 11px;
+    color: #4b5563;
+    margin-top: 8px !important;
+}
+
+/* ─── Responsive ─── */
+@media (max-width: 480px) {
+    .scan-header h1 {
+        font-size: 20px;
+    }
+    .scan-order-top {
+        flex-direction: column;
+        gap: 8px;
+    }
+    .scan-tree-node {
+        width: 280px;
+        padding: 12px 14px;
+    }
+}

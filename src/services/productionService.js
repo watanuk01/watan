@@ -359,6 +359,90 @@ export const completeProduction = async (productionId, { actual_output, complete
     const totalIngredientCost = production.total_ingredient_cost || 0;
     const updatedIngredients = production.ingredients || [];
 
+    // ── Build traceability chain from consumed batches ──
+    const BATCHES_COLL = 'inventory_batches';
+    const sourceBatchIds = [];
+    const traceabilityChain = [];
+
+    for (const ing of updatedIngredients) {
+        if (!ing.consumed_batches?.length) continue;
+        for (const cb of ing.consumed_batches) {
+            if (!cb.batch_id) continue;
+            sourceBatchIds.push(cb.batch_id);
+            try {
+                const cbSnap = await getDoc(doc(db, BATCHES_COLL, cb.batch_id));
+                if (!cbSnap.exists()) continue;
+                const cbData = cbSnap.data();
+
+                // If this batch has a parent (butcher child cut), walk up the ancestry
+                if (cbData.parent_batch_id || cbData.parent_batch_no) {
+                    // Find parent batch
+                    let parentData = null;
+                    if (cbData.parent_batch_id) {
+                        const pSnap = await getDoc(doc(db, BATCHES_COLL, cbData.parent_batch_id));
+                        if (pSnap.exists()) parentData = { id: pSnap.id, ...pSnap.data() };
+                    }
+
+                    traceabilityChain.push({
+                        ingredient_name: ing.item_name,
+                        vendor: cbData.vendor_name || cbData.supplier || parentData?.vendor_name || parentData?.supplier || 'Meat Supplier',
+                        parent_batch: parentData ? {
+                            batch_id: parentData.id,
+                            batch_number: parentData.batch_number,
+                            item_name: parentData.item_name,
+                            weight_kg: parentData.weight_kg || parentData.quantity,
+                            po_number: parentData.po_number || '',
+                            vendor_name: parentData.vendor_name || parentData.supplier || '',
+                            received_at: parentData.received_at || null,
+                        } : null,
+                        child_batch: {
+                            batch_id: cb.batch_id,
+                            batch_number: cb.batch_number || cbData.batch_number,
+                            item_name: cbData.item_name || ing.item_name,
+                            weight_kg: cbData.weight_kg || cbData.quantity,
+                            is_cut: cbData.is_cut || false,
+                        },
+                        quantity_used: cb.quantity_used,
+                    });
+                } else if (cbData.source === 'production' && cbData.production_id) {
+                    // Already a production batch — store its info
+                    traceabilityChain.push({
+                        ingredient_name: ing.item_name,
+                        vendor: cbData.vendor || 'Central Kitchen',
+                        source_production: {
+                            production_id: cbData.production_id,
+                            batch_number: cbData.batch_number,
+                            item_name: cbData.item_name,
+                        },
+                        child_batch: {
+                            batch_id: cb.batch_id,
+                            batch_number: cb.batch_number || cbData.batch_number,
+                            item_name: cbData.item_name || ing.item_name,
+                            weight_kg: cbData.weight_kg || cbData.quantity,
+                        },
+                        quantity_used: cb.quantity_used,
+                    });
+                } else {
+                    // Regular batch (e.g. from PO)
+                    traceabilityChain.push({
+                        ingredient_name: ing.item_name,
+                        vendor: cbData.vendor_name || cbData.supplier || cbData.vendor || 'Supplier',
+                        child_batch: {
+                            batch_id: cb.batch_id,
+                            batch_number: cb.batch_number || cbData.batch_number,
+                            item_name: cbData.item_name || ing.item_name,
+                            weight_kg: cbData.weight_kg || cbData.quantity,
+                            po_number: cbData.po_number || '',
+                        },
+                        quantity_used: cb.quantity_used,
+                    });
+                }
+            } catch (err) {
+                console.warn('Traceability lookup failed for batch:', cb.batch_id, err);
+            }
+        }
+    }
+
     // ── Create cooked meat batch ──
     const itemDoc = await getDoc(doc(db, ITEMS_COLLECTION, production.item_id));
     const itemData = itemDoc.exists() ? itemDoc.data() : {};
@@ -367,6 +451,15 @@ export const completeProduction = async (productionId, { actual_output, complete
     const expiryDate = new Date(now.getTime() + expiryDays * 24 * 60 * 60 * 1000);
 
     const totalSellingPrice = production.total_selling_price || 0;
+
+    const finalTraceabilityChain = traceabilityChain.map(tc => ({
+        ...tc,
+        production_id: productionId,
+        production_number: production.production_number,
+        product_name: production.item_name,
+        production_quantity: actualOutput,
+        chef_name: production.chef_name || completed_by || '',
+    }));
 
     const newBatch = await addBatch({
         item_id: production.item_id,
@@ -381,7 +474,10 @@ export const completeProduction = async (productionId, { actual_output, complete
         vendor: 'Central Kitchen',
         notes: `Produced from ${production.production_number}`,
         production_id: productionId,
+        production_number: production.production_number,
         source: 'production',
+        source_batch_ids: sourceBatchIds,
+        traceability_chain: finalTraceabilityChain,
         source_ingredients: updatedIngredients.map(i => ({
             item_id: i.item_id,
             item_name: i.item_name,

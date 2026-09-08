@@ -9,7 +9,8 @@ import { getItems } from '../../services/inventoryService';
 import {
     MdRefresh, MdSearch, MdFilterList, MdViewModule, MdViewList,
     MdFileDownload, MdLocalShipping, MdCheckBox, MdCheckBoxOutlineBlank,
-    MdVisibility, MdCancel, MdClose, MdPending, MdViewColumn
+    MdVisibility, MdCancel, MdClose, MdPending, MdViewColumn, MdQrCode2,
+    MdAccountTree
 } from 'react-icons/md';
 import Pagination from '../../components/common/Pagination';
 import toast from 'react-hot-toast';
@@ -387,6 +388,153 @@ const TodaysOrders = () => {
             hour: '2-digit', minute: '2-digit',
         });
     };
+
+    // ── Print QR Labels for dispatch ──
+    const printQrLabels = (order) => {
+        const qrItems = order.dispatch_qr_items || [];
+        const batchAllocs = order.batch_allocations || [];
+
+        // Build label data with full genealogy tree in text format for Google Lens
+        const labels = qrItems.length > 0
+            ? qrItems.map(q => {
+                const lines = [
+                    `WATAN CENTRAL KITCHEN`,
+                    `BATCH GENEALOGY TREE`,
+                    `Order: ${order.order_number || '—'}`,
+                    `Restaurant: ${order.restaurant_name || 'Restaurant'}`,
+                    `Product: ${q.item_name} (${q.quantity} ${q.unit || 'kg'})`,
+                ];
+                if (q.batch_numbers?.length) lines.push(`Batches: ${q.batch_numbers.join(', ')}`);
+                lines.push(``);
+                lines.push(`SUPPLY CHAIN FLOW:`);
+
+                if (q.traceability?.length) {
+                    q.traceability.forEach(step => {
+                        if (step.vendor) lines.push(`1. Vendor: ${step.vendor}`);
+                        if (step.parent_batch?.batch_number) {
+                            lines.push(`  ↓`);
+                            lines.push(`2. Parent Carcass: ${step.parent_batch.batch_number} (${step.parent_batch.item_name || 'Meat'}${step.parent_batch.weight_kg ? ` - ${step.parent_batch.weight_kg}kg` : ''})`);
+                        }
+                        if (step.child_batch?.batch_number) {
+                            lines.push(`  ↓`);
+                            lines.push(`3. Butcher Cut: ${step.child_batch.batch_number} (${step.child_batch.item_name || 'Cut'}${step.child_batch.weight_kg ? ` - ${step.child_batch.weight_kg}kg` : ''})`);
+                        }
+                        const prodRunNo = step.production_number || step.source_production?.production_number;
+                        const prodBatchNo = step.production_batch || step.source_production?.batch_number || q.batch_numbers?.[0];
+                        const prodName = step.production_item || step.product_name || q.item_name;
+                        const prodWeight = step.production_quantity ? ` - ${step.production_quantity}kg` : '';
+
+                        if (prodRunNo || prodBatchNo) {
+                            lines.push(`  ↓`);
+                            const runLabel = prodRunNo ? `Run ${prodRunNo}` : `Batch ${prodBatchNo}`;
+                            lines.push(`4. Production: ${runLabel} (${prodName}${prodWeight})`);
+                        }
+                    });
+                } else if (q.batch_numbers?.length) {
+                    lines.push(`1. Production Batch: ${q.batch_numbers.join(', ')} (${q.item_name})`);
+                }
+                lines.push(`  ↓`);
+                lines.push(`5. Destination: ${order.restaurant_name || 'Restaurant'} (${q.quantity} ${q.unit || 'kg'})`);
+                lines.push(`Status: ${order.status === 'delivered' ? 'Delivered' : 'Ready for Pickup / Dispatched'}`);
+
+                const qrText = lines.join('\n');
+
+                return {
+                    item_name: q.item_name,
+                    quantity: q.quantity,
+                    unit: q.unit || 'kg',
+                    batch_numbers: q.batch_numbers || [],
+                    qr_text: qrText,
+                    qr_img_url: `https://api.qrserver.com/v1/create-qr-code/?size=350x350&ecc=L&margin=1&data=${encodeURIComponent(qrText)}`,
+                };
+            })
+            : batchAllocs.map(a => {
+                const batchNos = (a.batches || []).map(b => b.batch_number || b.batch_id);
+                const lines = [
+                    `WATAN CENTRAL KITCHEN`,
+                    `BATCH GENEALOGY TREE`,
+                    `Order: ${order.order_number || '—'}`,
+                    `Restaurant: ${order.restaurant_name || 'Restaurant'}`,
+                    `Product: ${a.item_name} (${a.quantity} kg)`,
+                ];
+                if (batchNos.length) lines.push(`Batches: ${batchNos.join(', ')}`);
+                lines.push(``);
+                lines.push(`SUPPLY CHAIN FLOW:`);
+                lines.push(`Order: ${order.order_number || '—'} → ${order.restaurant_name || 'Restaurant'}`);
+                lines.push(`Status: ${order.status === 'delivered' ? 'Delivered' : 'Ready for Pickup'}`);
+
+                const qrText = lines.join('\n');
+
+                return {
+                    item_name: a.item_name,
+                    quantity: a.quantity,
+                    unit: 'kg',
+                    batch_numbers: batchNos,
+                    qr_text: qrText,
+                    qr_img_url: `https://api.qrserver.com/v1/create-qr-code/?size=350x350&ecc=L&margin=1&data=${encodeURIComponent(qrText)}`,
+                };
+            });
+
+        if (labels.length === 0) {
+            toast('No QR label data available for this order', { icon: 'ℹ️' });
+            return;
+        }
+
+        const printWindow = window.open('', '_blank', 'width=800,height=600');
+        if (!printWindow) { toast.error('Popup blocked — please allow popups'); return; }
+
+        const cardsHTML = labels.map(lb => `
+            <div class="qr-card">
+                <div class="qr-header">
+                    <div class="qr-company">WATAN CENTRAL KITCHEN</div>
+                    <div class="qr-order">Order: ${order.order_number || '—'}</div>
+                </div>
+                <div class="qr-body">
+                    <div class="qr-info">
+                        <div class="qr-item">${lb.item_name}</div>
+                        <div class="qr-qty">${lb.quantity} ${lb.unit}</div>
+                        <div class="qr-restaurant">📍 ${order.restaurant_name || 'Restaurant'}</div>
+                        <div class="qr-batches">Batches: ${lb.batch_numbers.join(', ') || '—'}</div>
+                    </div>
+                    <div class="qr-code-area">
+                        <img src="${lb.qr_img_url}" alt="QR Code" />
+                    </div>
+                </div>
+                <div class="qr-footer">Scan with Google Lens to view full batch genealogy tree in search</div>
+            </div>
+        `).join('');
+
+        printWindow.document.write(`
+            <html><head><title>QR Labels — ${order.order_number || 'Order'}</title>
+            <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body { font-family: 'Segoe UI', Arial, sans-serif; padding: 24px; background: #fff; color: #111; }
+                .qr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 24px; }
+                .qr-card { border: 2px solid #111; border-radius: 12px; padding: 20px; page-break-inside: avoid; background: #fff; }
+                .qr-header { border-bottom: 1.5px solid #222; padding-bottom: 8px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+                .qr-company { font-weight: 800; font-size: 15px; letter-spacing: 0.5px; }
+                .qr-order { font-size: 13px; font-weight: 700; color: #444; }
+                .qr-body { display: flex; gap: 20px; align-items: center; justify-content: space-between; }
+                .qr-info { flex: 1; }
+                .qr-item { font-size: 20px; font-weight: 800; margin-bottom: 6px; color: #111; }
+                .qr-qty { font-size: 28px; font-weight: 900; color: #b8944f; margin-bottom: 8px; }
+                .qr-restaurant { font-size: 15px; font-weight: 600; color: #333; margin-bottom: 6px; }
+                .qr-batches { font-size: 12px; color: #666; font-family: monospace; }
+                
+                .qr-code-area { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+                .qr-code-area img { width: 170px; height: 170px; display: block; border-radius: 4px; }
+                
+                .qr-footer { text-align: center; font-size: 11px; font-weight: 600; color: #666; margin-top: 16px; border-top: 1px solid #eee; padding-top: 10px; }
+                @media print {
+                    body { padding: 0; background: #fff; }
+                    .qr-card { border-width: 1.5px; }
+                }
+            </style></head>
+            <body><div class="qr-grid">${cardsHTML}</div>
+            <script>setTimeout(()=>window.print(),600);</` + `script></body></html>
+        `);
+        printWindow.document.close();
+    };
     // -----------------------------------
 
     // Status helper for colored badges
@@ -745,6 +893,19 @@ const TodaysOrders = () => {
                                                     >
                                                         <MdVisibility />
                                                     </button>
+                                                    {order.status !== 'cancelled' && (
+                                                        <button
+                                                            className="btn-action"
+                                                            title="View Genealogy Tree"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                window.open(`/scan?order=${order.id}`, '_blank');
+                                                            }}
+                                                            style={{ color: '#22c55e' }}
+                                                        >
+                                                            <MdAccountTree />
+                                                        </button>
+                                                    )}
                                                     {order.status !== 'cancelled' && order.status !== 'completed' && (
                                                         <button
                                                             className="btn-action delete"
@@ -839,9 +1000,37 @@ const TodaysOrders = () => {
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                {detailOrder.items?.map((item, idx) => (
-                                                    <tr key={idx}>
-                                                        <td><strong>{item.item_name}</strong></td>
+                                                 {detailOrder.items?.map((item, idx) => (
+                                                     <tr key={idx}>
+                                                         <td>
+                                                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                                                                 <strong>{item.item_name}</strong>
+                                                                 {detailOrder.status !== 'pending' && detailOrder.status !== 'cancelled' && (
+                                                                     <button
+                                                                         type="button"
+                                                                         className="btn btn-sm"
+                                                                         style={{
+                                                                             padding: '3px 8px',
+                                                                             fontSize: '11px',
+                                                                             fontWeight: 700,
+                                                                             background: 'rgba(34, 197, 94, 0.12)',
+                                                                             color: '#22c55e',
+                                                                             border: '1px solid rgba(34, 197, 94, 0.3)',
+                                                                             borderRadius: 6,
+                                                                             cursor: 'pointer',
+                                                                             whiteSpace: 'nowrap'
+                                                                         }}
+                                                                         onClick={(e) => {
+                                                                             e.stopPropagation();
+                                                                             window.open(`/scan?order=${detailOrder.id}&item=${item.item_id}`, '_blank');
+                                                                         }}
+                                                                         title="View full supply chain genealogy tree for this item"
+                                                                     >
+                                                                         🌳 Trace
+                                                                     </button>
+                                                                 )}
+                                                             </div>
+                                                         </td>
                                                         <td style={{ opacity: 0.7 }}>{item.item_type || '—'}</td>
                                                         <td style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>{item.category_name || '—'}</td>
                                                         <td style={{ textAlign: 'center', fontWeight: 600 }}>{item.quantity}</td>
@@ -912,6 +1101,25 @@ const TodaysOrders = () => {
                                             <MdLocalShipping /> {markReadyLoading ? 'Processing...' : 'Mark Ready for Pickup'}
                                         </button>
                                     )}
+                                    {detailOrder.status !== 'pending' && detailOrder.status !== 'cancelled' && (
+                                         <>
+                                             <button
+                                                 className="btn btn-secondary"
+                                                 style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 14px', background: 'rgba(34, 197, 94, 0.12)', color: '#22c55e', border: '1px solid rgba(34, 197, 94, 0.3)', fontWeight: 700 }}
+                                                 onClick={() => window.open(`/scan?order=${detailOrder.id}`, '_blank')}
+                                                 title="Open full interactive Genealogy Tree in new tab"
+                                             >
+                                                 <MdAccountTree size={18} /> View Genealogy Tree
+                                             </button>
+                                             <button
+                                                 className="btn btn-secondary"
+                                                 style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 14px', background: 'rgba(201,169,110,0.15)', color: '#c9a96e', border: '1px solid rgba(201,169,110,0.3)', fontWeight: 700 }}
+                                                 onClick={() => printQrLabels(detailOrder)}
+                                             >
+                                                 <MdQrCode2 size={18} /> Print QR Labels
+                                             </button>
+                                         </>
+                                     )}
                                 </div>
                             </div>
                         </div>

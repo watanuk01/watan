@@ -10,6 +10,7 @@ import {
     MdClose,
     MdReceipt,
     MdFileDownload,
+    MdQrCodeScanner,
 } from 'react-icons/md';
 import toast from 'react-hot-toast';
 import Pagination from '../../components/common/Pagination';
@@ -17,7 +18,10 @@ import './Restaurant.css';
 import '../orders/Orders.css';
 
 const OrderHistory = () => {
-    const { currentUser } = useAuth();
+    const { currentUser, userProfile } = useAuth();
+    const isAdmin = userProfile?.role === 'admin' || userProfile?.role === 'central_kitchen';
+    const targetRestaurantId = isAdmin ? 'all' : (userProfile?.restaurant_id || currentUser?.uid);
+
     const [orders, setOrders] = useState([]);
     const [loading, setLoading] = useState(true);
     const [statusFilter, setStatusFilter] = useState('all');
@@ -36,7 +40,7 @@ const OrderHistory = () => {
     const loadOrders = useCallback(async () => {
         setLoading(true);
         try {
-            const data = await getRestaurantOrders(currentUser.uid);
+            const data = await getRestaurantOrders(targetRestaurantId);
             setOrders(data);
         } catch (err) {
             console.error('Failed to load orders:', err);
@@ -44,17 +48,17 @@ const OrderHistory = () => {
         } finally {
             setLoading(false);
         }
-    }, [currentUser.uid]);
+    }, [targetRestaurantId]);
 
     // Real-time subscription for live updates
     useEffect(() => {
         setLoading(true);
-        const unsubscribe = subscribeToRestaurantOrders(currentUser.uid, (data) => {
+        const unsubscribe = subscribeToRestaurantOrders(targetRestaurantId, (data) => {
             setOrders(data);
             setLoading(false);
         });
         return () => unsubscribe();
-    }, [currentUser.uid]);
+    }, [targetRestaurantId]);
 
     const filteredOrders = useMemo(() => {
         let result = orders;
@@ -280,6 +284,7 @@ const OrderHistory = () => {
                                                 <th style={{ textAlign: 'right' }}>Price</th>
                                                 <th style={{ textAlign: 'right' }}>VAT</th>
                                                 <th style={{ textAlign: 'right' }}>Total</th>
+                                                <th style={{ textAlign: 'center' }}>Trace</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -293,20 +298,30 @@ const OrderHistory = () => {
                                                     <td style={{ textAlign: 'right' }}>£{(item.selling_price || 0).toFixed(2)}</td>
                                                     <td style={{ textAlign: 'right', opacity: 0.7 }}>{item.vat_rate || 0}%</td>
                                                     <td style={{ textAlign: 'right', fontWeight: 600 }}>£{(item.line_total || 0).toFixed(2)}</td>
+                                                    <td style={{ textAlign: 'center' }}>
+                                                        <button
+                                                            className="btn btn-secondary btn-xs"
+                                                            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', fontSize: 11, color: '#c9a96e', borderColor: 'rgba(201,169,110,0.3)' }}
+                                                            onClick={() => window.open(`/scan?order=${detailOrder.id}&item=${item.item_id}`, '_blank')}
+                                                            title="View full supply chain from vendor to delivery"
+                                                        >
+                                                            <MdQrCodeScanner size={13} /> Trace
+                                                        </button>
+                                                    </td>
                                                 </tr>
                                             ))}
                                         </tbody>
                                         <tfoot>
                                             <tr>
-                                                <td colSpan="6" style={{ textAlign: 'right', fontWeight: 500, opacity: 0.9, color: 'var(--color-text-primary)' }}>Subtotal</td>
+                                                <td colSpan="7" style={{ textAlign: 'right', fontWeight: 500, opacity: 0.9, color: 'var(--color-text-primary)' }}>Subtotal</td>
                                                 <td colSpan="2" style={{ textAlign: 'right', color: 'var(--color-text-primary)', fontWeight: 500 }}>£{(detailOrder.subtotal || 0).toFixed(2)}</td>
                                             </tr>
                                             <tr>
-                                                <td colSpan="6" style={{ textAlign: 'right', fontWeight: 500, opacity: 0.9, color: 'var(--color-text-primary)' }}>VAT</td>
+                                                <td colSpan="7" style={{ textAlign: 'right', fontWeight: 500, opacity: 0.9, color: 'var(--color-text-primary)' }}>VAT</td>
                                                 <td colSpan="2" style={{ textAlign: 'right', color: 'var(--color-text-primary)', fontWeight: 500 }}>£{(detailOrder.vat_amount || 0).toFixed(2)}</td>
                                             </tr>
                                             <tr>
-                                                <td colSpan="6" style={{ textAlign: 'right', fontWeight: 700, color: 'var(--color-text-primary)' }}>Total</td>
+                                                <td colSpan="7" style={{ textAlign: 'right', fontWeight: 700, color: 'var(--color-text-primary)' }}>Total</td>
                                                 <td colSpan="2" style={{ textAlign: 'right', fontWeight: 700, color: 'var(--color-primary)' }}>£{(detailOrder.total || 0).toFixed(2)}</td>
                                             </tr>
                                         </tfoot>

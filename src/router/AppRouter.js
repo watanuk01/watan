@@ -74,6 +74,9 @@ import CutTypesAdmin from '../pages/butchering/CutTypesAdmin';
 import ButcherPurchaseOrder from '../pages/butchering/ButcherPurchaseOrder';
 import ButcherInventory from '../pages/butchering/ButcherInventory';
 
+// QR Scan (public)
+import QrScanPage from '../pages/scan/QrScanPage';
+
 // Notifications
 import NotificationsPage from '../pages/notifications/NotificationsPage';
 
@@ -142,6 +145,9 @@ const AppRouter = () => {
                         )
                     }
                 />
+
+                {/* ─── QR Scan — Public (no auth) ─── */}
+                <Route path="/scan" element={<QrScanPage />} />
 
                 {/* ─── Xero OAuth Callback (inside protected area, admin only) ─── */}
                 <Route
