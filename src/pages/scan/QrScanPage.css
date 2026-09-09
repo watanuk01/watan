@@ -449,9 +449,60 @@
 
 .scan-tree-branches {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     justify-content: center;
-    gap: 16px;
+    align-items: flex-start;
+    gap: 0;
+    min-width: max-content;
+    padding: 0 16px;
+    position: relative;
+}
+
+/* Horizontal branch bar across siblings without any gaps */
+.scan-tree-branches > .tree-branch-container {
+    padding: 0 10px;
+    box-sizing: border-box;
+    position: relative;
+}
+
+.scan-tree-branches > .tree-branch-container::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -1px;
+    right: -1px;
+    height: 2px;
+    background: rgba(201, 169, 110, 0.3);
+}
+
+.scan-tree-branches > .tree-branch-container:first-child::before {
+    left: 50%;
+    right: -1px;
+}
+
+.scan-tree-branches > .tree-branch-container:last-child::before {
+    left: -1px;
+    right: 50%;
+}
+
+.scan-tree-branches > .tree-branch-container:only-child::before {
+    display: none;
+}
+
+/* Vertical line dropping to child card */
+.scan-tree-branches > .tree-branch-container::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 2px;
+    height: 18px;
+    background: rgba(201, 169, 110, 0.3);
+}
+
+.scan-tree-branches > .tree-branch-container > .tree-node-wrapper {
+    padding-top: 18px;
 }
 
 /* ─── Timeline View Styles ─── */

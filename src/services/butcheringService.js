@@ -510,7 +510,8 @@ export const getBatchGenealogyTree = async (searchTerm) => {
                 const ings = p.ingredients || [];
                 return ings.some(ing =>
                     (ing.consumed_batches || []).some(cb =>
-                        cb.batch_id === batchId || cb.batch_number === batchNumber
+                        (cb.batch_id && cb.batch_id === batchId) ||
+                        (!cb.batch_id && batchNumber && cb.batch_number === batchNumber)
                     )
                 );
             });
@@ -526,10 +527,17 @@ export const getBatchGenealogyTree = async (searchTerm) => {
                 );
             });
 
+        // Track attached productions and orders to prevent duplicate branch explosions across sibling cuts
+        const attachedProdIds = new Set();
+        const attachedOrderIds = new Set();
+
         // ── Helper: build order/delivery nodes for a batch ──
         const buildOrderNodes = (batchId, batchNumber) => {
             const orders = findOrdersUsingBatch(batchId, batchNumber);
-            return orders.map(o => {
+            const uniqueOrders = orders.filter(o => !attachedOrderIds.has(o.id));
+            uniqueOrders.forEach(o => attachedOrderIds.add(o.id));
+
+            return uniqueOrders.map(o => {
                 const statusMap = {
                     'pending': '⏳ Pending',
                     'ready_for_pickup': '📦 Ready for Pickup',
@@ -559,7 +567,11 @@ export const getBatchGenealogyTree = async (searchTerm) => {
         // ── Helper: build production → output batch → orders chain for a consumed batch ──
         const buildProductionChain = (batchId, batchNumber) => {
             const productions = findProductionsUsingBatch(batchId, batchNumber);
-            return productions.map(prod => {
+            // Only attach a production once in the entire tree
+            const uniqueProds = productions.filter(p => !attachedProdIds.has(p.id));
+            uniqueProds.forEach(p => attachedProdIds.add(p.id));
+
+            return uniqueProds.map(prod => {
                 // Find the output batch created by this production
                 const outputBatch = allBatches.find(b =>
                     b.production_id === prod.id || b.production_number === prod.production_number
@@ -705,11 +717,21 @@ export const getBatchGenealogyTree = async (searchTerm) => {
                         cutChildren.push(...orderNodes);
                     }
 
+                    const cutQty = (cut.weight_kg !== undefined && cut.weight_kg !== null && cut.weight_kg !== '')
+                        ? cut.weight_kg
+                        : (cut.quantity !== undefined && cut.quantity !== null && cut.quantity !== '')
+                            ? cut.quantity
+                            : (cut.remaining_weight_kg !== undefined && cut.remaining_weight_kg !== null && cut.remaining_weight_kg !== '')
+                                ? cut.remaining_weight_kg
+                                : (cut.initial_quantity !== undefined && cut.initial_quantity !== null && cut.initial_quantity !== '')
+                                    ? cut.initial_quantity
+                                    : null;
+
                     children.push({
                         type: 'child',
                         name: cut.item_name || cut.cut_name || 'Cut Batch',
                         batch_number: cut.batch_number || cut.id,
-                        quantity: cut.weight_kg || cut.quantity || cut.remaining_weight_kg,
+                        quantity: cutQty,
                         date: cut.created_at || cut.expiry_date,
                         info: cut.is_waste ? 'Waste/Trim' : (cut.destination_item_name ? `→ ${cut.destination_item_name}` : 'Usable Cut'),
                         children: cutChildren,
@@ -736,11 +758,19 @@ export const getBatchGenealogyTree = async (searchTerm) => {
                 (batch.parent_batch_id ? 'child' :
                     (batch.source === 'production' ? 'production' : 'parent'));
 
+            const parentQty = (batch.weight_kg !== undefined && batch.weight_kg !== null && batch.weight_kg !== '')
+                ? batch.weight_kg
+                : (batch.quantity !== undefined && batch.quantity !== null && batch.quantity !== '')
+                    ? batch.quantity
+                    : (batch.initial_quantity !== undefined && batch.initial_quantity !== null && batch.initial_quantity !== '')
+                        ? batch.initial_quantity
+                        : null;
+
             return {
                 type: depth === 0 ? 'parent' : nodeType,
                 name: batch.item_name || 'Batch',
                 batch_number: batch.batch_number || batch.id,
-                quantity: batch.weight_kg || batch.quantity || batch.initial_quantity,
+                quantity: parentQty,
                 date: batch.received_at || batch.created_at,
                 info: batch.is_cut ? 'Processed Cut' :
                     (batch.source === 'production' ? `Production: ${batch.production_number || ''}` : 'Parent Batch'),
