@@ -46,7 +46,6 @@ const StockTransfers = () => {
     const [acceptItems, setAcceptItems] = useState([]);
     const [acceptBusy, setAcceptBusy] = useState(false);
     const [actionBusy, setActionBusy] = useState({}); // { [transferId]: 'receiving' | 'rejecting' }
-    const [category, setCategory] = useState('All');
 
     const load = useCallback(async () => {
         if (!restaurant.id) return;
@@ -298,9 +297,6 @@ const StockTransfers = () => {
         if (!d) return '';
         return new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
     };
-    const categories = ['All', ...new Set(inventory.map(item => item.category_name).filter(Boolean))];
-    const searchableInventory = category === 'All' ? inventory : inventory.filter(item => item.category_name === category);
-    const formatQty = (value) => Number(value || 0).toLocaleString('en-GB', { maximumFractionDigits: 2 });
 
     return (
         <div className="page-container">
