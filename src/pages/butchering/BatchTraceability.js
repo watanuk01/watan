@@ -42,8 +42,8 @@ const TreeNode = ({ node, level = 0 }) => {
     const hasChildren = node.children?.length > 0;
 
     return (
-        <div style={{ textAlign: 'center' }}>
-            <div style={{ display: 'flex', justifyContent: 'center' }}>
+        <div className="tree-node-column">
+            <div className="tree-node-wrapper">
                 <div className={`tree-node ${node.type}`}>
                     <IconComp className="tree-node-icon" />
                     <div>
@@ -52,7 +52,9 @@ const TreeNode = ({ node, level = 0 }) => {
                         {node.batch_number && (
                             <span className="batch-code" style={{ marginTop: 3, display: 'inline-block' }}>{node.batch_number}</span>
                         )}
-                        {node.quantity && <div className="tree-node-meta">{node.quantity} kg</div>}
+                        {(node.quantity !== undefined && node.quantity !== null && node.quantity !== '') && (
+                            <div className="tree-node-meta">{node.quantity} kg</div>
+                        )}
                         {node.date && <div className="tree-node-meta" style={{ color: 'var(--color-text-muted)' }}>{safeDate(node.date)}</div>}
                         {node.info && <div className="tree-node-meta">{node.info}</div>}
                     </div>
@@ -206,10 +208,17 @@ const BatchTraceability = () => {
                 <>
                     <div className="butcher-panel" style={{ overflowX: 'auto' }}>
                         <div className="genealogy-wrapper">
-                            <h3 className="genealogy-title">
-                                <MdQrCodeScanner color="var(--color-primary)" />
-                                Batch Genealogy Tree: <span style={{ color: 'var(--color-primary)' }}>{genealogy.batch_number || searchTerm}</span>
-                            </h3>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 16 }}>
+                                <h3 className="genealogy-title" style={{ margin: 0 }}>
+                                    <MdQrCodeScanner color="var(--color-primary)" />
+                                    Batch Genealogy Tree: <span style={{ color: 'var(--color-primary)' }}>{genealogy.batch_number || searchTerm}</span>
+                                </h3>
+                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                    <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', background: 'var(--color-bg-subtle)', padding: '4px 10px', borderRadius: 20, border: '1px solid var(--color-border)' }}>
+                                        ↔ Scroll horizontally to view all cut branches
+                                    </span>
+                                </div>
+                            </div>
                             <TreeNode node={genealogy} />
                         </div>
                     </div>
@@ -242,7 +251,7 @@ const BatchTraceability = () => {
                                             <div className="qr-label-info">
                                                 <div className="qr-label-product">{n.name}</div>
                                                 <div>Batch: <strong>{n.batch_number}</strong></div>
-                                                {n.quantity && <div>Weight: <strong>{n.quantity} kg</strong></div>}
+                                                {(n.quantity !== undefined && n.quantity !== null && n.quantity !== '') && <div>Weight: <strong>{n.quantity} kg</strong></div>}
                                                 {n.date && <div>Date: <strong>{safeDate(n.date)}</strong></div>}
                                                 {n.info && <div><small>{n.info}</small></div>}
                                             </div>

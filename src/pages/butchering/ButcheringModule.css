@@ -652,12 +652,91 @@ select option {
     margin-bottom: 0;
 }
 
+.genealogy-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 16px 8px 36px;
+    width: 100%;
+}
+
+.tree-node-column {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+    flex-shrink: 0;
+}
+
+.tree-node-wrapper {
+    display: flex;
+    justify-content: center;
+    position: relative;
+    z-index: 2;
+}
+
 .tree-connector {
     width: 2px;
-    height: 28px;
-    background: var(--color-primary);
+    height: 24px;
+    background: var(--color-border-strong);
     margin: 0 auto;
-    opacity: 0.5;
+}
+
+.tree-branches {
+    display: flex;
+    flex-wrap: nowrap;
+    justify-content: center;
+    align-items: flex-start;
+    gap: 0;
+    min-width: max-content;
+    padding: 0 16px;
+    position: relative;
+}
+
+.tree-branches > .tree-node-column {
+    padding: 0 10px;
+    box-sizing: border-box;
+    position: relative;
+}
+
+/* Horizontal branch bar spanning from the first child to the last child without any gaps */
+.tree-branches > .tree-node-column::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -1px;
+    right: -1px;
+    height: 2px;
+    background: var(--color-border-strong);
+}
+
+.tree-branches > .tree-node-column:first-child::before {
+    left: 50%;
+    right: -1px;
+}
+
+.tree-branches > .tree-node-column:last-child::before {
+    left: -1px;
+    right: 50%;
+}
+
+.tree-branches > .tree-node-column:only-child::before {
+    display: none;
+}
+
+/* Vertical line dropping straight down from the horizontal branch into each child card */
+.tree-branches > .tree-node-column::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 2px;
+    height: 18px;
+    background: var(--color-border-strong);
+}
+
+.tree-branches > .tree-node-column > .tree-node-wrapper {
+    padding-top: 18px;
 }
 
 .tree-node {
@@ -670,7 +749,9 @@ select option {
     border-radius: var(--radius-lg);
     text-align: left;
     max-width: 320px;
+    width: 300px;
     transition: border-color var(--transition-fast);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
 }
 
 .tree-node:hover {
@@ -715,14 +796,6 @@ select option {
     font-size: var(--text-xs);
     color: var(--color-text-secondary);
     margin-top: 2px;
-}
-
-.tree-branches {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: var(--space-3);
-    margin: 0 auto;
 }
 
 /* ─── Trace Search Bar ─── */

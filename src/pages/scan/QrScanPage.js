@@ -65,7 +65,7 @@ const TreeNode = ({ node, level = 0 }) => {
                             </div>
                         )}
                         <div className="scan-tree-node-meta">
-                            {node.quantity && (
+                            {(node.quantity !== undefined && node.quantity !== null && node.quantity !== '') && (
                                 <span className="meta-pill qty">{node.quantity} kg</span>
                             )}
                             {node.date && (
@@ -541,7 +541,7 @@ const QrScanPage = () => {
                                         <div className="scan-step-batch">{step.batch_number}</div>
                                     )}
                                     <div className="scan-step-meta">
-                                        {step.quantity && <span>{step.quantity} kg</span>}
+                                        {(step.quantity !== undefined && step.quantity !== null && step.quantity !== '') && <span>{step.quantity} kg</span>}
                                         {step.date && <span>{safeDate(step.date)}</span>}
                                     </div>
                                     {step.info && <div className="scan-step-info">{step.info}</div>}
