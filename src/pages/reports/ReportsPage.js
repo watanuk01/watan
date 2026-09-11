@@ -10,7 +10,9 @@ import {
     MdInventory2, MdRefresh, MdWarning, MdFilterList,
     MdPictureAsPdf, MdEmail, MdClose, MdExpandMore,
     MdExpandLess, MdSearch, MdTrendingUp, MdTrendingDown,
-    MdContentCut, MdSync,
+    MdContentCut, MdSync, MdArrowForward, MdCheckCircle,
+    MdHourglassEmpty, MdCancel, MdLocalShipping, MdSwapHoriz,
+    MdReceiptLong,
 } from 'react-icons/md';
 import {
     fetchRestaurantComparison,
@@ -53,6 +55,7 @@ const REPORT_PRESETS = [
     { id: 'yesterday', label: 'Yesterday' },
     { id: 'this_week', label: 'This Week' },
     { id: 'this_month', label: 'This Month' },
+    { id: 'all_time', label: 'All Time' },
     { id: 'custom', label: 'Custom' },
 ];
 
@@ -78,6 +81,8 @@ const getReportPresetDates = (presetId) => {
             const d = new Date(now.getFullYear(), now.getMonth(), 1);
             return { dateFrom: d, dateTo: todayEnd };
         }
+        case 'all_time':
+            return { dateFrom: null, dateTo: null };
         default:
             return { dateFrom: null, dateTo: null };
     }
@@ -91,7 +96,429 @@ const KpiCard = ({ label, value, sub, color }) => (
     </div>
 );
 
-const TransferReport = ({ data }) => <div><div className="kpi-grid"><KpiCard label="Total Borrowed Value" value={formatCurrency(data?.totalBorrowedValue || 0)} /><KpiCard label="Net Credits Earned" value={formatCurrency(data?.netCreditsEarned || 0)} color="#22c55e" /></div><div className="card"><h3>Most Borrowed Items</h3>{data?.mostBorrowed?.length ? <ul>{data.mostBorrowed.map(i => <li key={i.name}>{i.name}: {i.quantity}</li>)}</ul> : <p>No completed stock transfers yet.</p>}</div></div>;
+const TransferReport = ({ data, filters, selectedRestaurant, datePreset, onResetFilters }) => {
+    const formatQty = value => Number(value || 0).toLocaleString('en-GB', { minimumFractionDigits: 1, maximumFractionDigits: 2 });
+    const formatDate = value => {
+        if (!value) return '—';
+        const d = new Date(value);
+        return isNaN(d.getTime()) ? '—' : d.toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+    };
+
+    const statusConfig = {
+        requested: { label: 'Requested', color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.12)', border: 'rgba(245, 158, 11, 0.25)', desc: 'Awaiting review / approval by lender branch' },
+        accepted: { label: 'In Transit', color: '#3b82f6', bg: 'rgba(59, 130, 246, 0.12)', border: 'rgba(59, 130, 246, 0.25)', desc: 'Approved & dispatched, awaiting borrower receipt' },
+        received: { label: 'Completed', color: '#22c55e', bg: 'rgba(34, 197, 94, 0.12)', border: 'rgba(34, 197, 94, 0.25)', desc: 'Received & verified into branch inventory' },
+        rejected: { label: 'Rejected', color: '#ef4444', bg: 'rgba(239, 68, 68, 0.12)', border: 'rgba(239, 68, 68, 0.25)', desc: 'Declined or cancelled by branch manager' },
+    };
+
+    if (!data) return (
+        <div className="card transfer-loading-card">
+            <MdSync className="spin" style={{ fontSize: 28, color: 'var(--color-primary)' }} />
+            <span>Loading stock transfer analytics…</span>
+        </div>
+    );
+
+    const totalTransfers = data.totalTransfers || 0;
+    const requestedCount = data.statusCounts?.requested || 0;
+    const acceptedCount = data.statusCounts?.accepted || 0;
+    const receivedCount = data.statusCounts?.received || 0;
+    const rejectedCount = data.statusCounts?.rejected || 0;
+
+    // Percentages for status bar
+    const reqPct = totalTransfers > 0 ? (requestedCount / totalTransfers) * 100 : 0;
+    const accPct = totalTransfers > 0 ? (acceptedCount / totalTransfers) * 100 : 0;
+    const recPct = totalTransfers > 0 ? (receivedCount / totalTransfers) * 100 : 0;
+    const rejPct = totalTransfers > 0 ? (rejectedCount / totalTransfers) * 100 : 0;
+
+    // Active period label
+    const activePeriodLabel = REPORT_PRESETS.find(p => p.id === datePreset)?.label || (datePreset === 'custom' ? 'Custom Range' : datePreset);
+    const activeScopeLabel = selectedRestaurant || 'All Restaurants';
+
+    return (
+        <div className="transfer-analytics-container">
+            {/* Scope Filter Header Banner */}
+            <div className="transfer-scope-banner">
+                <div className="transfer-scope-left">
+                    <div className="transfer-scope-icon-wrap">
+                        <MdSync />
+                    </div>
+                    <div>
+                        <div className="transfer-scope-title">
+                            Stock Transfer Flow & Branch Balance
+                        </div>
+                        <div className="transfer-scope-subtitle">
+                            Tracking inter-restaurant stock requests, dispatches, receipt audits, and credit adjustments.
+                        </div>
+                    </div>
+                </div>
+                <div className="transfer-scope-pills">
+                    <span className="transfer-scope-pill">
+                        <span className="pill-dot" />
+                        <strong>Period:</strong> {activePeriodLabel}
+                    </span>
+                    <span className="transfer-scope-pill">
+                        <MdStore style={{ fontSize: 13, marginRight: 2 }} />
+                        <strong>Scope:</strong> {activeScopeLabel}
+                    </span>
+                    {(datePreset !== 'all_time' || selectedRestaurant) && (
+                        <button
+                            type="button"
+                            className="transfer-reset-pill-btn"
+                            onClick={onResetFilters}
+                            title="Reset filters to All Time & All Restaurants"
+                        >
+                            <MdClose style={{ fontSize: 12 }} /> Reset Filters
+                        </button>
+                    )}
+                </div>
+            </div>
+
+            {/* Top 4 Executive KPI Metric Cards */}
+            <div className="kpi-grid transfer-kpi-grid">
+                <div className="card transfer-kpi-card gold-glow">
+                    <div className="transfer-kpi-top">
+                        <span className="transfer-kpi-label">All Transfer Requests</span>
+                        <div className="transfer-kpi-icon gold"><MdReceiptLong /></div>
+                    </div>
+                    <div className="transfer-kpi-value gold">{totalTransfers}</div>
+                    <div className="transfer-kpi-sub">
+                        <span className="text-success">{receivedCount} completed</span>
+                        <span className="dot-sep">·</span>
+                        <span className="text-danger">{rejectedCount} rejected</span>
+                    </div>
+                </div>
+
+                <div className="card transfer-kpi-card amber-glow">
+                    <div className="transfer-kpi-top">
+                        <span className="transfer-kpi-label">Awaiting Action</span>
+                        <div className="transfer-kpi-icon amber"><MdHourglassEmpty /></div>
+                    </div>
+                    <div className="transfer-kpi-value amber">{data.pendingAction || 0}</div>
+                    <div className="transfer-kpi-sub">
+                        <span>{requestedCount} awaiting approval</span>
+                        <span className="dot-sep">·</span>
+                        <span>{acceptedCount} in transit</span>
+                    </div>
+                </div>
+
+                <div className="card transfer-kpi-card green-glow">
+                    <div className="transfer-kpi-top">
+                        <span className="transfer-kpi-label">Completed Volume</span>
+                        <div className="transfer-kpi-icon green"><MdLocalShipping /></div>
+                    </div>
+                    <div className="transfer-kpi-value green">{formatQty(data.completedQuantity)} kg</div>
+                    <div className="transfer-kpi-sub">
+                        <span>{formatQty(data.totalQuantity)} kg total requested</span>
+                    </div>
+                </div>
+
+                <div className="card transfer-kpi-card blue-glow">
+                    <div className="transfer-kpi-top">
+                        <span className="transfer-kpi-label">Completed Credit Value</span>
+                        <div className="transfer-kpi-icon blue"><MdSwapHoriz /></div>
+                    </div>
+                    <div className="transfer-kpi-value blue">{formatCurrency(data.totalBorrowedValue || 0)}</div>
+                    <div className="transfer-kpi-sub">
+                        <span>{formatCurrency(data.totalPipelineValue || 0)} pipeline total</span>
+                    </div>
+                </div>
+            </div>
+
+            {/* Branch Focus Inbound / Outbound Card (Visible when a restaurant is selected) */}
+            {data.branchFocus && (
+                <div className="card transfer-branch-focus-card">
+                    <div className="transfer-focus-header">
+                        <div className="transfer-focus-title">
+                            <MdStore style={{ color: 'var(--color-primary)', fontSize: 20 }} />
+                            <span>Branch Ledger Scope: <strong>{data.branchFocus.restaurantName}</strong></span>
+                        </div>
+                        <div className={`transfer-net-badge ${data.branchFocus.netValue >= 0 ? 'net-positive' : 'net-negative'}`}>
+                            {data.branchFocus.netValue >= 0 ? '+' : ''}{formatCurrency(data.branchFocus.netValue)} Net {data.branchFocus.netValue >= 0 ? 'Creditor (Owed Stock / Credits)' : 'Debtor (Owes Credits)'}
+                        </div>
+                    </div>
+                    <div className="transfer-focus-grid">
+                        <div className="transfer-focus-col outbound">
+                            <div className="focus-col-label">
+                                <MdArrowForward className="icon-up" style={{ transform: 'rotate(-45deg)', color: '#34d399' }} />
+                                <span>Outbound (Lent to Other Branches)</span>
+                            </div>
+                            <div className="focus-col-val text-success">{formatCurrency(data.branchFocus.outboundValue)}</div>
+                            <div className="focus-col-sub">
+                                <strong>{data.branchFocus.outboundCount}</strong> transfers · <strong>{formatQty(data.branchFocus.outboundQty)} kg</strong> lent
+                            </div>
+                        </div>
+                        <div className="transfer-focus-col inbound">
+                            <div className="focus-col-label">
+                                <MdArrowForward className="icon-down" style={{ transform: 'rotate(135deg)', color: '#60a5fa' }} />
+                                <span>Inbound (Borrowed from Other Branches)</span>
+                            </div>
+                            <div className="focus-col-val text-info">{formatCurrency(data.branchFocus.inboundValue)}</div>
+                            <div className="focus-col-sub">
+                                <strong>{data.branchFocus.inboundCount}</strong> transfers · <strong>{formatQty(data.branchFocus.inboundQty)} kg</strong> received
+                            </div>
+                        </div>
+                        <div className="transfer-focus-col balance">
+                            <div className="focus-col-label">
+                                <MdSwapHoriz style={{ color: 'var(--color-primary)' }} />
+                                <span>Net Credit Balance</span>
+                            </div>
+                            <div className={`focus-col-val ${data.branchFocus.netValue >= 0 ? 'text-success' : 'text-warning'}`}>
+                                {data.branchFocus.netValue >= 0 ? '+' : ''}{formatCurrency(data.branchFocus.netValue)}
+                            </div>
+                            <div className="focus-col-sub">
+                                {data.branchFocus.netValue >= 0
+                                    ? 'Branch has provided more inventory value than it borrowed.'
+                                    : 'Branch has borrowed more inventory value than it provided.'}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Zero State if no transfers found */}
+            {totalTransfers === 0 ? (
+                <div className="card transfer-empty-card">
+                    <div className="transfer-empty-icon-wrap">
+                        <MdSync />
+                    </div>
+                    <h3>No Stock Transfers in Selected Period</h3>
+                    <p>There are no stock transfer records matching <strong>{activePeriodLabel}</strong> in <strong>{activeScopeLabel}</strong>.</p>
+                    <div style={{ marginTop: 16 }}>
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={onResetFilters}>
+                            Switch to "All Time" & All Restaurants
+                        </button>
+                    </div>
+                </div>
+            ) : (
+                <>
+                    {/* Middle Row: Transfer Status Pipeline & Busiest Routes */}
+                    <div className="transfer-grid-2col">
+                        {/* Status Pipeline */}
+                        <div className="card transfer-card">
+                            <div className="transfer-card-header">
+                                <div>
+                                    <h3 className="transfer-card-title">Transfer Status & Flow Pipeline</h3>
+                                    <div className="transfer-card-subtitle">Distribution of requests across lifecycle stages</div>
+                                </div>
+                                <span className="transfer-header-count">{totalTransfers} Total</span>
+                            </div>
+
+                            {/* Stacked Progress Bar */}
+                            <div className="transfer-pipeline-bar-wrapper">
+                                <div className="transfer-pipeline-bar" title="Status Distribution">
+                                    {reqPct > 0 && <div className="pipeline-seg requested" style={{ width: `${reqPct}%` }} title={`Requested: ${requestedCount} (${reqPct.toFixed(0)}%)`} />}
+                                    {accPct > 0 && <div className="pipeline-seg accepted" style={{ width: `${accPct}%` }} title={`In Transit: ${acceptedCount} (${accPct.toFixed(0)}%)`} />}
+                                    {recPct > 0 && <div className="pipeline-seg received" style={{ width: `${recPct}%` }} title={`Completed: ${receivedCount} (${recPct.toFixed(0)}%)`} />}
+                                    {rejPct > 0 && <div className="pipeline-seg rejected" style={{ width: `${rejPct}%` }} title={`Rejected: ${rejectedCount} (${rejPct.toFixed(0)}%)`} />}
+                                </div>
+                            </div>
+
+                            {/* Status List */}
+                            <div className="transfer-status-list">
+                                {['requested', 'accepted', 'received', 'rejected'].map(statusKey => {
+                                    const cfg = statusConfig[statusKey];
+                                    const count = data.statusCounts?.[statusKey] || 0;
+                                    const pct = totalTransfers > 0 ? ((count / totalTransfers) * 100).toFixed(0) : 0;
+                                    return (
+                                        <div key={statusKey} className="transfer-status-row">
+                                            <div className="status-row-left">
+                                                <span className="status-badge" style={{ color: cfg.color, backgroundColor: cfg.bg, borderColor: cfg.border }}>
+                                                    <span className="status-badge-dot" style={{ backgroundColor: cfg.color }} />
+                                                    {cfg.label}
+                                                </span>
+                                                <span className="status-desc">{cfg.desc}</span>
+                                            </div>
+                                            <div className="status-row-right">
+                                                <span className="status-pct">{pct}%</span>
+                                                <strong className="status-count" style={{ color: cfg.color }}>{count}</strong>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        {/* Busiest Inter-Branch Routes */}
+                        <div className="card transfer-card">
+                            <div className="transfer-card-header">
+                                <div>
+                                    <h3 className="transfer-card-title">Busiest Inter-Branch Routes</h3>
+                                    <div className="transfer-card-subtitle">Active transfer corridors and inter-kitchen traffic</div>
+                                </div>
+                                <span className="transfer-header-count">{data.busiestRoutes?.length || 0} Routes</span>
+                            </div>
+
+                            {data.busiestRoutes?.length ? (
+                                <div className="transfer-routes-list">
+                                    {data.busiestRoutes.map((route) => {
+                                        const maxCount = data.busiestRoutes[0]?.count || 1;
+                                        const widthPct = Math.min(100, Math.max(12, (route.count / maxCount) * 100));
+                                        return (
+                                            <div key={route.name} className="transfer-route-item">
+                                                <div className="route-item-top">
+                                                    <div className="route-flow">
+                                                        <span className="route-branch lender">{route.from}</span>
+                                                        <span className="route-arrow"><MdArrowForward /></span>
+                                                        <span className="route-branch borrower">{route.to}</span>
+                                                    </div>
+                                                    <div className="route-metrics">
+                                                        <span className="route-count-badge">
+                                                            <strong>{route.count}</strong> transfer{route.count !== 1 ? 's' : ''}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                <div className="route-bar-bg">
+                                                    <div className="route-bar-fill" style={{ width: `${widthPct}%` }} />
+                                                </div>
+                                                <div className="route-sub-info">
+                                                    <span>Volume: <strong>{formatQty(route.totalQuantity)} kg</strong></span>
+                                                    <span>Value: <strong>{formatCurrency(route.totalValue)}</strong></span>
+                                                    <span>Completed: <strong className="text-success">{route.completedCount}</strong></span>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            ) : (
+                                <div className="transfer-sub-empty">
+                                    <MdSwapHoriz style={{ fontSize: 24, color: 'var(--color-text-muted)' }} />
+                                    <p>No branch transfer routes recorded for this filter.</p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Bottom Row: Top Items & Recent Activity */}
+                    <div className="transfer-grid-bottom">
+                        {/* Most Transferred Items */}
+                        <div className="card transfer-card">
+                            <div className="transfer-card-header">
+                                <div>
+                                    <h3 className="transfer-card-title">Most Transferred Items</h3>
+                                    <div className="transfer-card-subtitle">Highest volume ingredients borrowed between branches</div>
+                                </div>
+                                <span className="transfer-header-count">{data.mostBorrowed?.length || 0} Items</span>
+                            </div>
+
+                            {data.mostBorrowed?.length ? (
+                                <div className="transfer-items-list">
+                                    {data.mostBorrowed.map((item, idx) => {
+                                        const maxQty = data.mostBorrowed[0]?.quantity || 1;
+                                        const widthPct = Math.min(100, Math.max(12, (item.quantity / maxQty) * 100));
+                                        const isTop = idx === 0;
+                                        return (
+                                            <div key={`${item.name}-${item.unit}`} className="transfer-item-card">
+                                                <div className="transfer-item-main">
+                                                    <div className="transfer-item-left">
+                                                        <span className={`transfer-rank-badge ${isTop ? 'gold-rank' : ''}`}>
+                                                            {idx + 1}
+                                                        </span>
+                                                        <div>
+                                                            <div className="transfer-item-name">{item.name}</div>
+                                                            <div className="transfer-item-meta">
+                                                                {item.count} transfer{item.count !== 1 ? 's' : ''} · {formatCurrency(item.value)} est.
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="transfer-item-qty">
+                                                        <strong>{formatQty(item.quantity)}</strong>
+                                                        <span className="unit-label">{item.unit}</span>
+                                                    </div>
+                                                </div>
+                                                <div className="item-bar-bg">
+                                                    <div className={`item-bar-fill ${isTop ? 'gold' : ''}`} style={{ width: `${widthPct}%` }} />
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            ) : (
+                                <div className="transfer-sub-empty">
+                                    <MdShoppingCart style={{ fontSize: 24, color: 'var(--color-text-muted)' }} />
+                                    <p>No transferred items recorded for this filter.</p>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Recent Transfer Activity Table */}
+                        <div className="card transfer-card transfer-table-card">
+                            <div className="transfer-card-header">
+                                <div>
+                                    <h3 className="transfer-card-title">Recent Transfer Activity</h3>
+                                    <div className="transfer-card-subtitle">Detailed audit trail of recent requests and receipts</div>
+                                </div>
+                                <span className="transfer-header-count">{data.recentTransfers?.length || 0} Transfers</span>
+                            </div>
+
+                            {data.recentTransfers?.length ? (
+                                <div className="transfer-table-wrapper">
+                                    <table className="data-table transfer-table">
+                                        <thead>
+                                            <tr>
+                                                <th>DATE & TIME</th>
+                                                <th>ROUTE (FROM → TO)</th>
+                                                <th>ITEMS & QUANTITY</th>
+                                                <th style={{ textAlign: 'right' }}>VALUE</th>
+                                                <th style={{ textAlign: 'center' }}>STATUS</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {data.recentTransfers.map(transfer => {
+                                                const cfg = statusConfig[transfer.status] || {
+                                                    label: transfer.status || 'Unknown',
+                                                    color: 'var(--color-text-secondary)',
+                                                    bg: 'rgba(255,255,255,0.05)',
+                                                    border: 'rgba(255,255,255,0.1)'
+                                                };
+                                                return (
+                                                    <tr key={transfer.id}>
+                                                        <td className="transfer-td-date">
+                                                            <div className="transfer-date-main">{formatDate(transfer.created_at)}</div>
+                                                        </td>
+                                                        <td className="transfer-td-route">
+                                                            <div className="transfer-route-pill-flow">
+                                                                <span className="route-pill-lender">{transfer.lender_name || '—'}</span>
+                                                                <MdArrowForward className="route-pill-arrow" />
+                                                                <span className="route-pill-borrower">{transfer.borrower_name || '—'}</span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="transfer-td-items">
+                                                            <div className="transfer-items-pills">
+                                                                {(transfer.items || []).map((item, i) => (
+                                                                    <span key={i} className="transfer-item-tag">
+                                                                        {item.item_name || 'Item'} · <strong>{formatQty(item.sent_quantity || item.quantity || item.requested_quantity)} {item.unit || ''}</strong>
+                                                                    </span>
+                                                                ))}
+                                                            </div>
+                                                        </td>
+                                                        <td className="transfer-td-val" style={{ textAlign: 'right' }}>
+                                                            <strong>{formatCurrency(transfer.total_value || 0)}</strong>
+                                                        </td>
+                                                        <td style={{ textAlign: 'center' }}>
+                                                            <span className="status-badge" style={{ color: cfg.color, backgroundColor: cfg.bg, borderColor: cfg.border }}>
+                                                                <span className="status-badge-dot" style={{ backgroundColor: cfg.color }} />
+                                                                {cfg.label}
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            ) : (
+                                <div className="transfer-sub-empty">
+                                    <MdSync style={{ fontSize: 24, color: 'var(--color-text-muted)' }} />
+                                    <p>No recent transfer activity found.</p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </>
+            )}
+        </div>
+    );
+};
 const PettyCashReport = ({ data }) => <div><div className="kpi-grid"><KpiCard label="Total Spent" value={formatCurrency(data?.total || 0)} /><KpiCard label="Cash" value={formatCurrency(data?.cash || 0)} /><KpiCard label="Card" value={formatCurrency(data?.card || 0)} /></div><div className="card"><h3>Category Breakdown</h3>{data?.categories?.map(c => <div key={c.name} style={{ display: 'flex', justifyContent: 'space-between', padding: 6 }}><span>{c.name}</span><strong>{formatCurrency(c.value)}</strong></div>) || <p>No purchases yet.</p>}</div></div>;
 
 // ─── custom label for pie ───
@@ -841,7 +1268,7 @@ const ReportsPage = () => {
             } else if (t === 'butcher') {
                 setButcheringData(await fetchButcheringAnalytics(filters));
             } else if (t === 'transfers') {
-                setTransferData(await getStockTransferAnalytics());
+                setTransferData(await getStockTransferAnalytics(filters));
             } else if (t === 'petty-cash') {
                 setPettyCashData(await getPettyCashAnalytics());
             }
@@ -1072,6 +1499,71 @@ const ReportsPage = () => {
                         ]),
                         headStyles, bodyStyles,
                         styles: { cellPadding: 2.5 },
+                    });
+                }
+            } else if (tab === 'transfers' && transferData) {
+                doc.setFontSize(9.5);
+                doc.setFont('helvetica', 'bold');
+                doc.setTextColor(30, 30, 46);
+                doc.text(`Stock Transfers Summary: ${transferData.totalTransfers || 0} Total Transfers | ${transferData.completedTransfers || 0} Completed | Volume: ${transferData.completedQuantity || 0} kg | Settlement Value: ${formatCurrency(transferData.totalBorrowedValue || 0)}`, 14, startY);
+                startY += 6;
+
+                autoTable(doc, {
+                    startY,
+                    head: [['Status Category', 'Count', 'Description']],
+                    body: [
+                        ['Requested', transferData.statusCounts?.requested || 0, 'Awaiting approval from lending restaurant'],
+                        ['Awaiting Receipt (In Transit)', transferData.statusCounts?.accepted || 0, 'Dispatched, pending receiving restaurant receipt'],
+                        ['Received (Completed)', transferData.statusCounts?.received || 0, 'Accepted & added to branch inventory'],
+                        ['Rejected', transferData.statusCounts?.rejected || 0, 'Declined by lending branch'],
+                    ],
+                    headStyles, bodyStyles,
+                    styles: { cellPadding: 2.5 },
+                });
+                startY = doc.lastAutoTable.finalY + 6;
+
+                if (transferData.busiestRoutes?.length) {
+                    doc.setFontSize(9.5);
+                    doc.setFont('helvetica', 'bold');
+                    doc.setTextColor(30, 30, 46);
+                    doc.text('Inter-Branch Routes & Traffic Flow', 14, startY);
+                    startY += 4;
+
+                    autoTable(doc, {
+                        startY,
+                        head: [['Route (Lender -> Borrower)', 'Transfers', 'Total Volume (kg)', 'Completed Value (£)']],
+                        body: transferData.busiestRoutes.map(r => [
+                            r.name,
+                            r.count,
+                            `${Number(r.totalQuantity || 0).toFixed(2)} kg`,
+                            formatCurrency(r.totalValue || 0),
+                        ]),
+                        headStyles, bodyStyles,
+                        styles: { cellPadding: 2.5 },
+                    });
+                    startY = doc.lastAutoTable.finalY + 6;
+                }
+
+                if (transferData.recentTransfers?.length) {
+                    doc.setFontSize(9.5);
+                    doc.setFont('helvetica', 'bold');
+                    doc.setTextColor(30, 30, 46);
+                    doc.text('Transfer Records & Audit Trail', 14, startY);
+                    startY += 4;
+
+                    autoTable(doc, {
+                        startY,
+                        head: [['Date', 'From (Lender)', 'To (Borrower)', 'Items', 'Value', 'Status']],
+                        body: transferData.recentTransfers.map(t => [
+                            t.created_at ? new Date(t.created_at).toLocaleDateString('en-GB') : '—',
+                            t.lender_name || '—',
+                            t.borrower_name || '—',
+                            (t.items || []).map(i => `${i.item_name || 'Item'} (${i.sent_quantity || i.quantity || 0} ${i.unit || 'kg'})`).join(', '),
+                            formatCurrency(t.total_value || 0),
+                            (t.status || '—').toUpperCase(),
+                        ]),
+                        headStyles, bodyStyles,
+                        styles: { cellPadding: 2 },
                     });
                 }
             }
@@ -1313,6 +1805,50 @@ const ReportsPage = () => {
                         <tbody>${rows}</tbody>
                     </table>
                 `;
+            } else if (tab === 'transfers' && transferData) {
+                const recentRows = (transferData.recentTransfers || []).map((t, i) => `
+                    <tr style="border-bottom: 1px solid #e2e8f0; ${i % 2 === 1 ? 'background-color: #f8fafc;' : ''}">
+                        <td style="padding: 8px; font-size: 11px;">${t.created_at ? new Date(t.created_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+                        <td style="padding: 8px; font-weight: 600;">${t.lender_name || '—'} &rarr; ${t.borrower_name || '—'}</td>
+                        <td style="padding: 8px; font-size: 11px;">${(t.items || []).map(item => `${item.item_name} (${item.sent_quantity || item.quantity} ${item.unit})`).join(', ')}</td>
+                        <td style="padding: 8px; font-weight: bold; color: #c9a96e;">${formatCurrency(t.total_value || 0)}</td>
+                        <td style="padding: 8px; text-transform: uppercase; font-weight: bold; font-size: 10px; color: ${t.status === 'received' ? '#22c55e' : t.status === 'rejected' ? '#ef4444' : '#f59e0b'};">${t.status}</td>
+                    </tr>
+                `).join('');
+
+                bodyHtml = `
+                    <div style="margin-bottom: 20px; display: table; width: 100%;">
+                        <div style="display: table-cell; background:#f8fafc; padding:12px; border-radius:6px; text-align:center; width:25%;">
+                            <div style="font-size:18px; font-weight:bold; color:#1e293b;">${transferData.totalTransfers || 0}</div>
+                            <div style="font-size:11px; color:#64748b;">Total Transfers</div>
+                        </div>
+                        <div style="display: table-cell; background:#f8fafc; padding:12px; border-radius:6px; text-align:center; width:25%;">
+                            <div style="font-size:18px; font-weight:bold; color:#f59e0b;">${transferData.pendingAction || 0}</div>
+                            <div style="font-size:11px; color:#64748b;">Awaiting Action</div>
+                        </div>
+                        <div style="display: table-cell; background:#f8fafc; padding:12px; border-radius:6px; text-align:center; width:25%;">
+                            <div style="font-size:18px; font-weight:bold; color:#22c55e;">${transferData.completedQuantity || 0} kg</div>
+                            <div style="font-size:11px; color:#64748b;">Completed Qty</div>
+                        </div>
+                        <div style="display: table-cell; background:#f8fafc; padding:12px; border-radius:6px; text-align:center; width:25%;">
+                            <div style="font-size:18px; font-weight:bold; color:#c9a96e;">${formatCurrency(transferData.totalBorrowedValue || 0)}</div>
+                            <div style="font-size:11px; color:#64748b;">Settlement Value</div>
+                        </div>
+                    </div>
+                    <h3 style="font-size:14px; color:#1e293b; margin: 16px 0 10px 0;">Recent Transfers Activity Log</h3>
+                    <table style="width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 24px;">
+                        <thead>
+                            <tr style="background: #1e1e2e; color: #c9a96e; text-align: left;">
+                                <th style="padding: 8px;">Date</th>
+                                <th style="padding: 8px;">Route</th>
+                                <th style="padding: 8px;">Items</th>
+                                <th style="padding: 8px;">Value</th>
+                                <th style="padding: 8px;">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>${recentRows || '<tr><td colspan="5" style="padding: 12px; text-align: center; color: #64748b;">No recent transfers</td></tr>'}</tbody>
+                    </table>
+                `;
             }
 
             const htmlContent = `
@@ -1439,7 +1975,7 @@ const ReportsPage = () => {
                         {tab === 'vendors' && <VendorPerformance data={vendors} />}
                         {tab === 'batches' && <BatchAnalyticsTab data={batches} />}
                         {tab === 'butcher' && <ButcheringYieldTab data={butcheringData} />}
-                        {tab === 'transfers' && <TransferReport data={transferData} />}
+                        {tab === 'transfers' && <TransferReport data={transferData} filters={getFilters()} selectedRestaurant={selectedRestaurant} datePreset={datePreset} onResetFilters={() => { setDatePreset('all_time'); setSelectedRestaurant(''); }} />}
                         {tab === 'petty-cash' && <PettyCashReport data={pettyCashData} />}
                     </>
                 )}

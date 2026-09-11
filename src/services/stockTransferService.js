@@ -5,21 +5,40 @@ import { addStockFromDelivery, deductRestaurantStock, getRestaurantItem } from '
 const TRANSFERS = 'stock_transfers';
 const CREDITS = 'stock_transfer_credits';
 
-const normalise = (d) => ({ id: d.id, ...d.data(), created_at: d.data().created_at?.toDate?.() || null, accepted_at: d.data().accepted_at?.toDate?.() || null, received_at: d.data().received_at?.toDate?.() || null });
+const parseDate = (val) => {
+  if (!val) return null;
+  if (val instanceof Date) return val;
+  if (val.toDate && typeof val.toDate === 'function') return val.toDate();
+  if (val.seconds) return new Date(val.seconds * 1000);
+  const d = new Date(val);
+  return isNaN(d.getTime()) ? null : d;
+};
+
+const normalise = (d) => {
+  const data = d.data();
+  return {
+    id: d.id,
+    ...data,
+    created_at: parseDate(data.created_at),
+    accepted_at: parseDate(data.accepted_at),
+    received_at: parseDate(data.received_at),
+    rejected_at: parseDate(data.rejected_at),
+  };
+};
 
 export const getRestaurantDirectory = async (excludeId) => {
   const snap = await getDocs(collection(db, 'users'));
   return snap.docs.map(d => ({ id: d.id, ...d.data() }))
     .filter(u => u.id !== excludeId && u.restaurant_id !== excludeId && (u.role === 'restaurant_manager' || u.role === 'restaurant_manager_non_managed'))
     .map(u => ({
-      id: u.id,
+      id: u.restaurant_id || u.id,
       restaurant_id: u.restaurant_id || u.id,
       name: u.restaurant_name || u.name || u.email || 'Restaurant',
       user_id: u.id,
     }));
 };
 
-export const createStockTransfer = async ({ borrower, lender, items, notes = '' }) => {
+export const createStockTransfer = async ({ borrower, lender, items, notes = '', requestedBy = null }) => {
   if (!lender?.id || !items?.length) throw new Error('Choose a restaurant and at least one item');
   const cleaned = items.filter(i => Number(i.quantity) > 0).map(i => ({
     ...i,
@@ -37,6 +56,7 @@ export const createStockTransfer = async ({ borrower, lender, items, notes = '' 
     lender_name: lender.name,
     items: cleaned,
     notes,
+    requested_by: requestedBy || { id: '', name: borrower.name || 'Restaurant user' },
     status: 'requested',
     created_at: serverTimestamp(),
     updated_at: serverTimestamp(),
@@ -201,9 +221,140 @@ export const applyCreditsToInvoice = async (invoiceId, credits) => {
   return total;
 };
 
-export const getStockTransferAnalytics = async () => {
-  const transfers = (await getDocs(collection(db, TRANSFERS))).docs.map(normalise).filter(t => t.status === 'received');
+export const getStockTransferAnalytics = async (filters = {}) => {
+  const rawSnap = await getDocs(collection(db, TRANSFERS));
+  const rawTransfers = rawSnap.docs.map(normalise);
+
+  const filteredTransfers = rawTransfers.filter(transfer => {
+    // Check date filter against created_at, accepted_at, or received_at
+    const tDate = transfer.created_at || transfer.accepted_at || transfer.received_at;
+    if (filters.dateFrom && (!tDate || tDate < filters.dateFrom)) return false;
+    if (filters.dateTo && (!tDate || tDate > filters.dateTo)) return false;
+
+    // Check restaurant filter (matches if restaurant is lender OR borrower)
+    if (filters.restaurantId || filters.restaurantName) {
+      const targets = [filters.restaurantId, filters.restaurantName]
+        .filter(Boolean)
+        .map(v => String(v).trim().toLowerCase());
+
+      const transferRefs = [
+        transfer.borrower_id,
+        transfer.lender_id,
+        transfer.borrower_name,
+        transfer.lender_name,
+      ].filter(Boolean).map(v => String(v).trim().toLowerCase());
+
+      const matches = targets.some(target =>
+        transferRefs.some(ref => ref === target || ref.includes(target) || target.includes(ref))
+      );
+      if (!matches) return false;
+    }
+    return true;
+  });
+
+  const completed = filteredTransfers.filter(t => t.status === 'received');
+  const statusCounts = {
+    requested: filteredTransfers.filter(t => t.status === 'requested').length,
+    accepted: filteredTransfers.filter(t => t.status === 'accepted' || t.status === 'accepting').length,
+    received: completed.length,
+    rejected: filteredTransfers.filter(t => t.status === 'rejected').length,
+  };
+
+  const totalTransfers = filteredTransfers.length;
+
+  // Item aggregation across all transfers in period (not just received)
   const itemMap = {};
-  transfers.forEach(t => (t.items || []).forEach(i => { itemMap[i.item_name] = (itemMap[i.item_name] || 0) + Number(i.sent_quantity || 0); }));
-  return { totalBorrowedValue: transfers.reduce((s, t) => s + Number(t.total_value || 0), 0), netCreditsEarned: transfers.reduce((s, t) => s + Number(t.total_value || 0), 0), mostBorrowed: Object.entries(itemMap).map(([name, quantity]) => ({ name, quantity })).sort((a, b) => b.quantity - a.quantity).slice(0, 10) };
+  filteredTransfers.forEach(transfer => {
+    (transfer.items || []).forEach(item => {
+      const name = item.item_name || item.name || 'Item';
+      const unit = item.unit || 'kg';
+      const key = `${name}|${unit}`;
+      const qty = Number(item.sent_quantity || item.quantity || item.requested_quantity || 0);
+      const val = Number(item.value || (qty * (Number(item.cost_price) || 0)) || 0);
+      if (!itemMap[key]) {
+        itemMap[key] = { name, unit, quantity: 0, completedQuantity: 0, value: 0, count: 0 };
+      }
+      itemMap[key].quantity += qty;
+      itemMap[key].value += val;
+      itemMap[key].count += 1;
+      if (transfer.status === 'received') {
+        itemMap[key].completedQuantity += qty;
+      }
+    });
+  });
+
+  // Route aggregation across transfers in period
+  const routeMap = {};
+  filteredTransfers.forEach(transfer => {
+    const from = (transfer.lender_name || 'Branch').trim();
+    const to = (transfer.borrower_name || 'Branch').trim();
+    const routeKey = `${from} → ${to}`;
+    const val = Number(transfer.total_value || 0);
+    const qty = (transfer.items || []).reduce((s, i) => s + Number(i.sent_quantity || i.quantity || 0), 0);
+    if (!routeMap[routeKey]) {
+      routeMap[routeKey] = { name: routeKey, from, to, count: 0, totalValue: 0, totalQuantity: 0, completedCount: 0 };
+    }
+    routeMap[routeKey].count += 1;
+    routeMap[routeKey].totalValue += val;
+    routeMap[routeKey].totalQuantity += qty;
+    if (transfer.status === 'received') {
+      routeMap[routeKey].completedCount += 1;
+    }
+  });
+
+  const totalQuantity = filteredTransfers.reduce((sum, transfer) =>
+    sum + (transfer.items || []).reduce((itemSum, item) => itemSum + Number(item.sent_quantity || item.quantity || item.requested_quantity || 0), 0), 0);
+
+  const completedQuantity = completed.reduce((sum, transfer) =>
+    sum + (transfer.items || []).reduce((itemSum, item) => itemSum + Number(item.sent_quantity || item.quantity || 0), 0), 0);
+
+  const totalBorrowedValue = completed.reduce((sum, transfer) => sum + Number(transfer.total_value || 0), 0);
+  const totalPipelineValue = filteredTransfers.reduce((sum, transfer) => sum + Number(transfer.total_value || 0), 0);
+
+  // Branch-specific focus breakdown if a restaurant is selected
+  let branchFocus = null;
+  if (filters.restaurantName || filters.restaurantId) {
+    const targetName = String(filters.restaurantName || filters.restaurantId).trim().toLowerCase();
+    const outbound = filteredTransfers.filter(t => {
+      const lName = String(t.lender_name || '').toLowerCase();
+      const lId = String(t.lender_id || '').toLowerCase();
+      return lName.includes(targetName) || targetName.includes(lName) || lId.includes(targetName);
+    });
+    const inbound = filteredTransfers.filter(t => {
+      const bName = String(t.borrower_name || '').toLowerCase();
+      const bId = String(t.borrower_id || '').toLowerCase();
+      return bName.includes(targetName) || targetName.includes(bName) || bId.includes(targetName);
+    });
+
+    const outboundValue = outbound.reduce((s, t) => s + Number(t.total_value || 0), 0);
+    const inboundValue = inbound.reduce((s, t) => s + Number(t.total_value || 0), 0);
+    const outboundQty = outbound.reduce((s, t) => s + (t.items || []).reduce((is, i) => is + Number(i.sent_quantity || i.quantity || 0), 0), 0);
+    const inboundQty = inbound.reduce((s, t) => s + (t.items || []).reduce((is, i) => is + Number(i.sent_quantity || i.quantity || 0), 0), 0);
+
+    branchFocus = {
+      restaurantName: filters.restaurantName || 'Selected Restaurant',
+      outboundCount: outbound.length,
+      outboundValue: Math.round(outboundValue * 100) / 100,
+      outboundQty: Math.round(outboundQty * 100) / 100,
+      inboundCount: inbound.length,
+      inboundValue: Math.round(inboundValue * 100) / 100,
+      inboundQty: Math.round(inboundQty * 100) / 100,
+      netValue: Math.round((outboundValue - inboundValue) * 100) / 100,
+    };
+  }
+
+  return {
+    totalTransfers,
+    completedTransfers: completed.length,
+    pendingAction: statusCounts.requested + statusCounts.accepted,
+    statusCounts,
+    totalQuantity: Math.round(totalQuantity * 100) / 100,
+    completedQuantity: Math.round(completedQuantity * 100) / 100,
+    totalBorrowedValue: Math.round(totalBorrowedValue * 100) / 100,
+    totalPipelineValue: Math.round(totalPipelineValue * 100) / 100,
+    branchFocus,
+    mostBorrowed: Object.values(itemMap).sort((a, b) => b.quantity - a.quantity).slice(0, 8),
+    busiestRoutes: Object.values(routeMap).sort((a, b) => b.count - a.count).slice(0, 8),
+    recentTransfers: filteredTransfers.sort((a, b) => ((b.created_at ? b.created_at.getTime() : 0) - (a.created_at ? a.created_at.getTime() : 0))).slice(0, 15),
+  };
 };

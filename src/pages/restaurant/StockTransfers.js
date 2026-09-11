@@ -26,7 +26,7 @@ import './StockTransfers.css';
 const StockTransfers = () => {
     const { userProfile, currentUser } = useAuth();
     const restaurant = {
-        id: currentUser?.uid || userProfile?.id || userProfile?.restaurant_id,
+        id: userProfile?.restaurant_id || currentUser?.uid || userProfile?.id,
         name: userProfile?.restaurant_name || userProfile?.name || 'My restaurant',
     };
 
@@ -46,6 +46,7 @@ const StockTransfers = () => {
     const [acceptItems, setAcceptItems] = useState([]);
     const [acceptBusy, setAcceptBusy] = useState(false);
     const [actionBusy, setActionBusy] = useState({}); // { [transferId]: 'receiving' | 'rejecting' }
+    const [category, setCategory] = useState('All');
 
     const load = useCallback(async () => {
         if (!restaurant.id) return;
@@ -198,6 +199,7 @@ const StockTransfers = () => {
                 lender: restaurants.find(r => r.id === lender),
                 items,
                 notes,
+                requestedBy: { id: currentUser?.uid || userProfile?.id || '', name: userProfile?.name || currentUser?.email || 'Restaurant user' },
             });
             toast.success('Borrow request sent');
             setItems([]);
@@ -294,8 +296,11 @@ const StockTransfers = () => {
 
     const formatDate = (d) => {
         if (!d) return '';
-        return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+        return new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
     };
+    const categories = ['All', ...new Set(inventory.map(item => item.category_name).filter(Boolean))];
+    const searchableInventory = category === 'All' ? inventory : inventory.filter(item => item.category_name === category);
+    const formatQty = (value) => Number(value || 0).toLocaleString('en-GB', { maximumFractionDigits: 2 });
 
     return (
         <div className="page-container">
@@ -427,6 +432,7 @@ const StockTransfers = () => {
                                         : `From ${t.borrower_name}`}
                                 </div>
                                 <div className="st-transfer-date">{formatDate(t.created_at)}</div>
+                                <div className="st-transfer-date">Requested by: {t.requested_by?.name || t.borrower_name || '—'}</div>
                             </div>
                             <div className="st-transfer-items">
                                 {(t.items || []).map(i =>
@@ -445,7 +451,7 @@ const StockTransfers = () => {
                                 )}
                             </div>
                             <div className="st-transfer-actions">
-                                {t.lender_id === restaurant.id && t.status === 'requested' && (
+                                {(t.lender_id === restaurant.id || t.lender_name === restaurant.name) && t.status === 'requested' && (
                                     <>
                                         <button
                                             className="btn btn-primary btn-sm"
@@ -464,7 +470,7 @@ const StockTransfers = () => {
                                         </button>
                                     </>
                                 )}
-                                {t.borrower_id === restaurant.id && t.status === 'accepted' && (
+                                {(t.borrower_id === restaurant.id || t.borrower_name === restaurant.name) && t.status === 'accepted' && (
                                     <button
                                         className="btn btn-primary btn-sm"
                                         onClick={() => handleReceive(t)}
