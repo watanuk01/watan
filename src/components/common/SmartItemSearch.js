@@ -189,7 +189,7 @@ const SmartItemSearch = ({
                                 )}
                                 {showStock && (
                                     <span className={`sis-stock ${(item.current_stock || 0) <= 0 ? 'sis-stock--out' : ''}`}>
-                                        {item.current_stock || 0} {item.unit}
+                                        {Number(item.current_stock || 0).toLocaleString('en-GB', { maximumFractionDigits: 2 })} {item.unit}
                                     </span>
                                 )}
                             </div>

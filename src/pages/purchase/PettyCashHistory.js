@@ -3,18 +3,22 @@ import { MdReceipt, MdVisibility, MdRefresh, MdImage } from 'react-icons/md';
 import { getPettyCashPurchases } from '../../services/pettyCashService';
 import PettyCashInvoiceDetail from './PettyCashInvoiceDetail';
 import toast from 'react-hot-toast';
+import { useAuth } from '../../contexts/AuthContext';
 import './Purchase.css';
 
 const PettyCashHistory = () => {
+    const { userProfile, currentUser } = useAuth();
     const [purchases, setPurchases] = useState([]);
     const [loading, setLoading] = useState(true);
     const [viewInvoice, setViewInvoice] = useState(null);
     const [receiptImg, setReceiptImg] = useState(null);
+    const isRestaurant = ['restaurant_manager', 'restaurant_manager_non_managed'].includes(userProfile?.role);
+    const restaurantId = userProfile?.restaurant_id || currentUser?.uid || '';
 
     const fetchData = async () => {
         setLoading(true);
         try {
-            const data = await getPettyCashPurchases();
+            const data = await getPettyCashPurchases(isRestaurant ? restaurantId : '');
             setPurchases(data);
         } catch (err) {
             console.error(err);
@@ -24,7 +28,7 @@ const PettyCashHistory = () => {
         }
     };
 
-    useEffect(() => { fetchData(); }, []);
+    useEffect(() => { fetchData(); }, [restaurantId, isRestaurant]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const formatDate = (date) => {
         if (!date) return '—';
@@ -49,8 +53,8 @@ const PettyCashHistory = () => {
         <div className="page-container">
             <div className="page-header">
                 <div>
-                    <h1><MdReceipt style={{ verticalAlign: 'middle', marginRight: 8 }} />Petty Cash History</h1>
-                    <p>View all emergency cash and card purchases with invoices.</p>
+                    <h1><MdReceipt style={{ verticalAlign: 'middle', marginRight: 8 }} />Quick Purchase History</h1>
+                    <p>{isRestaurant ? 'View purchases made for this restaurant only.' : 'View all emergency cash and card purchases with invoices.'}</p>
                 </div>
                 <button className="btn btn-secondary btn-sm" onClick={fetchData} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <MdRefresh /> Refresh

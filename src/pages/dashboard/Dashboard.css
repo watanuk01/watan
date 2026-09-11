@@ -1375,4 +1375,823 @@
     margin: 0 0 12px 0;
     font-size: 0.875rem;
     color: var(--color-text-primary);
-}
+}
+
+/* ============================================
+   STOCK TRANSFER ANALYTICS (Executive UI)
+   ============================================ */
+
+.transfer-analytics-container {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    animation: fadeIn var(--transition-base) ease-out;
+}
+
+/* Scope Filter Header Banner */
+.transfer-scope-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+    padding: 16px 20px;
+    background: linear-gradient(135deg, rgba(201, 169, 110, 0.08) 0%, rgba(26, 29, 46, 0.95) 100%);
+    border: 1px solid rgba(201, 169, 110, 0.22);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+
+.transfer-scope-left {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.transfer-scope-icon-wrap {
+    width: 42px;
+    height: 42px;
+    border-radius: var(--radius-md);
+    background: rgba(201, 169, 110, 0.15);
+    border: 1px solid rgba(201, 169, 110, 0.3);
+    color: var(--color-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.4rem;
+}
+
+.transfer-scope-title {
+    font-family: var(--font-heading);
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--color-text-primary);
+    letter-spacing: 0.01em;
+}
+
+.transfer-scope-subtitle {
+    font-size: 0.8rem;
+    color: var(--color-text-secondary);
+    margin-top: 2px;
+}
+
+.transfer-scope-pills {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.transfer-scope-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: var(--radius-full, 9999px);
+    font-size: 0.8rem;
+    color: var(--color-text-secondary);
+}
+
+.transfer-scope-pill strong {
+    color: var(--color-text-primary);
+}
+
+.transfer-scope-pill .pill-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-primary);
+}
+
+.transfer-reset-pill-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 12px;
+    background: rgba(239, 68, 68, 0.12);
+    border: 1px solid rgba(239, 68, 68, 0.25);
+    border-radius: var(--radius-full, 9999px);
+    color: #fca5a5;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.transfer-reset-pill-btn:hover {
+    background: rgba(239, 68, 68, 0.22);
+    color: #fff;
+}
+
+/* KPI Cards */
+.transfer-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+}
+
+@media (max-width: 1024px) {
+    .transfer-kpi-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 640px) {
+    .transfer-kpi-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.transfer-kpi-card {
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: 18px 20px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.transfer-kpi-card:hover {
+    transform: translateY(-2px);
+}
+
+.transfer-kpi-card.gold-glow {
+    border-top: 3px solid #c9a96e;
+    box-shadow: 0 4px 20px rgba(201, 169, 110, 0.08);
+}
+
+.transfer-kpi-card.amber-glow {
+    border-top: 3px solid #f59e0b;
+    box-shadow: 0 4px 20px rgba(245, 158, 11, 0.08);
+}
+
+.transfer-kpi-card.green-glow {
+    border-top: 3px solid #22c55e;
+    box-shadow: 0 4px 20px rgba(34, 197, 94, 0.08);
+}
+
+.transfer-kpi-card.blue-glow {
+    border-top: 3px solid #3b82f6;
+    box-shadow: 0 4px 20px rgba(59, 130, 246, 0.08);
+}
+
+.transfer-kpi-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+
+.transfer-kpi-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-text-secondary);
+}
+
+.transfer-kpi-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.15rem;
+}
+
+.transfer-kpi-icon.gold {
+    background: rgba(201, 169, 110, 0.15);
+    color: #c9a96e;
+}
+
+.transfer-kpi-icon.amber {
+    background: rgba(245, 158, 11, 0.15);
+    color: #f59e0b;
+}
+
+.transfer-kpi-icon.green {
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+}
+
+.transfer-kpi-icon.blue {
+    background: rgba(59, 130, 246, 0.15);
+    color: #3b82f6;
+}
+
+.transfer-kpi-value {
+    font-size: 1.85rem;
+    font-weight: 800;
+    line-height: 1.1;
+    margin-bottom: 8px;
+    letter-spacing: -0.02em;
+}
+
+.transfer-kpi-value.gold { color: #c9a96e; }
+.transfer-kpi-value.amber { color: #f59e0b; }
+.transfer-kpi-value.green { color: #22c55e; }
+.transfer-kpi-value.blue { color: #60a5fa; }
+
+.transfer-kpi-sub {
+    font-size: 0.775rem;
+    color: var(--color-text-muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.transfer-kpi-sub .dot-sep {
+    color: var(--color-border-strong);
+}
+
+/* Branch Focus Card */
+.transfer-branch-focus-card {
+    background: linear-gradient(135deg, rgba(30, 34, 56, 0.95), rgba(24, 27, 46, 0.95));
+    border: 1px solid rgba(201, 169, 110, 0.28);
+    border-radius: var(--radius-lg);
+    padding: 20px 24px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+}
+
+.transfer-focus-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    margin-bottom: 16px;
+}
+
+.transfer-focus-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--color-text-primary);
+}
+
+.transfer-focus-title strong {
+    color: var(--color-primary);
+}
+
+.transfer-net-badge {
+    padding: 6px 14px;
+    border-radius: var(--radius-full, 9999px);
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+.transfer-net-badge.net-positive {
+    background: rgba(34, 197, 94, 0.15);
+    border: 1px solid rgba(34, 197, 94, 0.35);
+    color: #4ade80;
+}
+
+.transfer-net-badge.net-negative {
+    background: rgba(245, 158, 11, 0.15);
+    border: 1px solid rgba(245, 158, 11, 0.35);
+    color: #fbbf24;
+}
+
+.transfer-focus-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+}
+
+@media (max-width: 768px) {
+    .transfer-focus-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.transfer-focus-col {
+    background: rgba(0, 0, 0, 0.15);
+    padding: 14px 16px;
+    border-radius: var(--radius-md);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.focus-col-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.775rem;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    margin-bottom: 6px;
+}
+
+.focus-col-val {
+    font-size: 1.4rem;
+    font-weight: 800;
+    line-height: 1.2;
+    margin-bottom: 4px;
+}
+
+.focus-col-sub {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+}
+
+/* 2-Column Grids */
+.transfer-grid-2col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+
+.transfer-grid-bottom {
+    display: grid;
+    grid-template-columns: 1fr 1.6fr;
+    gap: 20px;
+}
+
+@media (max-width: 1024px) {
+    .transfer-grid-2col,
+    .transfer-grid-bottom {
+        grid-template-columns: 1fr;
+    }
+}
+
+.transfer-card {
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: 20px 22px;
+}
+
+.transfer-card-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 18px;
+}
+
+.transfer-card-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--color-text-primary);
+    margin: 0;
+}
+
+.transfer-card-subtitle {
+    font-size: 0.775rem;
+    color: var(--color-text-muted);
+    margin-top: 3px;
+}
+
+.transfer-header-count {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--color-primary);
+    background: rgba(201, 169, 110, 0.12);
+    border: 1px solid rgba(201, 169, 110, 0.25);
+    padding: 3px 10px;
+    border-radius: var(--radius-full, 9999px);
+    white-space: nowrap;
+}
+
+/* Stacked Progress Bar */
+.transfer-pipeline-bar-wrapper {
+    margin-bottom: 18px;
+}
+
+.transfer-pipeline-bar {
+    height: 10px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 5px;
+    overflow: hidden;
+    display: flex;
+}
+
+.pipeline-seg {
+    height: 100%;
+    transition: width 0.3s ease;
+}
+
+.pipeline-seg.requested { background: #f59e0b; }
+.pipeline-seg.accepted { background: #3b82f6; }
+.pipeline-seg.received { background: #22c55e; }
+.pipeline-seg.rejected { background: #ef4444; }
+
+/* Status List */
+.transfer-status-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.transfer-status-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: var(--radius-md);
+    transition: background 0.15s ease;
+}
+
+.transfer-status-row:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.status-row-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: var(--radius-full, 9999px);
+    font-size: 0.75rem;
+    font-weight: 700;
+    border: 1px solid;
+    white-space: nowrap;
+}
+
+.status-badge-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+}
+
+.status-desc {
+    font-size: 0.775rem;
+    color: var(--color-text-secondary);
+}
+
+@media (max-width: 640px) {
+    .status-desc {
+        display: none;
+    }
+}
+
+.status-row-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.status-pct {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+}
+
+.status-count {
+    font-size: 1.05rem;
+    font-weight: 800;
+    min-width: 24px;
+    text-align: right;
+}
+
+/* Routes List */
+.transfer-routes-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.transfer-route-item {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: var(--radius-md);
+    padding: 12px 14px;
+    transition: all 0.2s ease;
+}
+
+.transfer-route-item:hover {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(201, 169, 110, 0.2);
+}
+
+.route-item-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.route-flow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.825rem;
+}
+
+.route-branch {
+    font-weight: 600;
+    color: var(--color-text-primary);
+}
+
+.route-arrow {
+    display: flex;
+    align-items: center;
+    color: var(--color-primary);
+    font-size: 0.95rem;
+}
+
+.route-count-badge {
+    font-size: 0.75rem;
+    color: var(--color-text-secondary);
+    background: rgba(255, 255, 255, 0.05);
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+}
+
+.route-count-badge strong {
+    color: var(--color-text-primary);
+}
+
+.route-bar-bg {
+    height: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-bottom: 8px;
+}
+
+.route-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #c9a96e, #e2c992);
+    border-radius: 2px;
+}
+
+.route-sub-info {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    font-size: 0.725rem;
+    color: var(--color-text-muted);
+}
+
+.route-sub-info strong {
+    color: var(--color-text-secondary);
+}
+
+/* Most Transferred Items */
+.transfer-items-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.transfer-item-card {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: var(--radius-md);
+    padding: 12px 14px;
+    transition: all 0.2s ease;
+}
+
+.transfer-item-card:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.transfer-item-main {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.transfer-item-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.transfer-rank-badge {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--color-text-muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
+.transfer-rank-badge.gold-rank {
+    background: linear-gradient(135deg, #c9a96e, #997838);
+    color: #1a1d2e;
+    box-shadow: 0 0 10px rgba(201, 169, 110, 0.4);
+}
+
+.transfer-item-name {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--color-text-primary);
+}
+
+.transfer-item-meta {
+    font-size: 0.725rem;
+    color: var(--color-text-muted);
+}
+
+.transfer-item-qty {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+}
+
+.transfer-item-qty strong {
+    font-size: 1.1rem;
+    font-weight: 800;
+    color: #22c55e;
+}
+
+.transfer-item-qty .unit-label {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+}
+
+.item-bar-bg {
+    height: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.item-bar-fill {
+    height: 100%;
+    background: #3b82f6;
+    border-radius: 2px;
+}
+
+.item-bar-fill.gold {
+    background: #c9a96e;
+}
+
+/* Recent Transfers Table */
+.transfer-table-card {
+    display: flex;
+    flex-direction: column;
+}
+
+.transfer-table-wrapper {
+    overflow-x: auto;
+    border-radius: var(--radius-md);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.transfer-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+}
+
+.transfer-table th {
+    background: rgba(255, 255, 255, 0.03);
+    padding: 10px 14px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-text-secondary);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    white-space: nowrap;
+}
+
+.transfer-table td {
+    padding: 12px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    vertical-align: middle;
+}
+
+.transfer-table tr:hover td {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.transfer-td-date .transfer-date-main {
+    font-weight: 600;
+    color: var(--color-text-primary);
+    white-space: nowrap;
+}
+
+.transfer-route-pill-flow {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+.route-pill-lender {
+    font-weight: 600;
+    color: #93c5fd;
+}
+
+.route-pill-borrower {
+    font-weight: 600;
+    color: #c4b5fd;
+}
+
+.route-pill-arrow {
+    color: var(--color-primary);
+    font-size: 0.85rem;
+}
+
+.transfer-items-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.transfer-item-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: var(--radius-sm);
+    font-size: 0.725rem;
+    color: var(--color-text-secondary);
+    white-space: nowrap;
+}
+
+.transfer-item-tag strong {
+    color: var(--color-text-primary);
+}
+
+.transfer-td-val strong {
+    color: #c9a96e;
+    font-weight: 700;
+    font-size: 0.875rem;
+}
+
+/* Empty States */
+.transfer-empty-card {
+    text-align: center;
+    padding: 60px 20px;
+    background: var(--color-bg-surface);
+    border: 1px dashed rgba(255, 255, 255, 0.15);
+    border-radius: var(--radius-lg);
+}
+
+.transfer-empty-icon-wrap {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--color-text-muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2rem;
+    margin: 0 auto 16px;
+}
+
+.transfer-empty-card h3 {
+    font-size: 1.15rem;
+    color: var(--color-text-primary);
+    margin: 0 0 8px;
+}
+
+.transfer-empty-card p {
+    font-size: 0.85rem;
+    color: var(--color-text-muted);
+    margin: 0;
+}
+
+.transfer-sub-empty {
+    text-align: center;
+    padding: 40px 16px;
+    color: var(--color-text-muted);
+    font-size: 0.825rem;
+}
+
+.transfer-loading-card {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 60px 20px;
+    color: var(--color-text-secondary);
+    font-size: 0.95rem;
+}
+
+.transfer-loading-card .spin {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+

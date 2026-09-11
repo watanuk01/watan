@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { MdShoppingCart, MdDelete, MdReceipt, MdPayment } from 'react-icons/md';
 import { getItems } from '../../services/inventoryService';
+import { getRestaurantInventory } from '../../services/restaurantInventoryService';
 import { savePettyCashPurchase } from '../../services/pettyCashService';
 import { useAuth } from '../../contexts/AuthContext';
 import SmartItemSearch from '../../components/common/SmartItemSearch';
@@ -15,12 +16,15 @@ const QuickPurchase = () => {
     const [receipt, setReceipt] = useState('');
     const [saving, setSaving] = useState(false);
     const [notes, setNotes] = useState('');
+    const [category, setCategory] = useState('All');
+    const isRestaurantPurchase = ['restaurant_manager', 'restaurant_manager_non_managed'].includes(userProfile?.role);
+    const restaurantId = userProfile?.restaurant_id || userProfile?.id || '';
 
     useEffect(() => {
-        getItems({ status: 'active' })
+        (isRestaurantPurchase ? getRestaurantInventory(restaurantId) : getItems({ status: 'active' }))
             .then(setInventory)
             .catch(() => toast.error('Could not load inventory'));
-    }, []);
+    }, [isRestaurantPurchase, restaurantId]);
 
     const addItem = (item) => {
         if (lines.some(x => x.id === item.id)) {
@@ -64,6 +68,8 @@ const QuickPurchase = () => {
     };
 
     const total = lines.reduce((s, x) => s + Number(x.quantity || 0) * Number(x.unit_price || 0), 0);
+    const categories = ['All', ...new Set(inventory.map(item => item.category_name).filter(Boolean))];
+    const filteredInventory = category === 'All' ? inventory : inventory.filter(item => item.category_name === category);
 
     const save = async (e) => {
         e.preventDefault();
@@ -76,6 +82,8 @@ const QuickPurchase = () => {
                 receipt_base64: receipt,
                 created_by: { id: userProfile?.id, name: userProfile?.name },
                 notes,
+                restaurant_id: isRestaurantPurchase ? restaurantId : '',
+                restaurant_name: isRestaurantPurchase ? (userProfile?.restaurant_name || userProfile?.name || '') : '',
             });
             toast.success(`Purchase saved! Invoice ${result.invoiceNumber} created`);
             setLines([]);
@@ -93,7 +101,7 @@ const QuickPurchase = () => {
             <div className="page-header">
                 <div>
                     <h1><MdShoppingCart style={{ verticalAlign: 'middle', marginRight: 8 }} />Quick Purchase</h1>
-                    <p>Log an emergency local purchase and update inventory immediately.</p>
+                    <p>Log an emergency local purchase and update {isRestaurantPurchase ? 'restaurant' : 'central kitchen'} inventory immediately.</p>
                 </div>
             </div>
 
@@ -104,13 +112,17 @@ const QuickPurchase = () => {
                         Add Items
                     </h3>
                     <div style={{ marginBottom: 16 }}>
+                        <label className="form-label">Category</label>
+                        <select className="form-select" value={category} onChange={e => setCategory(e.target.value)} style={{ marginBottom: 12 }}>
+                            {categories.map(value => <option key={value} value={value}>{value}</option>)}
+                        </select>
                         <SmartItemSearch
-                            items={inventory}
+                            items={filteredInventory}
                             onSelect={addItem}
                             onAddNew={addNewItem}
                             placeholder="Search inventory items or add new..."
                             excludeIds={lines.map(l => l.id)}
-                            nameKey="name"
+                            nameKey={isRestaurantPurchase ? 'item_name' : 'name'}
                             showCostPrice={true}
                             allowNew={true}
                         />

@@ -266,6 +266,7 @@
 }
 
 .st-transfer-value {
+    display: none;
     font-weight: 700;
     color: var(--color-primary, #c9a96e);
     font-size: var(--text-sm, 14px);

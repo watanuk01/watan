@@ -244,8 +244,8 @@ const AppRouter = () => {
                             </ProtectedRoute>
                         }
                     />
-                    <Route path="/purchase/quick" element={<ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef']}><QuickPurchase /></ProtectedRoute>} />
-                    <Route path="/purchase/petty-cash-history" element={<ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef']}><PettyCashHistory /></ProtectedRoute>} />
+                    <Route path="/purchase/quick" element={<ProtectedRoute allowedRoles={['admin', 'super_admin', 'ck_staff', 'chef', 'restaurant_manager', 'restaurant_manager_non_managed']}><QuickPurchase /></ProtectedRoute>} />
+                    <Route path="/purchase/petty-cash-history" element={<ProtectedRoute allowedRoles={['admin', 'super_admin', 'ck_staff', 'chef', 'restaurant_manager', 'restaurant_manager_non_managed']}><PettyCashHistory /></ProtectedRoute>} />
                     <Route
                         path="/production/start"
                         element={
@@ -441,7 +441,7 @@ const AppRouter = () => {
                     <Route
                         path="/reports/*"
                         element={
-                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'butcher']}>
+                                <ProtectedRoute allowedRoles={['admin', 'super_admin', 'ck_staff', 'butcher']}>
                                 <ReportsPage />
                             </ProtectedRoute>
                         }

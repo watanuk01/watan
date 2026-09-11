@@ -1,6 +1,7 @@
 import { addDoc, collection, getDocs, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import { addBatch, adjustStock, addItem } from './inventoryService';
+import { addStockFromDelivery } from './restaurantInventoryService';
 
 const PURCHASES = 'petty_cash_purchases';
 
@@ -17,7 +18,7 @@ const generatePCInvoiceNumber = async () => {
 /**
  * Save a petty cash purchase, update stock, and generate an invoice record.
  */
-export const savePettyCashPurchase = async ({ items, payment_method, receipt_base64, created_by, notes = '' }) => {
+export const savePettyCashPurchase = async ({ items, payment_method, receipt_base64, created_by, notes = '', restaurant_id = '', restaurant_name = '' }) => {
   const lines = items
     .filter(i => Number(i.quantity) > 0 && Number(i.unit_price) >= 0)
     .map(i => ({
@@ -30,7 +31,13 @@ export const savePettyCashPurchase = async ({ items, payment_method, receipt_bas
   if (!lines.length) throw new Error('Add at least one item');
 
   // ── Stock adjustments ──
-  for (const item of lines) {
+  if (restaurant_id) {
+    await addStockFromDelivery(restaurant_id, lines.map(item => ({
+      ...item,
+      item_id: item.item_id || item.id || '',
+      item_name: item.name || item.item_name || '',
+    })), 'Quick Purchase');
+  } else for (const item of lines) {
     let itemId = item.id;
 
     // If custom/new item, create it in inventory first
@@ -90,6 +97,8 @@ export const savePettyCashPurchase = async ({ items, payment_method, receipt_bas
     total,
     notes,
     created_by,
+    restaurant_id,
+    restaurant_name,
     created_at: serverTimestamp(),
 
     // Invoice fields
@@ -117,7 +126,7 @@ export const savePettyCashPurchase = async ({ items, payment_method, receipt_bas
 /**
  * Get all petty cash purchases (most recent first).
  */
-export const getPettyCashPurchases = async () => {
+export const getPettyCashPurchases = async (restaurantId = '') => {
   const snap = await getDocs(collection(db, PURCHASES));
   return snap.docs
     .map(d => ({
@@ -125,6 +134,7 @@ export const getPettyCashPurchases = async () => {
       ...d.data(),
       created_at: d.data().created_at?.toDate?.() || null,
     }))
+    .filter(purchase => !restaurantId || purchase.restaurant_id === restaurantId)
     .sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
 };
 
