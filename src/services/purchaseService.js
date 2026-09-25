@@ -26,6 +26,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { addBatch, generateBatchNumber } from './inventoryService';
+import { addStockFromDelivery } from './restaurantInventoryService';
 
 // ─── COLLECTION ───
 const PURCHASE_ORDERS = 'purchase_orders';
@@ -98,6 +99,9 @@ export const createPurchaseOrder = async (data) => {
         notes: data.notes || '',
         status: 'pending',
         created_by: data.created_by || '',
+        created_by_uid: data.created_by_uid || '',
+        restaurant_id: data.restaurant_id || '',
+        restaurant_name: data.restaurant_name || '',
         created_at: serverTimestamp(),
         updated_at: serverTimestamp(),
     };
@@ -146,6 +150,15 @@ export const getPurchaseOrders = async (filters = {}) => {
         const to = new Date(filters.dateTo);
         to.setHours(23, 59, 59, 999);
         orders = orders.filter(o => o.created_at && o.created_at <= to);
+    }
+
+    // Client-side restaurant scoping filter
+    if (filters.restaurant_id) {
+        orders = orders.filter(o =>
+            o.restaurant_id === filters.restaurant_id ||
+            o.created_by_uid === filters.restaurant_id ||
+            (filters.restaurant_name && o.restaurant_name === filters.restaurant_name)
+        );
     }
 
     // Sort by created_at descending
@@ -213,7 +226,9 @@ export const receivePurchaseOrder = async (orderId, receivedItems, receivedBy = 
             expiry_date: received.expiry_date || null,
         };
 
-        if (lineItem.item_type === 'raw_meat') {
+        if (orderData.restaurant_id) {
+            // Restaurant PO: stock will be routed to restaurant_inventory below
+        } else if (lineItem.item_type === 'raw_meat') {
             // Create batch for raw meat
             const batch = await addBatch({
                 item_id: lineItem.item_id,
@@ -234,12 +249,30 @@ export const receivePurchaseOrder = async (orderId, receivedItems, receivedBy = 
             createdBatches.push(batch);
             // addBatch already increments item stock
         } else {
-            // Grocery: directly increment stock
+            // Grocery: directly increment stock in CK inventory
             await updateDoc(doc(db, 'inventory_items', lineItem.item_id), {
                 current_stock: increment(receivedQty),
                 cost_price: received.received_price != null ? Number(received.received_price) : Number(lineItem.unit_price || 0),
                 updated_at: serverTimestamp(),
             });
+        }
+    }
+
+    // If this is a restaurant purchase order, add received items to restaurant inventory
+    if (orderData.restaurant_id) {
+        const restLines = updatedItems
+            .filter(i => (Number(i.received_quantity) || 0) > 0)
+            .map(i => ({
+                item_id: i.item_id,
+                item_name: i.item_name,
+                item_type: i.item_type || 'grocery',
+                category_name: i.category_name || '',
+                quantity: Number(i.received_quantity) || 0,
+                unit: i.unit || 'unit',
+                cost_price: i.received_price != null ? Number(i.received_price) : Number(i.unit_price || 0),
+            }));
+        if (restLines.length > 0) {
+            await addStockFromDelivery(orderData.restaurant_id, restLines, orderData.po_number || 'PO');
         }
     }
 

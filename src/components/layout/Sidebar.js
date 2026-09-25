@@ -222,8 +222,16 @@ const Sidebar = () => {
                     { type: 'section', label: 'Operations' },
                     { type: 'item', label: 'Order from CK', icon: MdShoppingCart, path: '/restaurant/order' },
                     { type: 'item', label: 'My Inventory', icon: MdInventory2, path: '/restaurant/inventory' },
-                    { type: 'item', label: 'Quick Purchase', icon: MdShoppingCart, path: '/purchase/quick' },
-                    { type: 'item', label: 'Quick Purchase History', icon: MdHistory, path: '/purchase/petty-cash-history' },
+                    {
+                        type: 'submenu', label: 'Purchase', icon: MdShoppingCart, key: 'purchase',
+                        children: [
+                            { label: 'Create Order', path: '/purchase/create' },
+                            { label: 'Pending Orders', path: '/purchase/pending' },
+                            { label: 'Purchase History', path: '/purchase/history' },
+                            { label: 'Quick Purchase', path: '/purchase/quick' },
+                            { label: 'Petty Cash History', path: '/purchase/petty-cash-history' },
+                        ]
+                    },
                     { type: 'item', label: 'Stock Transfers', icon: MdSync, path: '/restaurant/stock-transfers' },
                     { type: 'item', label: 'Order History', icon: MdHistory, path: '/restaurant/orders' },
                     { type: 'item', label: 'Waste Management', icon: MdDelete, path: '/waste' },
@@ -242,8 +250,16 @@ const Sidebar = () => {
                     { type: 'section', label: 'Operations' },
                     { type: 'item', label: 'Order from CK', icon: MdShoppingCart, path: '/restaurant/order' },
                     { type: 'item', label: 'My Inventory', icon: MdInventory2, path: '/restaurant/inventory' },
-                    { type: 'item', label: 'Quick Purchase', icon: MdShoppingCart, path: '/purchase/quick' },
-                    { type: 'item', label: 'Quick Purchase History', icon: MdHistory, path: '/purchase/petty-cash-history' },
+                    {
+                        type: 'submenu', label: 'Purchase', icon: MdShoppingCart, key: 'purchase',
+                        children: [
+                            { label: 'Create Order', path: '/purchase/create' },
+                            { label: 'Pending Orders', path: '/purchase/pending' },
+                            { label: 'Purchase History', path: '/purchase/history' },
+                            { label: 'Quick Purchase', path: '/purchase/quick' },
+                            { label: 'Petty Cash History', path: '/purchase/petty-cash-history' },
+                        ]
+                    },
                     { type: 'item', label: 'Stock Transfers', icon: MdSync, path: '/restaurant/stock-transfers' },
                     { type: 'item', label: 'Order History', icon: MdHistory, path: '/restaurant/orders' },
                     { type: 'item', label: 'Waste Management', icon: MdDelete, path: '/waste' },

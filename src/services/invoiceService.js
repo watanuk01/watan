@@ -187,10 +187,12 @@ const getRestaurantProfile = async (restaurantId) => {
 // ═══════════════════════════════════════════════════════
 
 /**
- * Generate a VAT-compliant invoice for a specific order.
+ * Generate VAT-compliant invoice(s) for a specific order.
+ * If the order contains both grocery AND meat (raw_meat/cooked_meat) items,
+ * two separate invoices are created. Otherwise, a single invoice is generated.
  *
  * @param {string} orderId — Firestore order document ID
- * @returns {Object} — The created invoice document
+ * @returns {Object|Array} — The created invoice(s)
  */
 export const generateOrderInvoice = async (orderId) => {
     // 1. Fetch order
@@ -198,7 +200,7 @@ export const generateOrderInvoice = async (orderId) => {
     if (!orderSnap.exists()) throw new Error('Order not found');
     const order = { id: orderSnap.id, ...orderSnap.data() };
 
-    // 2. Check if invoice already exists for this order
+    // 2. Check if invoice(s) already exist for this order
     const existingQ = query(
         collection(db, INVOICES),
         where('type', '==', 'order'),
@@ -206,7 +208,7 @@ export const generateOrderInvoice = async (orderId) => {
     );
     const existingSnap = await getDocs(existingQ);
     if (existingSnap.size > 0) {
-        // Return existing invoice
+        // Return existing invoice (use the first one as the "primary")
         const existing = existingSnap.docs[0];
         return { id: existing.id, ...existing.data() };
     }
@@ -217,98 +219,119 @@ export const generateOrderInvoice = async (orderId) => {
     // 4. Get restaurant profile for billing info
     const restaurantProfile = await getRestaurantProfile(order.restaurant_id);
 
-    // 5. Generate invoice number
-    const invoiceNumber = await generateInvoiceNumber('INV');
+    // 5. Split items into grocery vs meat (cooked_meat + raw_meat)
+    const allItems = order.items || [];
+    const groceryItems = allItems.filter(i => (i.item_type || 'grocery') === 'grocery');
+    const meatItems = allItems.filter(i => ['raw_meat', 'cooked_meat'].includes(i.item_type));
 
-    // 6. Build line items with VAT
-    const lineItems = (order.items || []).map(item => {
-        const netAmount = (item.selling_price || 0) * (item.quantity || 0);
-        const vatRate = item.vat_exempt ? 0 : (item.vat_rate ?? 20);
-        const vatAmount = netAmount * (vatRate / 100);
-        return {
-            item_id: item.item_id,
-            description: item.item_name,
-            item_type: item.item_type || 'grocery',
-            category_name: item.category_name || '',
-            quantity: item.quantity || 0,
-            unit: item.unit || 'kg',
-            unit_price: item.selling_price || 0,
-            vat_rate: vatRate,
-            vat_exempt: item.vat_exempt || false,
-            net_amount: Math.round(netAmount * 100) / 100,
-            vat_amount: Math.round(vatAmount * 100) / 100,
-            gross_amount: Math.round((netAmount + vatAmount) * 100) / 100,
+    const hasBothTypes = groceryItems.length > 0 && meatItems.length > 0;
+
+    // Helper: create a single invoice from a subset of items
+    const createInvoiceForItems = async (items, suffix, invoiceCategory) => {
+        const invoiceNumber = await generateInvoiceNumber(suffix);
+
+        const lineItems = items.map(item => {
+            const netAmount = (item.selling_price || 0) * (item.quantity || 0);
+            const vatRate = item.vat_exempt ? 0 : (item.vat_rate ?? 20);
+            const vatAmount = netAmount * (vatRate / 100);
+            return {
+                item_id: item.item_id,
+                description: item.item_name,
+                item_type: item.item_type || 'grocery',
+                category_name: item.category_name || '',
+                quantity: item.quantity || 0,
+                unit: item.unit || 'kg',
+                unit_price: item.selling_price || 0,
+                vat_rate: vatRate,
+                vat_exempt: item.vat_exempt || false,
+                net_amount: Math.round(netAmount * 100) / 100,
+                vat_amount: Math.round(vatAmount * 100) / 100,
+                gross_amount: Math.round((netAmount + vatAmount) * 100) / 100,
+            };
+        });
+
+        const vatSummary = buildVatSummary(lineItems);
+        const totals = calculateTotals(lineItems);
+
+        const invoiceDate = new Date();
+        const supplyDate = convertTimestamp(order.ready_at) || convertTimestamp(order.created_at) || invoiceDate;
+
+        const invoice = {
+            invoice_number: invoiceNumber,
+            type: 'order',
+            invoice_category: invoiceCategory, // 'grocery', 'meat', or 'mixed'
+            order_id: orderId,
+            order_number: order.order_number || '',
+            supplier: {
+                name: supplier.name,
+                address: supplier.address,
+                vat_number: supplier.vat_number,
+                phone: supplier.phone || '',
+                email: supplier.email || '',
+            },
+            customer: {
+                name: restaurantProfile?.name || order.restaurant_name || '',
+                restaurant_name: restaurantProfile?.restaurant_name || order.restaurant_name || '',
+                restaurant_id: order.restaurant_id || '',
+                address: restaurantProfile?.address || '',
+                vat_number: restaurantProfile?.vat_number || '',
+                email: restaurantProfile?.email || '',
+                phone: restaurantProfile?.phone || '',
+            },
+            invoice_date: Timestamp.fromDate(invoiceDate),
+            supply_date: Timestamp.fromDate(supplyDate instanceof Date ? supplyDate : new Date(supplyDate)),
+            line_items: lineItems,
+            vat_summary: vatSummary,
+            ...totals,
+            discount_type: 'none',
+            discount_value: 0,
+            discount_amount: 0,
+            status: 'issued',
+            xero_status: null,
+            xero_invoice_id: null,
+            notes: order.notes || '',
+            created_at: serverTimestamp(),
+            updated_at: serverTimestamp(),
         };
-    });
 
-    // 7. VAT Summary
-    const vatSummary = buildVatSummary(lineItems);
-
-    // 8. Calculate totals (no discount initially)
-    const totals = calculateTotals(lineItems);
-
-    // 9. Build the invoice document
-    const invoiceDate = new Date();
-    const supplyDate = convertTimestamp(order.ready_at) || convertTimestamp(order.created_at) || invoiceDate;
-
-    const invoice = {
-        invoice_number: invoiceNumber,
-        type: 'order',
-        // Order reference
-        order_id: orderId,
-        order_number: order.order_number || '',
-        // Parties
-        supplier: {
-            name: supplier.name,
-            address: supplier.address,
-            vat_number: supplier.vat_number,
-            phone: supplier.phone || '',
-            email: supplier.email || '',
-        },
-        customer: {
-            name: restaurantProfile?.name || order.restaurant_name || '',
-            restaurant_name: restaurantProfile?.restaurant_name || order.restaurant_name || '',
-            restaurant_id: order.restaurant_id || '',
-            address: restaurantProfile?.address || '',
-            vat_number: restaurantProfile?.vat_number || '',
-            email: restaurantProfile?.email || '',
-            phone: restaurantProfile?.phone || '',
-        },
-        // Dates
-        invoice_date: Timestamp.fromDate(invoiceDate),
-        supply_date: Timestamp.fromDate(supplyDate instanceof Date ? supplyDate : new Date(supplyDate)),
-        // Line items & VAT
-        line_items: lineItems,
-        vat_summary: vatSummary,
-        // Totals
-        ...totals,
-        // Discount (default: none)
-        discount_type: 'none',
-        discount_value: 0,
-        discount_amount: 0,
-        // Status
-        status: 'issued',
-        xero_status: null,
-        xero_invoice_id: null,
-        // Notes
-        notes: order.notes || '',
-        // Timestamps
-        created_at: serverTimestamp(),
-        updated_at: serverTimestamp(),
+        const docRef = await addDoc(collection(db, INVOICES), invoice);
+        return { id: docRef.id, ...invoice, invoice_number: invoiceNumber };
     };
 
-    // 10. Save to Firestore
-    const docRef = await addDoc(collection(db, INVOICES), invoice);
+    if (hasBothTypes) {
+        // Create TWO separate invoices
+        const groceryInvoice = await createInvoiceForItems(groceryItems, 'INV-G', 'grocery');
+        const meatInvoice = await createInvoiceForItems(meatItems, 'INV-M', 'meat');
 
-    // 11. Update the order with the invoice number
-    await updateDoc(doc(db, ORDERS, orderId), {
-        invoice_number: invoiceNumber,
-        invoice_id: docRef.id,
-        updated_at: serverTimestamp(),
-    });
+        // Update the order with both invoice references
+        await updateDoc(doc(db, ORDERS, orderId), {
+            invoice_number: groceryInvoice.invoice_number,
+            invoice_id: groceryInvoice.id,
+            split_invoices: [
+                { id: groceryInvoice.id, invoice_number: groceryInvoice.invoice_number, category: 'grocery' },
+                { id: meatInvoice.id, invoice_number: meatInvoice.invoice_number, category: 'meat' },
+            ],
+            updated_at: serverTimestamp(),
+        });
 
-    return { id: docRef.id, ...invoice };
+        // Return the grocery invoice as the "primary" for backward compatibility
+        return groceryInvoice;
+    } else {
+        // Single invoice (all items are the same type)
+        const category = meatItems.length > 0 ? 'meat' : 'grocery';
+        const invoice = await createInvoiceForItems(allItems, 'INV', category);
+
+        // Update the order with the invoice number
+        await updateDoc(doc(db, ORDERS, orderId), {
+            invoice_number: invoice.invoice_number,
+            invoice_id: invoice.id,
+            updated_at: serverTimestamp(),
+        });
+
+        return invoice;
+    }
 };
+
 
 // ═══════════════════════════════════════════════════════
 //  REGENERATE INVOICE VAT FROM ORDER DATA

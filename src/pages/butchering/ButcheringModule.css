@@ -655,8 +655,19 @@ select option {
 .genealogy-wrapper {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
-    padding: 16px 8px 36px;
+    padding: 16px 0 36px;
     width: 100%;
+    box-sizing: border-box;
+}
+
+.genealogy-tree-canvas {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 100%;
+    width: max-content;
+    box-sizing: border-box;
+    padding: 16px 64px 48px;
 }
 
 .tree-node-column {
@@ -665,6 +676,8 @@ select option {
     align-items: center;
     position: relative;
     flex-shrink: 0;
+    width: max-content;
+    min-width: min-content;
 }
 
 .tree-node-wrapper {
@@ -1337,4 +1350,121 @@ select option {
     background: var(--color-primary-muted, rgba(207, 197, 155, 0.15));
     border-color: var(--color-primary, #cfc59b);
 }
+
+/* ─── Batch Category Filter Pills & Search ─── */
+.batch-filter-bar {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 18px;
+    background: var(--color-bg, #0f121d);
+    border: 1px solid var(--color-border, #2a2d42);
+    border-radius: var(--radius-lg, 10px);
+    padding: 14px 16px;
+}
+
+.batch-category-pills {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.batch-category-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    background: var(--color-surface, #181b2a);
+    border: 1px solid var(--color-border, #2a2d42);
+    color: var(--color-text-secondary, #94a3b8);
+    transition: all 0.18s ease;
+    user-select: none;
+}
+
+.batch-category-pill:hover {
+    border-color: var(--color-primary, #cfc59b);
+    color: var(--color-text-primary, #f8fafc);
+}
+
+.batch-category-pill.active {
+    background: var(--color-primary, #cfc59b);
+    border-color: var(--color-primary, #cfc59b);
+    color: #0b0e17;
+    font-weight: 700;
+}
+
+.batch-category-pill .pill-count {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.batch-category-pill.active .pill-count {
+    background: rgba(0, 0, 0, 0.25);
+    color: #0b0e17;
+}
+
+.batch-search-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.batch-search-input-wrap {
+    position: relative;
+    flex: 1;
+    min-width: 240px;
+}
+
+.batch-search-input-wrap .search-icon {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--color-text-muted, #64748b);
+    font-size: 16px;
+    pointer-events: none;
+}
+
+.batch-search-input-wrap .clear-icon {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--color-text-muted, #64748b);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    display: flex;
+    align-items: center;
+}
+
+.batch-search-input-wrap .clear-icon:hover {
+    color: var(--color-text-primary, #f8fafc);
+}
+
+.batch-search-input {
+    width: 100%;
+    padding: 8px 36px 8px 36px;
+    background: var(--color-surface, #181b2a);
+    border: 1px solid var(--color-border, #2a2d42);
+    border-radius: var(--radius-md, 8px);
+    color: var(--color-text-primary, #f8fafc);
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.18s ease;
+}
+
+.batch-search-input:focus {
+    border-color: var(--color-primary, #cfc59b);
+}
+
 

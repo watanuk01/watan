@@ -223,7 +223,7 @@ const AppRouter = () => {
                     <Route
                         path="/purchase/create"
                         element={
-                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef']}>
+                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef', 'restaurant_manager', 'restaurant_manager_non_managed']}>
                                 <CreatePurchaseOrder />
                             </ProtectedRoute>
                         }
@@ -231,7 +231,7 @@ const AppRouter = () => {
                     <Route
                         path="/purchase/pending"
                         element={
-                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef']}>
+                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef', 'restaurant_manager', 'restaurant_manager_non_managed']}>
                                 <PendingOrders />
                             </ProtectedRoute>
                         }
@@ -239,7 +239,7 @@ const AppRouter = () => {
                     <Route
                         path="/purchase/history"
                         element={
-                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef']}>
+                            <ProtectedRoute allowedRoles={['admin', 'ck_staff', 'chef', 'restaurant_manager', 'restaurant_manager_non_managed']}>
                                 <PurchaseHistory />
                             </ProtectedRoute>
                         }
