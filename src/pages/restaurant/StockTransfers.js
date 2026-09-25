@@ -31,6 +31,8 @@ const StockTransfers = () => {
     };
 
     const [inventory, setInventory] = useState([]);
+    const [lenderInventory, setLenderInventory] = useState([]);
+    const [loadingLenderStock, setLoadingLenderStock] = useState(false);
     const [restaurants, setRestaurants] = useState([]);
     const [transfers, setTransfers] = useState([]);
     const [lender, setLender] = useState('');
@@ -44,7 +46,6 @@ const StockTransfers = () => {
     const [acceptItems, setAcceptItems] = useState([]);
     const [acceptBusy, setAcceptBusy] = useState(false);
     const [actionBusy, setActionBusy] = useState({}); // { [transferId]: 'receiving' | 'rejecting' }
-    const [category, setCategory] = useState('All');
 
     const load = useCallback(async () => {
         if (!restaurant.id) return;
@@ -100,6 +101,58 @@ const StockTransfers = () => {
     useEffect(() => {
         if (restaurant.id) load();
     }, [restaurant.id, load]);
+
+    // ── Fetch lender branch inventory when lender changes ──
+    useEffect(() => {
+        if (!lender) {
+            setLenderInventory([]);
+            return;
+        }
+        let cancelled = false;
+        const fetchLenderStock = async () => {
+            setLoadingLenderStock(true);
+            try {
+                let stock = await getRestaurantInventory(lender);
+                if (cancelled) return;
+
+                // Merge CK catalog items so users can still request items not in lender's stock
+                try {
+                    const ckItems = await getItems({ status: 'active' });
+                    if (cancelled) return;
+                    const existingNames = new Set((stock || []).map(s => (s.item_name || s.name || '').toLowerCase()));
+                    ckItems.forEach(item => {
+                        if (!existingNames.has((item.name || '').toLowerCase())) {
+                            stock.push({
+                                id: item.id,
+                                item_id: item.id,
+                                item_name: item.name,
+                                name: item.name,
+                                item_type: item.item_type || 'grocery',
+                                category_name: item.category_name || '',
+                                unit: item.unit || 'kg',
+                                current_stock: 0,
+                                cost_price: item.cost_price || 0,
+                            });
+                        }
+                    });
+                } catch (e2) {
+                    console.warn('Could not load CK items for lender merge:', e2);
+                }
+
+                if (!cancelled) setLenderInventory(stock);
+            } catch (err) {
+                console.error('Failed to load lender inventory:', err);
+                if (!cancelled) setLenderInventory([]);
+            } finally {
+                if (!cancelled) setLoadingLenderStock(false);
+            }
+        };
+        fetchLenderStock();
+        return () => { cancelled = true; };
+    }, [lender]);
+
+    // The inventory to show in SmartItemSearch — lender's stock when a lender is selected, own stock otherwise
+    const searchableInventory = lender ? lenderInventory : inventory;
 
     // ── Add item from smart search ──
     const addItem = (item) => {
@@ -244,9 +297,6 @@ const StockTransfers = () => {
         if (!d) return '';
         return new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
     };
-    const categories = ['All', ...new Set(inventory.map(item => item.category_name).filter(Boolean))];
-    const searchableInventory = category === 'All' ? inventory : inventory.filter(item => item.category_name === category);
-    const formatQty = (value) => Number(value || 0).toLocaleString('en-GB', { maximumFractionDigits: 2 });
 
     return (
         <div className="page-container">
@@ -266,7 +316,7 @@ const StockTransfers = () => {
                     <div className="st-form-grid">
                         <div className="st-form-group">
                             <label>Borrow From</label>
-                            <select value={lender} onChange={e => setLender(e.target.value)} required>
+                            <select value={lender} onChange={e => { setLender(e.target.value); setItems([]); }} required>
                                 <option value="">Select restaurant</option>
                                 {restaurants.map(r => (
                                     <option key={r.id} value={r.id}>{r.name}</option>
@@ -274,24 +324,32 @@ const StockTransfers = () => {
                             </select>
                         </div>
                         <div className="st-form-group">
-                            <label>Category</label>
-                            <select value={category} onChange={e => setCategory(e.target.value)}>
-                                {categories.map(value => <option key={value} value={value}>{value}</option>)}
-                            </select>
-                        </div>
-                        <div className="st-form-group">
-                            <label>Search & Add Items</label>
-                            <SmartItemSearch
-                                items={searchableInventory}
-                                onSelect={addItem}
-                                onAddNew={addNewItem}
-                                placeholder="Search items to borrow..."
-                                excludeIds={items.map(i => i.item_id || i.id)}
-                                nameKey="item_name"
-                                showStock={true}
-                                showCostPrice={false}
-                                allowNew={false}
-                            />
+                            <label>
+                                Search & Add Items
+                                {lender && (
+                                    <span style={{ fontWeight: 400, fontSize: 12, marginLeft: 8, color: 'var(--color-text-secondary)' }}>
+                                        — showing {restaurants.find(r => r.id === lender)?.name || 'lender'}'s stock
+                                    </span>
+                                )}
+                            </label>
+                            {loadingLenderStock ? (
+                                <div style={{ padding: '12px 16px', color: 'var(--color-text-secondary)', fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <span className="spinner-sm" style={{ width: 16, height: 16, border: '2px solid rgba(201,169,110,0.3)', borderTopColor: 'var(--color-primary)', borderRadius: '50%', animation: 'spin 0.6s linear infinite', display: 'inline-block' }} />
+                                    Loading {restaurants.find(r => r.id === lender)?.name || 'lender'}'s inventory...
+                                </div>
+                            ) : (
+                                <SmartItemSearch
+                                    items={searchableInventory}
+                                    onSelect={addItem}
+                                    onAddNew={addNewItem}
+                                    placeholder={lender ? `Search ${restaurants.find(r => r.id === lender)?.name || 'lender'}'s items...` : 'Select a restaurant first...'}
+                                    excludeIds={items.map(i => i.item_id || i.id)}
+                                    nameKey="item_name"
+                                    showStock={true}
+                                    showCostPrice={false}
+                                    allowNew={false}
+                                />
+                            )}
                         </div>
                     </div>
 
@@ -306,7 +364,7 @@ const StockTransfers = () => {
                                             <div className="st-item-name">{i.item_name || i.name}</div>
                                             <div className="st-item-stock">
                                                 {i.category_name && <span className="sis-tag" style={{ marginRight: 6 }}>{i.category_name}</span>}
-                                                Stock: {formatQty(i.current_stock)} {i.unit}
+                                                {lender ? "Lender's" : ''} Stock: {Number(i.current_stock || 0).toFixed(2)} {i.unit}
                                             </div>
                                         </div>
                                         <div className="st-item-qty">
