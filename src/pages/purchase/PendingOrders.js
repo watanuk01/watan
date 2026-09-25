@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../contexts/AuthContext';
 import {
     getPurchaseOrders,
     receivePurchaseOrder,
@@ -42,6 +43,10 @@ const toDateInput = (value) => {
 
 const PendingOrders = () => {
     const navigate = useNavigate();
+    const { userProfile, currentUser } = useAuth();
+    const isRestaurantUser = ['restaurant_manager', 'restaurant_manager_non_managed'].includes(userProfile?.role);
+    const restaurantId = isRestaurantUser ? (userProfile?.restaurant_id || currentUser?.uid || '') : '';
+
     const [orders, setOrders] = useState([]);
     const [loading, setLoading] = useState(true);
     const [receiveModal, setReceiveModal] = useState(null); // order being received
@@ -52,15 +57,16 @@ const PendingOrders = () => {
     const fetchOrders = useCallback(async () => {
         setLoading(true);
         try {
-            const pending = await getPurchaseOrders({ status: 'pending' });
-            const partial = await getPurchaseOrders({ status: 'partially_received' });
+            const filterObj = isRestaurantUser ? { restaurant_id: restaurantId } : {};
+            const pending = await getPurchaseOrders({ status: 'pending', ...filterObj });
+            const partial = await getPurchaseOrders({ status: 'partially_received', ...filterObj });
             setOrders([...pending, ...partial]);
         } catch (err) {
             toast.error('Failed to load orders');
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [isRestaurantUser, restaurantId]);
 
     useEffect(() => { fetchOrders(); }, [fetchOrders]);
 

@@ -14,6 +14,7 @@ import {
     getDoc,
     getDocs,
     addDoc,
+    setDoc,
     updateDoc,
     deleteDoc,
     query,
@@ -31,6 +32,17 @@ const BUTCHERING_ORDERS = 'butchering_orders';
 const BATCHES = 'inventory_batches';
 const ITEMS = 'inventory_items';
 const PURCHASE_ORDERS = 'purchase_orders';
+
+/**
+ * Format any numeric weight or quantity to exactly 2 decimal places.
+ * Eliminates floating point inaccuracies like 0.4999999999998934 kg -> 0.50 kg.
+ */
+export const formatKg = (val, fallback = '0.00') => {
+    if (val === undefined || val === null || val === '') return fallback;
+    const num = Number(val);
+    if (isNaN(num)) return fallback;
+    return (Math.round((num + Number.EPSILON) * 100) / 100).toFixed(2);
+};
 
 // ─── DEFAULT SEED CUT TYPES ───
 export const DEFAULT_CUT_TYPES = [
@@ -117,6 +129,8 @@ export const createCutType = async (data) => {
         std_weight_kg: Number(data.std_weight_kg) || 0,
         shelf_life_days: Number(data.shelf_life_days) || 3,
         is_waste: Boolean(data.is_waste),
+        default_ck_item_id: data.default_ck_item_id || '',
+        default_ck_item_name: data.default_ck_item_name || '',
         created_at: serverTimestamp(),
     });
     return { id: docRef.id, ...data };
@@ -129,6 +143,8 @@ export const updateCutType = async (id, data) => {
         std_weight_kg: Number(data.std_weight_kg) || 0,
         shelf_life_days: Number(data.shelf_life_days) || 3,
         is_waste: Boolean(data.is_waste),
+        default_ck_item_id: data.default_ck_item_id || '',
+        default_ck_item_name: data.default_ck_item_name || '',
         updated_at: serverTimestamp(),
     });
 };
@@ -196,6 +212,8 @@ export const createAnimal = async (data) => {
             shelf_life_days: Number(ct.shelf_life_days) || 5,
             is_waste: Boolean(ct.is_waste),
             notes: ct.notes || '',
+            default_ck_item_id: ct.default_ck_item_id || '',
+            default_ck_item_name: ct.default_ck_item_name || '',
         })),
         created_at: serverTimestamp(),
         updated_at: serverTimestamp(),
@@ -212,6 +230,8 @@ export const createAnimal = async (data) => {
             shelf_life_days: ct.shelf_life_days,
             is_waste: ct.is_waste,
             notes: ct.notes,
+            default_ck_item_id: ct.default_ck_item_id || '',
+            default_ck_item_name: ct.default_ck_item_name || '',
             animal_id: docRef.id,
             created_at: serverTimestamp(),
         });
@@ -238,6 +258,8 @@ export const updateAnimal = async (id, data) => {
             shelf_life_days: Number(ct.shelf_life_days) || 5,
             is_waste: Boolean(ct.is_waste),
             notes: ct.notes || '',
+            default_ck_item_id: ct.default_ck_item_id || '',
+            default_ck_item_name: ct.default_ck_item_name || '',
         })),
         updated_at: serverTimestamp(),
     };
@@ -263,6 +285,8 @@ export const updateAnimal = async (id, data) => {
             shelf_life_days: ct.shelf_life_days,
             is_waste: ct.is_waste,
             notes: ct.notes,
+            default_ck_item_id: ct.default_ck_item_id || '',
+            default_ck_item_name: ct.default_ck_item_name || '',
             animal_id: id,
             created_at: serverTimestamp(),
         });
@@ -282,6 +306,182 @@ export const deleteAnimal = async (id) => {
     await deleteDoc(doc(db, BUTCHER_ANIMALS, id));
 };
 
+/**
+ * Retrieve all known cut-to-CK-inventory mappings.
+ * Aggregates across localStorage, dedicated cut_ck_mappings collection,
+ * BUTCHER_ANIMALS cut_types, and flat CUT_TYPES.
+ */
+export const getCutCKMappings = async () => {
+    const map = {};
+
+    // 1. Check localStorage first for instant client cache
+    try {
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith('ck_mapping_')) {
+                const cutKey = key.replace('ck_mapping_', '').toLowerCase().trim();
+                const val = JSON.parse(localStorage.getItem(key) || '{}');
+                if (val.item_id) {
+                    map[cutKey] = val;
+                }
+            }
+        }
+    } catch (e) {}
+
+    // 2. Fetch from dedicated cut_ck_mappings collection
+    try {
+        const snap = await getDocs(collection(db, 'cut_ck_mappings'));
+        snap.forEach(docSnap => {
+            const d = docSnap.data();
+            if (d.ck_item_id) {
+                map[docSnap.id.toLowerCase().trim()] = {
+                    item_id: d.ck_item_id,
+                    item_name: d.ck_item_name || '',
+                };
+            }
+        });
+    } catch (e) {
+        console.warn('Could not read cut_ck_mappings collection:', e);
+    }
+
+    // 3. Scan BUTCHER_ANIMALS for any cut with default_ck_item_id
+    try {
+        const animalsSnap = await getDocs(collection(db, BUTCHER_ANIMALS));
+        animalsSnap.forEach(d => {
+            const a = d.data();
+            (a.cut_types || []).forEach(ct => {
+                if (ct.default_ck_item_id && ct.name) {
+                    const k = ct.name.toLowerCase().trim();
+                    if (!map[k]) {
+                        map[k] = {
+                            item_id: ct.default_ck_item_id,
+                            item_name: ct.default_ck_item_name || '',
+                        };
+                    }
+                }
+            });
+        });
+    } catch (e) {
+        console.warn('Could not scan BUTCHER_ANIMALS for CK mappings:', e);
+    }
+
+    // 4. Scan CUT_TYPES for any cut with default_ck_item_id
+    try {
+        const cutsSnap = await getDocs(collection(db, CUT_TYPES));
+        cutsSnap.forEach(d => {
+            const ct = d.data();
+            if (ct.default_ck_item_id && ct.name) {
+                const k = ct.name.toLowerCase().trim();
+                if (!map[k]) {
+                    map[k] = {
+                        item_id: ct.default_ck_item_id,
+                        item_name: ct.default_ck_item_name || '',
+                    };
+                }
+            }
+        });
+    } catch (e) {
+        console.warn('Could not scan CUT_TYPES for CK mappings:', e);
+    }
+
+    return map;
+};
+
+/**
+ * Persist a CK mapping back to the animal's cut_types definition.
+ * When admin maps a cut to CK inventory, this saves the mapping so it
+ * auto-populates in future butchering orders.
+ *
+ * @param {string} cutName — e.g. "Mix Lamb", "Mince"
+ * @param {string} ckItemId — the CK inventory_items document ID
+ * @param {string} ckItemName — the CK item name
+ * @param {string} [animalType] — optional animal type to narrow the search
+ */
+export const saveCutCKMapping = async (cutName, ckItemId, ckItemName, animalType = '') => {
+    if (!cutName || !ckItemId) return;
+    const cutNameLower = cutName.toLowerCase().trim();
+
+    // 1. Immediately cache in localStorage for instant retrieval across browser sessions
+    try {
+        localStorage.setItem(`ck_mapping_${cutNameLower}`, JSON.stringify({
+            item_id: ckItemId,
+            item_name: ckItemName,
+            cut_name: cutName,
+            updated_at: new Date().toISOString(),
+        }));
+    } catch (e) {}
+
+    // 2. Persist to dedicated cut_ck_mappings Firestore collection
+    try {
+        await setDoc(doc(db, 'cut_ck_mappings', cutNameLower), {
+            cut_name: cutName,
+            cut_name_lower: cutNameLower,
+            ck_item_id: ckItemId,
+            ck_item_name: ckItemName,
+            animal_type: animalType || '',
+            updated_at: serverTimestamp(),
+        }, { merge: true });
+    } catch (e) {
+        console.warn('Could not persist to cut_ck_mappings collection:', e);
+    }
+
+    try {
+        // 3. Find and update animals that have this cut type (exact or substring match)
+        const animalsSnap = await getDocs(collection(db, BUTCHER_ANIMALS));
+        for (const animalDoc of animalsSnap.docs) {
+            const animal = animalDoc.data();
+            const cutTypes = animal.cut_types || [];
+
+            // Check if this animal has a cut matching the cut name
+            let cutIdx = cutTypes.findIndex(ct =>
+                (ct.name || '').toLowerCase().trim() === cutNameLower
+            );
+            if (cutIdx < 0) {
+                cutIdx = cutTypes.findIndex(ct => {
+                    const ctName = (ct.name || '').toLowerCase().trim();
+                    return ctName.includes(cutNameLower) || cutNameLower.includes(ctName);
+                });
+            }
+
+            if (cutIdx >= 0) {
+                // Update the cut's default CK mapping
+                const updatedCuts = [...cutTypes];
+                updatedCuts[cutIdx] = {
+                    ...updatedCuts[cutIdx],
+                    default_ck_item_id: ckItemId,
+                    default_ck_item_name: ckItemName,
+                };
+
+                await updateDoc(doc(db, BUTCHER_ANIMALS, animalDoc.id), {
+                    cut_types: updatedCuts,
+                    updated_at: serverTimestamp(),
+                });
+
+                console.log(`✅ Saved CK mapping: "${cutName}" → "${ckItemName}" on animal "${animal.name}"`);
+            }
+        }
+
+        // 4. Also update the flat CUT_TYPES collection
+        try {
+            const cutSnap = await getDocs(collection(db, CUT_TYPES));
+            for (const cutDoc of cutSnap.docs) {
+                const cutData = cutDoc.data();
+                const ctName = (cutData.name || '').toLowerCase().trim();
+                if (ctName === cutNameLower || ctName.includes(cutNameLower) || cutNameLower.includes(ctName)) {
+                    await updateDoc(doc(db, CUT_TYPES, cutDoc.id), {
+                        default_ck_item_id: ckItemId,
+                        default_ck_item_name: ckItemName,
+                    });
+                }
+            }
+        } catch (e) {
+            console.warn('Could not sync CK mapping to flat cut_types:', e);
+        }
+    } catch (err) {
+        console.error('saveCutCKMapping error:', err);
+    }
+};
+
 // ═══════════════════════════════════════════
 // 2. BUTCHERING ORDERS & BATCH SPLITTING
 // ═══════════════════════════════════════════
@@ -290,12 +490,23 @@ export const deleteAnimal = async (id) => {
 export const getUnbutcheredBatches = async () => {
     try {
         const snap = await getDocs(collection(db, BATCHES));
-        const allBatches = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        const allBatches = snap.docs.map(d => {
+            const b = d.data();
+            const rawWeight = Number(b.remaining_weight_kg ?? b.quantity ?? b.initial_quantity ?? 0);
+            const cleanWeight = Math.round((rawWeight || 0) * 100) / 100;
+            return {
+                id: d.id,
+                ...b,
+                quantity: cleanWeight,
+                remaining_weight_kg: cleanWeight,
+            };
+        });
 
         // Filter batches that are raw_meat or whole animals, not depleted, and not already cut
         return allBatches.filter(b => {
             const isMeat = (b.item_type === 'raw_meat' || b.item_name?.toLowerCase().includes('whole') || b.category?.toLowerCase().includes('meat'));
-            const hasStock = (Number(b.quantity || b.remaining_weight_kg || b.initial_quantity) > 0);
+            const cleanWeight = Number(b.quantity || b.remaining_weight_kg || 0);
+            const hasStock = cleanWeight > 0.05;
             const isNotChild = !b.parent_batch_id;
             const notFullyButchered = b.butchered_status !== 'completed';
             return isMeat && hasStock && isNotChild && notFullyButchered;
@@ -422,10 +633,12 @@ export const createButcheringOrder = async (orderData) => {
 
     // 3. Mark/Deduct Parent Batch
     const parentDocRef = doc(db, BATCHES, sourceBatch.id);
+    const newRemaining = Math.max(0, Math.round((availableWeight - totalProcessed) * 100) / 100);
+    const finalRemaining = newRemaining <= 0.05 ? 0 : newRemaining;
     batchRef.update(parentDocRef, {
-        quantity: Math.max(0, availableWeight - totalProcessed),
-        remaining_weight_kg: Math.max(0, availableWeight - totalProcessed),
-        butchered_status: availableWeight - totalProcessed <= 0.05 ? 'completed' : 'partial',
+        quantity: finalRemaining,
+        remaining_weight_kg: finalRemaining,
+        butchered_status: finalRemaining === 0 ? 'completed' : 'partial',
         butchered_at: serverTimestamp(),
         child_batch_ids: childBatchIds,
     });
@@ -593,6 +806,188 @@ export const getBatchGenealogyTree = async (searchTerm) => {
             });
         };
 
+        // ── Helper: build comprehensive order-centric tree ──
+        const buildOrderGenealogyTree = (order) => {
+            const statusMap = {
+                'pending': '⏳ Pending',
+                'accepted': '👩‍🍳 Accepted',
+                'in_prep': '🔪 In Prep',
+                'ready': '📦 Ready for Dispatch',
+                'ready_for_pickup': '📦 Ready for Pickup',
+                'assigned': '👤 Assigned',
+                'dispatched': '🚚 In Transit',
+                'out_for_delivery': '🚚 In Transit',
+                'delivered': '✅ Delivered',
+                'cancelled': '❌ Cancelled',
+            };
+
+            const deliveryChild = order.status === 'delivered' ? [{
+                type: 'delivery',
+                name: `Delivered to ${order.restaurant_name || 'Restaurant'}`,
+                info: order.delivery_manager_name ? `Received by: ${order.delivery_manager_name}` : 'Delivery confirmed',
+                date: order.delivered_at,
+                children: [],
+            }] : [];
+
+            const orderItems = order.items || [];
+            const allocations = order.batch_allocations || [];
+            const qrItems = order.dispatch_qr_items || [];
+
+            let vendorName = 'Watan Central Kitchen & Suppliers';
+
+            const itemNodes = orderItems.map((item, idx) => {
+                const restaurantNode = {
+                    type: 'restaurant',
+                    name: order.restaurant_name || 'Restaurant',
+                    batch_number: order.order_number || '',
+                    quantity: item.quantity,
+                    info: `Order #${order.order_number || '—'} — ${statusMap[order.status] || order.status || 'Active'}`,
+                    date: order.delivered_at || order.dispatched_at || order.ready_at || order.created_at,
+                    children: deliveryChild,
+                };
+
+                const itemAlloc = allocations.find(a =>
+                    a.item_id === item.item_id ||
+                    a.item_name === item.item_name ||
+                    (a.item_id && a.item_id === item.id)
+                );
+                const itemQr = qrItems.find(q =>
+                    q.item_id === item.item_id ||
+                    q.item_name === item.item_name
+                );
+
+                const batchRefs = itemAlloc?.batches || [];
+                const batchNumbers = itemQr?.batch_numbers || [];
+
+                // 1. Line item has allocated batches
+                if (batchRefs.length > 0) {
+                    const batchSubNodes = batchRefs.map(bRef => {
+                        const b = findBatch(bRef.batch_id) || findBatch(bRef.batch_number);
+                        if (b) {
+                            if (b.vendor_name || b.supplier) {
+                                vendorName = b.vendor_name || b.supplier;
+                            }
+                            let parentBatch = null;
+                            if (b.parent_batch_id || b.parent_batch_no) {
+                                parentBatch = findBatch(b.parent_batch_id) ||
+                                    allBatches.find(pb => pb.batch_number === b.parent_batch_no);
+                                if (parentBatch?.vendor_name) {
+                                    vendorName = parentBatch.vendor_name;
+                                }
+                            }
+
+                            const cutNode = {
+                                type: b.is_cut ? 'child' : (b.source === 'production' ? 'production' : 'child'),
+                                name: b.item_name || item.item_name || 'Cut Batch',
+                                batch_number: b.batch_number || bRef.batch_number || b.id,
+                                quantity: bRef.quantity || item.quantity,
+                                date: b.created_at || order.created_at,
+                                info: b.is_waste ? 'Waste/Trim' : (b.destination_item_name ? `→ ${b.destination_item_name}` : (b.source === 'production' ? 'Production Output' : 'Butcher Cut')),
+                                children: [restaurantNode],
+                            };
+
+                            if (parentBatch) {
+                                return {
+                                    type: 'parent',
+                                    name: parentBatch.item_name || 'Whole Carcass',
+                                    batch_number: parentBatch.batch_number || parentBatch.id,
+                                    quantity: parentBatch.weight_kg || parentBatch.quantity,
+                                    date: parentBatch.received_at || parentBatch.created_at,
+                                    info: parentBatch.vendor_name ? `Vendor: ${parentBatch.vendor_name}` : 'Primary Parent Batch',
+                                    children: [cutNode],
+                                };
+                            }
+                            return cutNode;
+                        }
+
+                        return {
+                            type: 'child',
+                            name: item.item_name || 'Meat Cut',
+                            batch_number: bRef.batch_number || 'Batch Allocated',
+                            quantity: bRef.quantity || item.quantity,
+                            date: order.created_at,
+                            info: 'Allocated Butcher Batch',
+                            children: [restaurantNode],
+                        };
+                    });
+
+                    return {
+                        type: item.item_type === 'cooked_meat' ? 'production' : 'child',
+                        name: item.item_name,
+                        batch_number: batchNumbers[0] || (batchRefs[0]?.batch_number || ''),
+                        quantity: item.quantity,
+                        date: order.created_at,
+                        info: item.category_name ? `${item.category_name} (${item.unit || 'kg'})` : `Meat Cut (${item.unit || 'kg'})`,
+                        children: batchSubNodes,
+                    };
+                }
+
+                // 2. Line item has dispatch QR batches
+                if (batchNumbers.length > 0) {
+                    const bNodes = batchNumbers.map(bNo => {
+                        const b = findBatch(bNo);
+                        return {
+                            type: item.item_type === 'cooked_meat' ? 'production' : 'child',
+                            name: item.item_name,
+                            batch_number: bNo,
+                            quantity: item.quantity,
+                            date: b?.created_at || order.created_at,
+                            info: item.category_name || (item.item_type === 'cooked_meat' ? 'Kitchen Production' : 'Prepared Item'),
+                            children: [restaurantNode],
+                        };
+                    });
+
+                    return {
+                        type: item.item_type === 'cooked_meat' ? 'production' : 'child',
+                        name: item.item_name,
+                        batch_number: batchNumbers[0],
+                        quantity: item.quantity,
+                        date: order.created_at,
+                        info: item.category_name || 'Dispatched Item',
+                        children: bNodes,
+                    };
+                }
+
+                // 3. Grocery or non-batched item
+                const isGrocery = (item.item_type || 'grocery') === 'grocery';
+                return {
+                    type: isGrocery ? 'parent' : (item.item_type === 'cooked_meat' ? 'production' : 'child'),
+                    name: item.item_name || `Item ${idx + 1}`,
+                    batch_number: item.batch_number || 'Central Kitchen Stock',
+                    quantity: item.quantity,
+                    date: order.created_at,
+                    info: item.category_name
+                        ? `${item.category_name} • ${item.unit || 'units'}`
+                        : (isGrocery ? `Grocery Item • ${item.unit || 'units'}` : `Kitchen Prepared • ${item.unit || 'units'}`),
+                    children: [restaurantNode],
+                };
+            });
+
+            return {
+                type: 'vendor',
+                name: vendorName,
+                info: `Order #${order.order_number || order.id} — ${order.restaurant_name || 'Restaurant'}`,
+                date: order.created_at,
+                children: itemNodes.length > 0 ? itemNodes : [{
+                    type: 'restaurant',
+                    name: order.restaurant_name || 'Restaurant',
+                    batch_number: order.order_number || '',
+                    info: `Order #${order.order_number || '—'} — ${statusMap[order.status] || order.status}`,
+                    date: order.delivered_at || order.dispatched_at || order.created_at,
+                    children: deliveryChild,
+                }],
+            };
+        };
+
+        // ── Direct Order match ──
+        const directOrder = allOrders.find(o =>
+            (o.order_number || '').toLowerCase() === term ||
+            (o.id || '').toLowerCase() === term
+        );
+        if (directOrder) {
+            return buildOrderGenealogyTree(directOrder);
+        }
+
         // ── Find target batch ──
         let target = allBatches.find(b =>
             (b.batch_number || '').toLowerCase() === term ||
@@ -616,22 +1011,14 @@ export const getBatchGenealogyTree = async (searchTerm) => {
             }
         }
 
-        // Also check if searchTerm matches an order number or document ID
+        // Also check if searchTerm matches an order number (partial) or fallback to order tree
         if (!target) {
             const order = allOrders.find(o =>
-                (o.order_number || '').toLowerCase() === term ||
-                (o.id || '').toLowerCase() === term
+                (o.order_number || '').toLowerCase().includes(term) ||
+                (o.id || '').toLowerCase().includes(term)
             );
-            if (order?.batch_allocations?.length) {
-                // Use the first allocated batch
-                const firstBatchId = order.batch_allocations[0]?.batches?.[0]?.batch_id;
-                const firstBatchNo = order.batch_allocations[0]?.batches?.[0]?.batch_number;
-                if (firstBatchId) target = findBatch(firstBatchId);
-                if (!target && firstBatchNo) target = findBatch(firstBatchNo);
-            }
-            if (!target && order?.dispatch_qr_items?.length) {
-                const bNo = order.dispatch_qr_items[0]?.batch_numbers?.[0];
-                if (bNo) target = findBatch(bNo);
+            if (order) {
+                return buildOrderGenealogyTree(order);
             }
         }
 
@@ -731,7 +1118,7 @@ export const getBatchGenealogyTree = async (searchTerm) => {
                         type: 'child',
                         name: cut.item_name || cut.cut_name || 'Cut Batch',
                         batch_number: cut.batch_number || cut.id,
-                        quantity: cutQty,
+                        quantity: (cutQty !== null && cutQty !== undefined && cutQty !== '') ? formatKg(cutQty) : null,
                         date: cut.created_at || cut.expiry_date,
                         info: cut.is_waste ? 'Waste/Trim' : (cut.destination_item_name ? `→ ${cut.destination_item_name}` : 'Usable Cut'),
                         children: cutChildren,
@@ -770,7 +1157,7 @@ export const getBatchGenealogyTree = async (searchTerm) => {
                 type: depth === 0 ? 'parent' : nodeType,
                 name: batch.item_name || 'Batch',
                 batch_number: batch.batch_number || batch.id,
-                quantity: parentQty,
+                quantity: (parentQty !== null && parentQty !== undefined && parentQty !== '') ? formatKg(parentQty) : null,
                 date: batch.received_at || batch.created_at,
                 info: batch.is_cut ? 'Processed Cut' :
                     (batch.source === 'production' ? `Production: ${batch.production_number || ''}` : 'Parent Batch'),
@@ -1049,15 +1436,22 @@ export const getButcherInventory = async () => {
             const isButcherBatch = b.is_butcher_inventory === true || b.is_butcher_po === true;
             const isNotChild = !b.parent_batch_id;
             const isNotCut = b.is_cut !== true;
-            const hasStock = (Number(b.remaining_weight_kg ?? b.quantity ?? b.initial_quantity) > 0);
-            return isButcherBatch && isNotChild && isNotCut && hasStock;
-        }).map(b => ({
-            ...b,
-            // Older orders incorrectly saved a completed status while retaining
-            // a positive parent balance. Treat those as partial so old data is
-            // immediately usable without a manual database migration.
-            butchered_status: b.butchered_status === 'completed' ? 'partial' : (b.butchered_status || 'pending'),
-        })).sort((a, b) => {
+            const rawWeight = Number(b.remaining_weight_kg ?? b.quantity ?? b.initial_quantity);
+            const cleanWeight = Math.round((rawWeight || 0) * 100) / 100;
+            return isButcherBatch && isNotChild && isNotCut && cleanWeight > 0.05;
+        }).map(b => {
+            const rawWeight = Number(b.remaining_weight_kg ?? b.quantity ?? b.initial_quantity);
+            const cleanWeight = Math.round((rawWeight || 0) * 100) / 100;
+            return {
+                ...b,
+                quantity: cleanWeight,
+                remaining_weight_kg: cleanWeight,
+                // Older orders incorrectly saved a completed status while retaining
+                // a positive parent balance. Treat those as partial so old data is
+                // immediately usable without a manual database migration.
+                butchered_status: b.butchered_status === 'completed' ? 'partial' : (b.butchered_status || 'pending'),
+            };
+        }).sort((a, b) => {
             const tA = new Date(a.created_at || 0).getTime();
             const tB = new Date(b.created_at || 0).getTime();
             return tB - tA;
@@ -1074,9 +1468,14 @@ export const getButcherCutInventory = async () => {
         const snap = await getDocs(collection(db, BATCHES));
         return snap.docs.map(d => {
             const data = d.data();
+            const rawWeight = Number(data.remaining_qty ?? data.remaining_weight_kg ?? data.quantity ?? 0);
+            const cleanWeight = Math.round((rawWeight || 0) * 100) / 100;
             return {
                 id: d.id,
                 ...data,
+                quantity: cleanWeight,
+                remaining_qty: cleanWeight,
+                remaining_weight_kg: cleanWeight,
                 created_at: data.created_at?.toDate?.() ? data.created_at.toDate().toISOString() : data.created_at,
                 expiry_date: data.expiry_date?.toDate?.() ? data.expiry_date.toDate().toISOString().substring(0, 10) : data.expiry_date,
             };
@@ -1085,7 +1484,7 @@ export const getButcherCutInventory = async () => {
             batch.is_waste !== true &&
             (batch.is_butcher_inventory === true || !batch.item_id) &&
             batch.status !== 'mapped_to_ck' &&
-            Number(batch.remaining_qty ?? batch.remaining_weight_kg ?? batch.quantity ?? 0) > 0.001
+            Number(batch.remaining_qty ?? batch.remaining_weight_kg ?? batch.quantity ?? 0) > 0.05
         )).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
     } catch (err) {
         console.error('Error fetching butcher cut inventory:', err);

@@ -20,11 +20,12 @@ import {
     deleteAnimal,
     ANIMAL_TYPES,
 } from '../../services/butcheringService';
+import { getItems } from '../../services/inventoryService';
 import toast from 'react-hot-toast';
 import './ButcheringModule.css';
 
 // ─── Blank form templates ───
-const BLANK_CUT = { name: '', std_weight_kg: '', shelf_life_days: 5, is_waste: false, notes: '' };
+const BLANK_CUT = { name: '', std_weight_kg: '', shelf_life_days: 5, is_waste: false, notes: '', default_ck_item_id: '', default_ck_item_name: '' };
 const BLANK_ANIMAL = {
     name: '',
     animal_type: 'Lamb',
@@ -47,13 +48,18 @@ const CutTypesAdmin = () => {
     const [expandedCard, setExpandedCard] = useState(null);
     const [customAnimalType, setCustomAnimalType] = useState('');
     const [showCustomType, setShowCustomType] = useState(false);
+    const [ckItems, setCkItems] = useState([]);
 
     // ── Load animals ──
     const load = async () => {
         setLoading(true);
         try {
-            const list = await getAnimals();
+            const [list, itemsList] = await Promise.all([
+                getAnimals(),
+                getItems({ status: 'active' }),
+            ]);
             setAnimals(list || []);
+            setCkItems((itemsList || []).filter(i => ['raw_meat', 'cooked_meat'].includes(i.item_type)));
         } catch (err) {
             console.error(err);
             toast.error('Failed to load animals');
@@ -111,12 +117,17 @@ const CutTypesAdmin = () => {
         }));
     };
 
-    const updateCut = (idx, field, value) => {
+    const updateCut = (idx, fieldOrUpdates, value) => {
         setForm(prev => ({
             ...prev,
-            cut_types: prev.cut_types.map((ct, i) =>
-                i === idx ? { ...ct, [field]: value } : ct
-            ),
+            cut_types: prev.cut_types.map((ct, i) => {
+                if (i !== idx) return ct;
+                // Support both single field and multi-field updates
+                if (typeof fieldOrUpdates === 'object') {
+                    return { ...ct, ...fieldOrUpdates };
+                }
+                return { ...ct, [fieldOrUpdates]: value };
+            }),
         }));
     };
 
@@ -130,7 +141,7 @@ const CutTypesAdmin = () => {
     // ── Yield calculation ──
     const totalCutWeight = form.cut_types.reduce((s, ct) => s + (Number(ct.std_weight_kg) || 0), 0);
     const baseWeight = Number(form.base_weight) || 0;
-    const yieldPct = baseWeight > 0 ? ((totalCutWeight / baseWeight) * 100).toFixed(1) : '—';
+    const yieldPct = baseWeight > 0 ? ((totalCutWeight / baseWeight) * 100).toFixed(2) : '—';
     const wasteWeight = form.cut_types.filter(ct => ct.is_waste).reduce((s, ct) => s + (Number(ct.std_weight_kg) || 0), 0);
     const usableWeight = totalCutWeight - wasteWeight;
 
@@ -255,7 +266,7 @@ const CutTypesAdmin = () => {
                             const totalWeight = cuts.reduce((s, c) => s + (Number(c.std_weight_kg) || 0), 0);
                             const waste = cuts.filter(c => c.is_waste).reduce((s, c) => s + (Number(c.std_weight_kg) || 0), 0);
                             const usable = totalWeight - waste;
-                            const yld = animal.base_weight > 0 ? ((usable / animal.base_weight) * 100).toFixed(0) : '—';
+                            const yld = animal.base_weight > 0 ? ((usable / animal.base_weight) * 100).toFixed(2) : '—';
                             const isExpanded = expandedCard === animal.id;
 
                             return (
@@ -299,8 +310,8 @@ const CutTypesAdmin = () => {
                                     }}>
                                         {[
                                             { label: 'Cut Types', value: cuts.length },
-                                            { label: 'Usable', value: `${usable.toFixed(1)} kg` },
-                                            { label: 'Waste', value: `${waste.toFixed(1)} kg` },
+                                            { label: 'Usable', value: `${usable.toFixed(2)} kg` },
+                                            { label: 'Waste', value: `${waste.toFixed(2)} kg` },
                                             { label: 'Yield', value: `${yld}%`, color: Number(yld) >= 80 ? '#22c55e' : Number(yld) >= 60 ? '#f59e0b' : '#ef4444' },
                                         ].map((kpi, i) => (
                                             <div key={i} style={{ textAlign: 'center' }}>
@@ -329,6 +340,7 @@ const CutTypesAdmin = () => {
                                                                 <th>Weight (kg)</th>
                                                                 <th>Shelf Life</th>
                                                                 <th>Type</th>
+                                                                <th>Default CK Mapping</th>
                                                             </tr>
                                                         </thead>
                                                         <tbody>
@@ -340,13 +352,24 @@ const CutTypesAdmin = () => {
                                                                             <strong>{cut.name}</strong>
                                                                         </div>
                                                                     </td>
-                                                                    <td>{cut.std_weight_kg ? `${cut.std_weight_kg} kg` : '—'}</td>
+                                                                    <td>{cut.std_weight_kg ? `${Number(cut.std_weight_kg).toFixed(2)} kg` : '—'}</td>
                                                                     <td>{cut.shelf_life_days ? `${cut.shelf_life_days} days` : '—'}</td>
                                                                     <td>
                                                                         {cut.is_waste
                                                                             ? <span className="chip-red">Waste</span>
                                                                             : <span className="chip-green">Usable</span>
                                                                         }
+                                                                    </td>
+                                                                    <td>
+                                                                        {cut.is_waste ? (
+                                                                            <span style={{ color: 'var(--color-text-muted)', fontSize: 11 }}>—</span>
+                                                                        ) : cut.default_ck_item_name ? (
+                                                                            <span style={{ color: 'var(--color-primary)', fontWeight: 600, fontSize: 11 }}>
+                                                                                🥩 {cut.default_ck_item_name}
+                                                                            </span>
+                                                                        ) : (
+                                                                            <span style={{ color: 'var(--color-text-muted)', fontSize: 11 }}>Not mapped</span>
+                                                                        )}
                                                                     </td>
                                                                 </tr>
                                                             ))}
@@ -458,7 +481,7 @@ const CutTypesAdmin = () => {
                                 <div className="form-row-2">
                                     <div className="form-field">
                                         <label>Base Batch Weight (kg) *</label>
-                                        <input className="form-input" type="number" step="0.1" min="0" value={form.base_weight}
+                                        <input className="form-input" type="number" step="0.01" min="0" value={form.base_weight}
                                             onChange={e => updateField('base_weight', e.target.value)} placeholder="e.g. 56" />
                                         <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 4, display: 'block' }}>
                                             Every cut weight below is defined for this base kg batch and scales proportionally.
@@ -521,7 +544,7 @@ const CutTypesAdmin = () => {
                                         {form.cut_types.map((cut, idx) => (
                                             <div key={idx} style={{
                                                 display: 'grid',
-                                                gridTemplateColumns: '2fr 90px 80px auto 32px',
+                                                gridTemplateColumns: '2fr 90px 80px auto 1.5fr 32px',
                                                 gap: 'var(--space-2)',
                                                 alignItems: 'center',
                                                 padding: 'var(--space-3)',
@@ -541,7 +564,7 @@ const CutTypesAdmin = () => {
                                                 <input
                                                     className="form-input"
                                                     type="number"
-                                                    step="0.1"
+                                                    step="0.01"
                                                     min="0"
                                                     value={cut.std_weight_kg}
                                                     onChange={e => updateCut(idx, 'std_weight_kg', e.target.value)}
@@ -572,6 +595,34 @@ const CutTypesAdmin = () => {
                                                     />
                                                     Waste
                                                 </label>
+                                                {!cut.is_waste ? (
+                                                    <select
+                                                        className="form-select"
+                                                        value={cut.default_ck_item_id || ''}
+                                                        onChange={e => {
+                                                            const selId = e.target.value;
+                                                            const found = ckItems.find(i => i.id === selId);
+                                                            updateCut(idx, {
+                                                                default_ck_item_id: selId,
+                                                                default_ck_item_name: found?.name || '',
+                                                            });
+                                                        }}
+                                                        style={{
+                                                            fontSize: 'var(--text-xs)',
+                                                            borderColor: cut.default_ck_item_id ? 'var(--color-primary)' : 'var(--color-border)',
+                                                        }}
+                                                        title="Default CK inventory item mapping"
+                                                    >
+                                                        <option value="">— No default CK mapping —</option>
+                                                        {ckItems.map(item => (
+                                                            <option key={item.id} value={item.id}>
+                                                                {item.item_type === 'raw_meat' ? '🥩' : '📦'} {item.name}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                ) : (
+                                                    <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>—</span>
+                                                )}
                                                 <button
                                                     onClick={() => removeCut(idx)}
                                                     style={{
@@ -592,7 +643,7 @@ const CutTypesAdmin = () => {
                                         {/* Column labels */}
                                         <div style={{
                                             display: 'grid',
-                                            gridTemplateColumns: '2fr 90px 80px auto 32px',
+                                            gridTemplateColumns: '2fr 90px 80px auto 1.5fr 32px',
                                             gap: 'var(--space-2)',
                                             padding: '0 var(--space-3)',
                                             fontSize: 'var(--text-xs)',
@@ -604,6 +655,7 @@ const CutTypesAdmin = () => {
                                             <span style={{ textAlign: 'center' }}>Weight (kg)</span>
                                             <span style={{ textAlign: 'center' }}>Shelf Life</span>
                                             <span></span>
+                                            <span>Default CK Mapping</span>
                                             <span></span>
                                         </div>
                                     </div>
@@ -629,15 +681,15 @@ const CutTypesAdmin = () => {
                                         </div>
                                         <div>
                                             <span style={{ color: 'var(--color-text-muted)' }}>Total Cuts: </span>
-                                            <strong>{totalCutWeight.toFixed(1)} kg</strong>
+                                            <strong>{totalCutWeight.toFixed(2)} kg</strong>
                                         </div>
                                         <div>
                                             <span style={{ color: '#22c55e' }}>Usable: </span>
-                                            <strong style={{ color: '#22c55e' }}>{usableWeight.toFixed(1)} kg</strong>
+                                            <strong style={{ color: '#22c55e' }}>{usableWeight.toFixed(2)} kg</strong>
                                         </div>
                                         <div>
                                             <span style={{ color: '#ef4444' }}>Waste: </span>
-                                            <strong style={{ color: '#ef4444' }}>{wasteWeight.toFixed(1)} kg</strong>
+                                            <strong style={{ color: '#ef4444' }}>{wasteWeight.toFixed(2)} kg</strong>
                                         </div>
                                         <div>
                                             <span style={{ color: 'var(--color-text-muted)' }}>Yield: </span>

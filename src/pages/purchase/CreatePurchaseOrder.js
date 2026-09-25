@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useAuth } from '../../contexts/AuthContext';
 import { getItems, getUniqueVendors as getItemVendors } from '../../services/inventoryService';
 import { createPurchaseOrder, getUniqueVendors, getStatusInfo } from '../../services/purchaseService';
 import {
@@ -47,6 +48,11 @@ const generateAutoInvoiceNo = () => {
 const CreatePurchaseOrder = () => {
     const navigate = useNavigate();
     const location = useLocation();
+    const { userProfile, currentUser } = useAuth();
+    const isRestaurantUser = ['restaurant_manager', 'restaurant_manager_non_managed'].includes(userProfile?.role);
+    const restaurantId = isRestaurantUser ? (userProfile?.restaurant_id || currentUser?.uid || '') : '';
+    const restaurantName = isRestaurantUser ? (userProfile?.restaurant_name || userProfile?.name || 'Restaurant') : '';
+
     const draft = useRef(loadDraft());
     const [items, setItems] = useState([]);          // all inventory items (grocery + raw_meat)
     const [selectedItems, setSelectedItems] = useState(draft.current?.selectedItems || []);
@@ -70,10 +76,10 @@ const CreatePurchaseOrder = () => {
 
     // Company Info
     const COMPANY = {
-        name: 'Watan Central Kitchen',
-        address: '123 High Street, London, UK',
-        phone: '+44 20 1234 5678',
-        email: 'orders@watan.com',
+        name: isRestaurantUser ? (userProfile?.restaurant_name || userProfile?.name || 'Watan Restaurant') : 'Watan Central Kitchen',
+        address: userProfile?.address || '123 High Street, London, UK',
+        phone: userProfile?.phone || '+44 20 1234 5678',
+        email: userProfile?.email || 'orders@watan.com',
     };
 
     // ── Save draft to localStorage on every change ──
@@ -252,6 +258,10 @@ const CreatePurchaseOrder = () => {
                 receive_time: receiveTime,
                 expected_delivery_date: expectedDate,
                 notes,
+                restaurant_id: restaurantId,
+                restaurant_name: restaurantName,
+                created_by: userProfile?.name || currentUser?.email || '',
+                created_by_uid: currentUser?.uid || '',
             });
             clearDraft();
             toast.success(`Purchase Order ${result.po_number} created!`);

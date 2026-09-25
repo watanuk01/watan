@@ -11,7 +11,7 @@ import {
     MdSyncAlt,
 } from 'react-icons/md';
 import { getItems } from '../../services/inventoryService';
-import { mapCutToCKInventory } from '../../services/butcheringService';
+import { mapCutToCKInventory, saveCutCKMapping } from '../../services/butcheringService';
 import toast from 'react-hot-toast';
 
 const safeNum = (v, fallback = 0) => {
@@ -143,6 +143,15 @@ const MapCutToCKModal = ({ cutBatch, isOpen, onClose, onSuccess }) => {
             });
 
             toast.success(`Successfully mapped ${transferQty} kg to ${selectedItem.name}!`);
+
+            // Persist this CK mapping back to the animal definition
+            // so future butchering orders auto-populate this dropdown
+            const cutName = cutBatch.cut_name || cutBatch.item_name || '';
+            if (cutName && selectedItem.id) {
+                saveCutCKMapping(cutName, selectedItem.id, selectedItem.name)
+                    .catch(err => console.warn('Failed to persist CK mapping:', err));
+            }
+
             if (onSuccess) onSuccess(res);
             onClose();
         } catch (err) {
@@ -321,7 +330,7 @@ const MapCutToCKModal = ({ cutBatch, isOpen, onClose, onSuccess }) => {
                                             </div>
                                             <div style={{ textAlign: 'right' }}>
                                                 <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-primary)' }}>
-                                                    {safeNum(item.current_stock).toFixed(1)} {item.unit || 'kg'}
+                                                    {safeNum(item.current_stock).toFixed(2)} {item.unit || 'kg'}
                                                 </div>
                                                 <div style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>Current Stock</div>
                                             </div>

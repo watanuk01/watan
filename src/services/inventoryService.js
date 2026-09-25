@@ -801,7 +801,24 @@ export const deductStockFIFO = async (itemId, quantity) => {
     }
 
     if (remaining > 0.001) {
-        console.warn(`FIFO deduction short by ${remaining.toFixed(3)} for item ${itemId}`);
+        // No batches available to deduct from — directly update current_stock
+        // This handles items that were stocked without batch records (e.g. legacy data,
+        // grocery items classified as meat, or stock added via direct DB edits).
+        console.warn(`FIFO deduction short by ${remaining.toFixed(3)} for item ${itemId}. Falling back to direct stock decrement.`);
+        try {
+            const itemRef = doc(db, ITEMS, itemId);
+            const itemSnap = await getDoc(itemRef);
+            if (itemSnap.exists()) {
+                const currentStock = Number(itemSnap.data().current_stock || 0);
+                const newStock = Math.max(0, Math.round((currentStock - remaining) * 100) / 100);
+                await updateDoc(itemRef, {
+                    current_stock: newStock,
+                    updated_at: serverTimestamp(),
+                });
+            }
+        } catch (err) {
+            console.error('Fallback direct stock decrement failed:', err);
+        }
     }
 
     return consumed;

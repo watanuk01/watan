@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { getItems, ITEM_TYPES } from '../../services/inventoryService';
 import { createOrder, getTodaysPendingOrder, addItemsToOrder } from '../../services/orderService';
+import { getAllUsers } from '../../services/userService';
 import {
     MdSearch,
     MdShoppingCart,
@@ -38,7 +39,23 @@ const PlaceOrder = () => {
     });
     const [submitting, setSubmitting] = useState(false);
     const isAdmin = userProfile?.role === 'admin' || userProfile?.role === 'central_kitchen' || !userProfile?.restaurant_name;
-    const [selectedRestaurant, setSelectedRestaurant] = useState('Restaurant A');
+    const [selectedRestaurant, setSelectedRestaurant] = useState('');
+    const [restaurantUsers, setRestaurantUsers] = useState([]);
+
+    // Load restaurant users for admin dropdown
+    useEffect(() => {
+        if (!isAdmin) return;
+        getAllUsers().then(users => {
+            const restaurants = users.filter(u =>
+                u.restaurant_name &&
+                (u.role === 'restaurant_manager' || u.role === 'restaurant_manager_non_managed')
+            );
+            setRestaurantUsers(restaurants);
+            if (restaurants.length > 0 && !selectedRestaurant) {
+                setSelectedRestaurant(restaurants[0].id);
+            }
+        }).catch(err => console.error('Failed to load restaurant users:', err));
+    }, [isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Persist cart to localStorage
     useEffect(() => {
@@ -203,8 +220,13 @@ const PlaceOrder = () => {
 
         setSubmitting(true);
         try {
-            const targetRestaurantName = isAdmin ? selectedRestaurant : (userProfile?.restaurant_name || userProfile?.name || 'Restaurant A');
-            const targetRestaurantId = isAdmin ? selectedRestaurant.toLowerCase().replace(/\s+/g, '-') : (userProfile?.restaurant_id || currentUser.uid);
+            const targetUser = isAdmin ? restaurantUsers.find(u => u.id === selectedRestaurant) : null;
+            const targetRestaurantName = isAdmin
+                ? (targetUser?.restaurant_name || targetUser?.name || 'Restaurant')
+                : (userProfile?.restaurant_name || userProfile?.name || 'Restaurant');
+            const targetRestaurantId = isAdmin
+                ? (targetUser?.id || selectedRestaurant)
+                : (userProfile?.restaurant_id || currentUser.uid);
 
             // Check for existing pending order today (single order per day rule)
             const existingOrder = await getTodaysPendingOrder(targetRestaurantId);
@@ -260,10 +282,12 @@ const PlaceOrder = () => {
                             onChange={e => setSelectedRestaurant(e.target.value)}
                             style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text-primary)', fontSize: 13, fontWeight: 600, outline: 'none' }}
                         >
-                            <option value="Restaurant A">Restaurant A</option>
-                            <option value="Restaurant B">Restaurant B</option>
-                            <option value="Southall">Southall Branch</option>
-                            <option value="Ilford">Ilford Branch</option>
+                            {restaurantUsers.length === 0 && <option value="">Loading restaurants…</option>}
+                            {restaurantUsers.map(u => (
+                                <option key={u.id} value={u.id}>
+                                    {u.restaurant_name || u.name} {u.restaurant_id ? `(${u.restaurant_id})` : ''}
+                                </option>
+                            ))}
                         </select>
                     </div>
                 )}
