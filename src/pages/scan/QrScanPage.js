@@ -16,7 +16,7 @@ import {
     MdHelpOutline,
     MdClose,
 } from 'react-icons/md';
-import { getBatchGenealogyTree } from '../../services/butcheringService';
+import { getBatchGenealogyTree, formatKg } from '../../services/butcheringService';
 import { getDoc, doc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import './QrScanPage.css';
@@ -66,7 +66,7 @@ const TreeNode = ({ node, level = 0 }) => {
                         )}
                         <div className="scan-tree-node-meta">
                             {(node.quantity !== undefined && node.quantity !== null && node.quantity !== '') && (
-                                <span className="meta-pill qty">{node.quantity} kg</span>
+                                <span className="meta-pill qty">{formatKg(node.quantity)} kg</span>
                             )}
                             {node.date && (
                                 <span className="meta-pill date">{safeDate(node.date)}</span>
@@ -114,7 +114,21 @@ const flattenToTimeline = (tree) => {
 const buildTreeFromOrderData = (orderData, targetItemId) => {
     if (!orderData) return null;
     const qrItems = orderData.dispatch_qr_items || [];
-    const qrItem = (targetItemId ? qrItems.find(q => q.item_id === targetItemId) : null) || qrItems[0];
+    let qrItem = (targetItemId ? qrItems.find(q => q.item_id === targetItemId) : null) || qrItems[0];
+
+    // Fallback: if no dispatch_qr_items, build from orderData.items (e.g. grocery or standard order)
+    if (!qrItem && orderData.items?.length > 0) {
+        const item = (targetItemId ? orderData.items.find(i => i.item_id === targetItemId || i.id === targetItemId) : null) || orderData.items[0];
+        qrItem = {
+            item_id: item.item_id || item.id,
+            item_name: item.item_name || item.name,
+            quantity: item.quantity,
+            unit: item.unit || 'kg',
+            item_type: item.item_type || 'grocery',
+            category_name: item.category_name || '',
+            batch_numbers: item.batch_number ? [item.batch_number] : [],
+        };
+    }
 
     if (!qrItem) return null;
 
@@ -193,18 +207,29 @@ const buildTreeFromOrderData = (orderData, targetItemId) => {
         return { tree: vendorNode, qrItem };
     }
 
-    // Fallback if no deep traceability stored
+    // Fallback if no deep traceability stored (grocery or unbatched item)
     const batchNos = qrItem.batch_numbers || [];
-    const basicProdNode = {
-        type: 'production',
-        name: qrItem.item_name || 'Production Batch',
-        batch_number: batchNos[0] || 'Central Kitchen Batch',
+    const isGrocery = qrItem.item_type === 'grocery' || (!qrItem.batch_numbers?.length && !qrItem.traceability?.length);
+    const itemNode = {
+        type: isGrocery ? 'parent' : 'production',
+        name: qrItem.item_name || 'Inventory Item',
+        batch_number: batchNos[0] || 'Central Kitchen Stock',
         quantity: qrItem.quantity,
-        info: 'Central Kitchen Production',
+        info: isGrocery ? (qrItem.category_name ? `${qrItem.category_name} • Grocery Stock` : 'Grocery / Central Kitchen Stock') : 'Central Kitchen Production',
+        date: orderData.created_at,
         children: [restaurantNode],
     };
 
-    return { tree: basicProdNode, qrItem };
+    const vendorNode = {
+        type: 'vendor',
+        name: 'Watan Central Kitchen & Suppliers',
+        batch_number: orderData.order_number || '',
+        info: `Order Fulfillment #${orderData.order_number || ''}`,
+        date: orderData.created_at,
+        children: [itemNode],
+    };
+
+    return { tree: vendorNode, qrItem };
 };
 
 const QrScanPage = () => {
@@ -224,6 +249,7 @@ const QrScanPage = () => {
     const [searchTerm, setSearchTerm] = useState(batchParam);
     const [copied, setCopied] = useState(false);
     const [showScanHelp, setShowScanHelp] = useState(false);
+    const [zoom, setZoom] = useState(100);
 
     // Load batch traceability by batch/production/order query
     const loadTraceability = async (term) => {
@@ -414,7 +440,7 @@ const QrScanPage = () => {
                                 <div className="scan-meta-box">
                                     <div className="scan-meta-lbl">Dispatched Product</div>
                                     <div className="scan-meta-val gold">
-                                        {activeQrItem.item_name} ({activeQrItem.quantity} {activeQrItem.unit || 'kg'})
+                                        {activeQrItem.item_name} ({formatKg(activeQrItem.quantity)} {activeQrItem.unit || 'kg'})
                                     </div>
                                 </div>
                             )}
@@ -434,7 +460,7 @@ const QrScanPage = () => {
                                         className={`scan-item-tab ${selectedItemId === item.item_id ? 'active' : ''}`}
                                         onClick={() => handleSwitchItem(item.item_id)}
                                     >
-                                        {item.item_name} ({item.quantity} {item.unit || 'kg'})
+                                        {item.item_name} ({formatKg(item.quantity)} {item.unit || 'kg'})
                                     </button>
                                 ))}
                             </div>
@@ -480,8 +506,37 @@ const QrScanPage = () => {
                         </button>
                     </div>
                     {viewMode === 'tree' && (
-                        <div className="scan-mobile-hint">
-                            <span>↔ Scroll horizontally to view full tree branches</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'rgba(255, 255, 255, 0.05)', padding: '2px 8px', borderRadius: 8, border: '1px solid rgba(255, 255, 255, 0.1)' }}>
+                                <button
+                                    type="button"
+                                    onClick={() => setZoom(z => Math.max(50, z - 15))}
+                                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 8px', fontWeight: 700, fontSize: 13, color: '#f3f4f6' }}
+                                    title="Zoom Out"
+                                >−</button>
+                                <span style={{ fontSize: 12, fontWeight: 600, minWidth: 40, textAlign: 'center', color: '#f3f4f6' }}>{zoom}%</span>
+                                <button
+                                    type="button"
+                                    onClick={() => setZoom(z => Math.min(150, z + 15))}
+                                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 8px', fontWeight: 700, fontSize: 13, color: '#f3f4f6' }}
+                                    title="Zoom In"
+                                >+</button>
+                                <button
+                                    type="button"
+                                    onClick={() => setZoom(100)}
+                                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px', fontSize: 11, color: '#9ca3af' }}
+                                    title="Reset to 100%"
+                                >Reset</button>
+                                <button
+                                    type="button"
+                                    onClick={() => setZoom(75)}
+                                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px', fontSize: 11, color: '#c9a96e', fontWeight: 600 }}
+                                    title="Fit wide tree to screen"
+                                >Fit</button>
+                            </div>
+                            <div className="scan-mobile-hint" style={{ margin: 0 }}>
+                                <span>↔ Scroll horizontally to view full tree branches</span>
+                            </div>
                         </div>
                     )}
                 </div>
@@ -512,7 +567,14 @@ const QrScanPage = () => {
             {/* ─── Tree View ─── */}
             {!loading && viewMode === 'tree' && tree && (
                 <div className="scan-tree-wrapper">
-                    <div className="scan-tree-container">
+                    <div
+                        className="scan-tree-container"
+                        style={{
+                            transform: zoom !== 100 ? `scale(${zoom / 100})` : 'none',
+                            transformOrigin: 'top center',
+                            transition: 'transform 0.2s ease',
+                        }}
+                    >
                         <TreeNode node={tree} />
                     </div>
                 </div>
@@ -541,7 +603,7 @@ const QrScanPage = () => {
                                         <div className="scan-step-batch">{step.batch_number}</div>
                                     )}
                                     <div className="scan-step-meta">
-                                        {(step.quantity !== undefined && step.quantity !== null && step.quantity !== '') && <span>{step.quantity} kg</span>}
+                                        {(step.quantity !== undefined && step.quantity !== null && step.quantity !== '') && <span>{formatKg(step.quantity)} kg</span>}
                                         {step.date && <span>{safeDate(step.date)}</span>}
                                     </div>
                                     {step.info && <div className="scan-step-info">{step.info}</div>}

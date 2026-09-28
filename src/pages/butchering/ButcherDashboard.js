@@ -17,6 +17,7 @@ import {
 import {
     getButcheringOrders,
     getButcherInventory,
+    formatKg,
 } from '../../services/butcheringService';
 import './ButcheringModule.css';
 
@@ -92,7 +93,7 @@ const ButcherDashboard = () => {
 
     const completedOrders = orders.filter(o => safeNum(o.yield_pct) > 0);
     const avgYield = completedOrders.length > 0
-        ? Math.round(completedOrders.reduce((s, o) => s + safeNum(o.yield_pct), 0) / completedOrders.length * 10) / 10
+        ? Math.round(completedOrders.reduce((s, o) => s + safeNum(o.yield_pct), 0) / completedOrders.length * 100) / 100
         : 0;
 
     const twoDays = Date.now() + 48 * 3600 * 1000;
@@ -203,7 +204,7 @@ const ButcherDashboard = () => {
                         <span className="chip-green"><MdTrendingUp style={{ fontSize: 11 }} /> Target &gt;90%</span>
                     </div>
                     <div className="metric-number" style={{ color: avgYield >= 90 ? 'var(--color-success)' : avgYield > 0 ? 'var(--color-warning)' : 'var(--color-text-muted)' }}>
-                        {avgYield > 0 ? `${avgYield}%` : '—'}
+                        {avgYield > 0 ? `${avgYield.toFixed(2)}%` : '—'}
                     </div>
                     <div className="metric-caption">Usable output vs raw input weight</div>
                 </div>
@@ -272,7 +273,7 @@ const ButcherDashboard = () => {
                                             <td>{safeNum(o.output_weight_kg).toFixed(2)} kg</td>
                                             <td>
                                                 <span className={`yield-badge ${safeNum(o.yield_pct) >= 90 ? 'high' : 'medium'}`}>
-                                                    {safeNum(o.yield_pct)}%
+                                                    {Number(o.yield_pct || 0).toFixed(2)}%
                                                 </span>
                                             </td>
                                             <td style={{ color: 'var(--color-text-muted)' }}>{o.date || '—'}</td>
@@ -320,7 +321,7 @@ const ButcherDashboard = () => {
                                     </div>
                                     <div className="pb-right">
                                         <span className="pb-weight">
-                                            {safeNum(b.weight_kg || b.quantity || b.initial_quantity || 10)} kg
+                                            {formatKg(b.remaining_weight_kg ?? b.weight_kg ?? b.quantity ?? b.initial_quantity)} kg
                                         </span>
                                         <button
                                             className="btn btn-primary btn-sm"

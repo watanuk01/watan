@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Pagination from '../../components/common/Pagination';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../contexts/AuthContext';
 import {
     getPurchaseOrders,
     getUniqueVendors,
@@ -31,6 +32,10 @@ import './Purchase.css';
 
 const PurchaseHistory = () => {
     const navigate = useNavigate();
+    const { userProfile, currentUser } = useAuth();
+    const isRestaurantUser = ['restaurant_manager', 'restaurant_manager_non_managed'].includes(userProfile?.role);
+    const restaurantId = isRestaurantUser ? (userProfile?.restaurant_id || currentUser?.uid || '') : '';
+
     const [orders, setOrders] = useState([]);
     const [loading, setLoading] = useState(true);
     const [vendors, setVendors] = useState([]);
@@ -57,10 +62,10 @@ const PurchaseHistory = () => {
 
     // ── Company Info ──
     const COMPANY = {
-        name: 'Watan Central Kitchen',
-        address: '123 High Street, London, UK',
-        phone: '+44 20 1234 5678',
-        email: 'orders@watan.com',
+        name: isRestaurantUser ? (userProfile?.restaurant_name || userProfile?.name || 'Watan Restaurant') : 'Watan Central Kitchen',
+        address: userProfile?.address || '123 High Street, London, UK',
+        phone: userProfile?.phone || '+44 20 1234 5678',
+        email: userProfile?.email || 'orders@watan.com',
         tagline: 'Quality Food, Delivered Fresh',
     };
 
@@ -72,6 +77,7 @@ const PurchaseHistory = () => {
                 ...(filters.vendor && { vendor: filters.vendor }),
                 ...(filters.dateFrom && { dateFrom: filters.dateFrom }),
                 ...(filters.dateTo && { dateTo: filters.dateTo }),
+                ...(isRestaurantUser && { restaurant_id: restaurantId }),
             });
             setOrders(data);
         } catch (err) {
@@ -79,7 +85,7 @@ const PurchaseHistory = () => {
         } finally {
             setLoading(false);
         }
-    }, [filters.status, filters.vendor, filters.dateFrom, filters.dateTo]);
+    }, [filters.status, filters.vendor, filters.dateFrom, filters.dateTo, isRestaurantUser, restaurantId]);
 
     useEffect(() => { fetchOrders(); }, [fetchOrders]);
 

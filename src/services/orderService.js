@@ -67,6 +67,34 @@ const generateOrderNumber = async () => {
 export const createOrder = async (orderData) => {
     const { restaurant_id, restaurant_name, items, created_by, notes } = orderData;
 
+    // ── Resolve canonical restaurant name from Firestore user profile ──
+    // The client may pass a person's name, a stale value, or a generated slug.
+    // Always look up the authoritative restaurant_name from the users collection.
+    let resolvedRestaurantName = restaurant_name || '';
+    try {
+        // restaurant_id may be a UID (restaurant user doc) or a slug
+        const userDoc = await getDoc(doc(db, 'users', restaurant_id));
+        if (userDoc.exists()) {
+            const profile = userDoc.data();
+            resolvedRestaurantName = profile.restaurant_name || profile.name || restaurant_name || '';
+        } else if (!resolvedRestaurantName) {
+            // Fallback: scan users collection for matching restaurant_id field
+            const usersSnap = await getDocs(collection(db, 'users'));
+            const match = usersSnap.docs.find(d => {
+                const u = d.data();
+                return u.restaurant_id === restaurant_id ||
+                    (u.restaurant_name || '').toLowerCase() === (restaurant_id || '').toLowerCase();
+            });
+            if (match) {
+                const profile = match.data();
+                resolvedRestaurantName = profile.restaurant_name || profile.name || restaurant_name || '';
+            }
+        }
+    } catch (err) {
+        console.warn('Could not resolve restaurant name from profile:', err);
+        // Continue with the supplied name as fallback
+    }
+
     // Calculate totals
     let subtotal = 0;
     let vatAmount = 0;
@@ -104,7 +132,7 @@ export const createOrder = async (orderData) => {
     const order = {
         order_number: orderNumber,
         restaurant_id,
-        restaurant_name: restaurant_name || '',
+        restaurant_name: resolvedRestaurantName,
         status: 'pending',
         items: processedItems,
         item_count: processedItems.length,
@@ -132,6 +160,7 @@ export const createOrder = async (orderData) => {
     const docRef = await addDoc(collection(db, ORDERS), order);
     return { id: docRef.id, ...order };
 };
+
 
 // ═══════════════════════════════════════════
 // READ ORDERS

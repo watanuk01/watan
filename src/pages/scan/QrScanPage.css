@@ -324,21 +324,26 @@
     width: 100%;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
-    padding: 24px 16px 40px;
+    padding: 24px 0 40px;
     box-sizing: border-box;
 }
 
 .scan-tree-container {
-    min-width: min-content;
-    margin: 0 auto;
-    display: flex;
-    justify-content: center;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 100%;
+    width: max-content;
+    box-sizing: border-box;
+    padding: 16px 64px 48px;
 }
 
 .tree-branch-container {
     display: flex;
     flex-direction: column;
     align-items: center;
+    width: max-content;
+    min-width: min-content;
 }
 
 .tree-node-wrapper {

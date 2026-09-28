@@ -13,7 +13,7 @@ import {
     MdRefresh,
     MdCheckCircle,
 } from 'react-icons/md';
-import { getBatchGenealogyTree } from '../../services/butcheringService';
+import { getBatchGenealogyTree, formatKg } from '../../services/butcheringService';
 import QrCodeSvg from '../../components/ui/QrCodeSvg';
 import toast from 'react-hot-toast';
 import './ButcheringModule.css';
@@ -53,7 +53,7 @@ const TreeNode = ({ node, level = 0 }) => {
                             <span className="batch-code" style={{ marginTop: 3, display: 'inline-block' }}>{node.batch_number}</span>
                         )}
                         {(node.quantity !== undefined && node.quantity !== null && node.quantity !== '') && (
-                            <div className="tree-node-meta">{node.quantity} kg</div>
+                            <div className="tree-node-meta">{formatKg(node.quantity)} kg</div>
                         )}
                         {node.date && <div className="tree-node-meta" style={{ color: 'var(--color-text-muted)' }}>{safeDate(node.date)}</div>}
                         {node.info && <div className="tree-node-meta">{node.info}</div>}
@@ -84,6 +84,7 @@ const BatchTraceability = () => {
     const [loading, setLoading] = useState(false);
     const [genealogy, setGenealogy] = useState(null);
     const [printBatch, setPrintBatch] = useState(null);
+    const [zoom, setZoom] = useState(100);
 
     const search = async (term) => {
         const q = term || searchTerm;
@@ -124,7 +125,7 @@ const BatchTraceability = () => {
             `Batch: ${node.batch_number}`,
             `Product: ${node.name}`,
         ];
-        if (node.quantity) lines.push(`Weight: ${node.quantity} kg`);
+        if (node.quantity) lines.push(`Weight: ${formatKg(node.quantity)} kg`);
         if (node.date) lines.push(`Date: ${safeDate(node.date)}`);
 
         lines.push(``);
@@ -147,7 +148,7 @@ const BatchTraceability = () => {
             const prefix = i === 0 ? '' : '  > ';
             lines.push(`${prefix}${(step.type || 'batch').toUpperCase()}: ${step.name}`);
             if (step.batch_number) lines.push(`  Batch: ${step.batch_number}`);
-            if (step.quantity) lines.push(`  Weight: ${step.quantity} kg`);
+            if (step.quantity) lines.push(`  Weight: ${formatKg(step.quantity)} kg`);
             if (step.info) lines.push(`  ${step.info}`);
         });
 
@@ -206,20 +207,57 @@ const BatchTraceability = () => {
                 <div className="butcher-loading">Building genealogy tree...</div>
             ) : genealogy ? (
                 <>
-                    <div className="butcher-panel" style={{ overflowX: 'auto' }}>
+                    <div className="butcher-panel" style={{ overflowX: 'auto', padding: 0 }}>
                         <div className="genealogy-wrapper">
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 16 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, padding: '16px 20px 12px', borderBottom: '1px solid var(--color-border)' }}>
                                 <h3 className="genealogy-title" style={{ margin: 0 }}>
                                     <MdQrCodeScanner color="var(--color-primary)" />
                                     Batch Genealogy Tree: <span style={{ color: 'var(--color-primary)' }}>{genealogy.batch_number || searchTerm}</span>
                                 </h3>
-                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                                    {/* Zoom controls */}
+                                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'var(--color-bg-subtle)', padding: '2px 6px', borderRadius: 8, border: '1px solid var(--color-border)' }}>
+                                        <button
+                                            type="button"
+                                            onClick={() => setZoom(z => Math.max(50, z - 15))}
+                                            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 8px', fontWeight: 700, fontSize: 13, color: 'var(--color-text-primary)' }}
+                                            title="Zoom Out"
+                                        >−</button>
+                                        <span style={{ fontSize: 'var(--text-xs)', fontWeight: 600, minWidth: 40, textAlign: 'center', color: 'var(--color-text-primary)' }}>{zoom}%</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => setZoom(z => Math.min(150, z + 15))}
+                                            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 8px', fontWeight: 700, fontSize: 13, color: 'var(--color-text-primary)' }}
+                                            title="Zoom In"
+                                        >+</button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setZoom(100)}
+                                            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px', fontSize: 11, color: 'var(--color-text-muted)' }}
+                                            title="Reset to 100%"
+                                        >Reset</button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setZoom(75)}
+                                            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px', fontSize: 11, color: 'var(--color-primary)', fontWeight: 600 }}
+                                            title="Fit wider tree to screen"
+                                        >Fit</button>
+                                    </div>
                                     <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', background: 'var(--color-bg-subtle)', padding: '4px 10px', borderRadius: 20, border: '1px solid var(--color-border)' }}>
                                         ↔ Scroll horizontally to view all cut branches
                                     </span>
                                 </div>
                             </div>
-                            <TreeNode node={genealogy} />
+                            <div
+                                className="genealogy-tree-canvas"
+                                style={{
+                                    transform: zoom !== 100 ? `scale(${zoom / 100})` : 'none',
+                                    transformOrigin: 'top center',
+                                    transition: 'transform 0.2s ease',
+                                }}
+                            >
+                                <TreeNode node={genealogy} />
+                            </div>
                         </div>
                     </div>
 
@@ -251,7 +289,7 @@ const BatchTraceability = () => {
                                             <div className="qr-label-info">
                                                 <div className="qr-label-product">{n.name}</div>
                                                 <div>Batch: <strong>{n.batch_number}</strong></div>
-                                                {(n.quantity !== undefined && n.quantity !== null && n.quantity !== '') && <div>Weight: <strong>{n.quantity} kg</strong></div>}
+                                                {(n.quantity !== undefined && n.quantity !== null && n.quantity !== '') && <div>Weight: <strong>{formatKg(n.quantity)} kg</strong></div>}
                                                 {n.date && <div>Date: <strong>{safeDate(n.date)}</strong></div>}
                                                 {n.info && <div><small>{n.info}</small></div>}
                                             </div>

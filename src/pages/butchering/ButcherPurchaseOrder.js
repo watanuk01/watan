@@ -281,7 +281,7 @@ const ButcherPurchaseOrder = () => {
         pdf.setFont(undefined, 'normal');
         items.forEach(item => {
             pdf.text(item.item_name || '—', 14, y);
-            pdf.text(String(item.quantity || 0), 90, y);
+            pdf.text(`${safeNum(item.quantity).toFixed(2)} kg`, 90, y);
             pdf.text(`£${(item.unit_price || 0).toFixed(2)}`, 110, y);
             pdf.text(`£${(item.purchase_price || (item.quantity * item.unit_price) || 0).toFixed(2)}`, 150, y);
             y += 7;
@@ -291,7 +291,7 @@ const ButcherPurchaseOrder = () => {
         pdf.line(14, y, 196, y);
         y += 8;
         pdf.setFont(undefined, 'bold');
-        pdf.text(`Total Qty: ${po.total_quantity || 0}`, 14, y);
+        pdf.text(`Total Qty: ${safeNum(po.total_quantity).toFixed(2)} kg`, 14, y);
         pdf.text(`Total: £${(po.total_amount || 0).toFixed(2)}`, 110, y);
 
         if (po.notes) {
@@ -307,7 +307,7 @@ const ButcherPurchaseOrder = () => {
     const emailOrder = (po) => {
         const items = po.items || [];
         const itemLines = items.map(i =>
-            `  - ${i.item_name}: Qty ${i.quantity} × £${(i.unit_price || 0).toFixed(2)} = £${(i.purchase_price || (i.quantity * i.unit_price) || 0).toFixed(2)}`
+            `  - ${i.item_name}: Qty ${safeNum(i.quantity).toFixed(2)} kg × £${(i.unit_price || 0).toFixed(2)} = £${(i.purchase_price || (i.quantity * i.unit_price) || 0).toFixed(2)}`
         ).join('%0A');
 
         const subject = `Meat Purchase Order ${po.po_number}`;
@@ -444,7 +444,7 @@ const ButcherPurchaseOrder = () => {
                                                     </select>
                                                 </td>
                                                 <td>
-                                                    <input type="number" min="0.1" step="0.1" className="table-cell-input"
+                                                    <input type="number" min="0.01" step="0.01" className="table-cell-input"
                                                         style={{ width: '100%' }} value={item.quantity}
                                                         onChange={e => updateItem(item.id, 'quantity', e.target.value)} />
                                                 </td>
@@ -483,7 +483,7 @@ const ButcherPurchaseOrder = () => {
                                     </div>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--color-border)', paddingBottom: 6 }}>
                                         <span style={{ color: 'var(--color-text-secondary)' }}>Total Quantity</span>
-                                        <span style={{ fontWeight: 700, color: 'var(--color-success)' }}>{totalQty.toFixed(1)} kg</span>
+                                        <span style={{ fontWeight: 700, color: 'var(--color-success)' }}>{totalQty.toFixed(2)} kg</span>
                                     </div>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 2 }}>
                                         <span style={{ color: 'var(--color-text-secondary)' }}>Total Amount</span>
@@ -497,7 +497,7 @@ const ButcherPurchaseOrder = () => {
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 24, paddingTop: 16, borderTop: '1px solid var(--color-border)' }}>
                             <div style={{ fontSize: 13, color: 'var(--color-text-secondary)' }}>
                                 <strong>{items.length} item(s)</strong> •{' '}
-                                <strong style={{ color: 'var(--color-success)' }}>{totalQty.toFixed(1)} kg</strong> •{' '}
+                                <strong style={{ color: 'var(--color-success)' }}>{totalQty.toFixed(2)} kg</strong> •{' '}
                                 <strong style={{ color: 'var(--color-primary)' }}>£{grandTotal.toFixed(2)}</strong>
                             </div>
                             <div style={{ display: 'flex', gap: 12 }}>
@@ -546,7 +546,7 @@ const ButcherPurchaseOrder = () => {
                                             <td><span className="batch-code">{po.po_number}</span></td>
                                             <td style={{ color: 'var(--color-text-secondary)', fontSize: 13 }}>{po.vendor || '—'}</td>
                                             <td>{(po.items || []).length}</td>
-                                            <td style={{ fontWeight: 600 }}>{safeNum(po.total_quantity).toFixed(1)} kg</td>
+                                            <td style={{ fontWeight: 600 }}>{safeNum(po.total_quantity).toFixed(2)} kg</td>
                                             <td style={{ fontWeight: 600 }}>£{safeNum(po.total_amount).toFixed(2)}</td>
                                             <td>
                                                 <span className={`chip-${po.status === 'received' ? 'green' : po.status === 'ordered' ? 'amber' : 'red'}`}>
@@ -647,7 +647,7 @@ const ButcherPurchaseOrder = () => {
                                     {(detailPO.items || []).map((item, idx) => (
                                         <tr key={idx}>
                                             <td style={{ fontWeight: 600 }}>{item.item_name}</td>
-                                            <td>{item.quantity} kg</td>
+                                            <td>{safeNum(item.quantity).toFixed(2)} kg</td>
                                             <td>£{safeNum(item.unit_price).toFixed(2)}</td>
                                             <td style={{ fontWeight: 700, color: 'var(--color-primary)' }}>
                                                 £{safeNum(item.purchase_price || (item.quantity * item.unit_price)).toFixed(2)}
