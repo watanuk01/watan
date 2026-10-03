@@ -22,6 +22,7 @@ import {
     serverTimestamp,
     writeBatch,
     increment,
+    arrayUnion,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -557,6 +558,54 @@ export const createButcheringOrder = async (orderData) => {
     const childBatchIds = [];
     const parentBatchNo = sourceBatch.batch_number || sourceBatch.id;
 
+    // Resolve vendor unit cost with multi-tier fallback so cuts never have £0.00
+    let sourceBatchCost = Number(sourceBatch.cost_price ?? sourceBatch.unit_price ?? 0);
+    if (!sourceBatchCost && (sourceBatch.po_id || sourceBatch.purchase_order_id)) {
+        try {
+            const poSnap = await getDoc(doc(db, PURCHASE_ORDERS, sourceBatch.po_id || sourceBatch.purchase_order_id));
+            if (poSnap.exists()) {
+                const poData = poSnap.data();
+                const matchedItem = (poData.items || []).find(it =>
+                    (sourceBatch.item_name && it.item_name && it.item_name.toLowerCase().trim() === sourceBatch.item_name.toLowerCase().trim()) ||
+                    (sourceBatch.item_id && it.item_id === sourceBatch.item_id)
+                ) || (poData.items || [])[0];
+                if (matchedItem) {
+                    sourceBatchCost = Number(matchedItem.unit_price ?? matchedItem.received_price ?? matchedItem.cost_price ?? 0);
+                }
+            }
+        } catch (err) {
+            console.warn('Failed to resolve PO cost for source batch:', err);
+        }
+    }
+    if (!sourceBatchCost && sourceBatch.item_id) {
+        try {
+            const itSnap = await getDoc(doc(db, ITEMS, sourceBatch.item_id));
+            if (itSnap.exists()) {
+                sourceBatchCost = Number(itSnap.data().cost_price || 0);
+            }
+        } catch (err) {
+            console.warn('Failed to resolve item cost for source batch:', err);
+        }
+    }
+    if (!sourceBatchCost && sourceBatch.item_name) {
+        try {
+            const itQuery = query(collection(db, ITEMS), where('name', '==', sourceBatch.item_name));
+            const itSnap = await getDocs(itQuery);
+            if (!itSnap.empty) {
+                sourceBatchCost = Number(itSnap.docs[0].data().cost_price || 0);
+            }
+        } catch (err) {}
+    }
+
+    // If source batch was missing cost in Firestore, heal it now so future lookups succeed
+    if (sourceBatchCost > 0 && sourceBatch.id && (!sourceBatch.cost_price || sourceBatch.cost_price === 0)) {
+        batchRef.update(doc(db, BATCHES, sourceBatch.id), {
+            cost_price: sourceBatchCost,
+            unit_price: sourceBatchCost,
+            updated_at: serverTimestamp(),
+        });
+    }
+
     for (let i = 0; i < cuts.length; i++) {
         const cut = cuts[i];
         const childRef = doc(collection(db, BATCHES));
@@ -568,6 +617,17 @@ export const createButcheringOrder = async (orderData) => {
 
         const isMappedToCK = Boolean(cut.destination_item_id) && !cut.is_waste;
 
+        // Cut inherits vendor cost per kg from carcass batch or destination CK item
+        let cutCost = sourceBatchCost;
+        if (!cutCost && isMappedToCK && cut.destination_item_id) {
+            try {
+                const destSnap = await getDoc(doc(db, ITEMS, cut.destination_item_id));
+                if (destSnap.exists()) {
+                    cutCost = Number(destSnap.data().cost_price || 0);
+                }
+            } catch (e) {}
+        }
+
         const childData = {
             batch_number: childBatchNo,
             item_id: isMappedToCK ? cut.destination_item_id : null,
@@ -576,11 +636,23 @@ export const createButcheringOrder = async (orderData) => {
             category: 'Raw Meat',
             cut_name: cut.cut_name,
             quantity: Number(cut.weight_kg) || 0,
+            initial_quantity: Number(cut.weight_kg) || 0,
+            // A cut inherits its vendor cost per kg. Without this, production
+            // consuming a butcher cut has no cost and invoices show £0.00.
+            cost_price: cutCost,
+            unit_price: cutCost,
             remaining_qty: cut.is_waste ? 0 : (Number(cut.weight_kg) || 0),
             remaining_weight_kg: Number(cut.weight_kg) || 0,
             unit: 'kg',
             parent_batch_id: sourceBatch.id,
             parent_batch_no: parentBatchNo,
+            // Keep the producing operation on every output.  A parent batch can be
+            // processed many times, so parent_batch_id alone is not enough to
+            // explain which cuts came from the 10 kg, 4 kg, 5 kg, etc. operation.
+            butchering_order_id: orderRef.id,
+            butchering_order_no: orderNo,
+            processing_input_weight_kg: inputWeight,
+            source_batch_initial_quantity: Number(sourceBatch.initial_quantity ?? sourceBatch.weight_kg ?? availableWeight) || availableWeight,
             vendor_name: sourceBatch.vendor_name || sourceBatch.supplier || 'Vendor Delivery',
             received_at: sourceBatch.received_at || sourceBatch.created_at || new Date().toISOString(),
             expiry_date: expiryDate.toISOString().substring(0, 10),
@@ -640,7 +712,7 @@ export const createButcheringOrder = async (orderData) => {
         remaining_weight_kg: finalRemaining,
         butchered_status: finalRemaining === 0 ? 'completed' : 'partial',
         butchered_at: serverTimestamp(),
-        child_batch_ids: childBatchIds,
+        child_batch_ids: arrayUnion(...childBatchIds),
     });
 
     // 4. Save Order
@@ -650,6 +722,7 @@ export const createButcheringOrder = async (orderData) => {
         source_batch_no: parentBatchNo,
         source_product: sourceBatch.item_name || 'Whole Animal',
         input_weight_kg: inputWeight,
+        source_batch_initial_quantity: Number(sourceBatch.initial_quantity ?? sourceBatch.weight_kg ?? availableWeight) || availableWeight,
         output_weight_kg: totalOutputWeight,
         waste_weight_kg: wasteWeight,
         yield_pct: yieldPct,
@@ -702,15 +775,17 @@ export const getBatchGenealogyTree = async (searchTerm) => {
     const term = searchTerm.trim().toLowerCase();
 
     try {
-        const [batchesSnap, prodSnap, ordersSnap] = await Promise.all([
+        const [batchesSnap, prodSnap, ordersSnap, butcheringSnap] = await Promise.all([
             getDocs(collection(db, BATCHES)).catch(() => ({ docs: [] })),
             getDocs(collection(db, 'productions')).catch(() => ({ docs: [] })),
             getDocs(collection(db, 'orders')).catch(() => ({ docs: [] })),
+            getDocs(collection(db, BUTCHERING_ORDERS)).catch(() => ({ docs: [] })),
         ]);
 
         const allBatches = batchesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
         const allProds = prodSnap.docs.map(d => ({ id: d.id, ...d.data() }));
         const allOrders = ordersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        const allButcheringOrders = butcheringSnap.docs.map(d => ({ id: d.id, ...d.data() }));
 
         // ── Helper: find batch by id or batch_number ──
         const findBatch = (idOrNo) => allBatches.find(b =>
@@ -740,15 +815,14 @@ export const getBatchGenealogyTree = async (searchTerm) => {
                 );
             });
 
-        // Track attached productions and orders to prevent duplicate branch explosions across sibling cuts
+        // A production belongs in one branch, but a restaurant order can
+        // legitimately consume several batches and must remain on each one.
         const attachedProdIds = new Set();
-        const attachedOrderIds = new Set();
 
         // ── Helper: build order/delivery nodes for a batch ──
         const buildOrderNodes = (batchId, batchNumber) => {
             const orders = findOrdersUsingBatch(batchId, batchNumber);
-            const uniqueOrders = orders.filter(o => !attachedOrderIds.has(o.id));
-            uniqueOrders.forEach(o => attachedOrderIds.add(o.id));
+            const uniqueOrders = orders.filter((o, index) => orders.findIndex(candidate => candidate.id === o.id) === index);
 
             return uniqueOrders.map(o => {
                 const statusMap = {
@@ -765,7 +839,14 @@ export const getBatchGenealogyTree = async (searchTerm) => {
                     batch_number: o.order_number || '',
                     info: `Order #${o.order_number || '—'} — ${statusMap[o.status] || o.status}`,
                     date: o.delivered_at || o.dispatched_at || o.ready_at || o.created_at,
-                    quantity: o.items?.reduce((s, i) => s + (i.quantity || 0), 0),
+                    // This is the quantity supplied by this exact batch, not
+                    // the total quantity of every product on the order.
+                    quantity: (o.batch_allocations || []).reduce((sum, allocation) => {
+                        const batch = (allocation.batches || []).find(b =>
+                            b.batch_id === batchId || b.batch_number === batchNumber
+                        );
+                        return sum + (batch ? Number(batch.quantity_deducted ?? batch.quantity ?? 0) : 0);
+                    }, 0),
                     children: o.status === 'delivered' ? [{
                         type: 'delivery',
                         name: `Delivered to ${o.restaurant_name || 'Restaurant'}`,
@@ -794,12 +875,20 @@ export const getBatchGenealogyTree = async (searchTerm) => {
                     ? buildOrderNodes(outputBatch.id, outputBatch.batch_number)
                     : [];
 
+                // Calculate how much raw meat from this specific batch was consumed
+                const meatUsedFromBatch = (prod.ingredients || []).reduce((sum, ing) => {
+                    return sum + (ing.consumed_batches || [])
+                        .filter(cb => (cb.batch_id && cb.batch_id === batchId) || (!cb.batch_id && batchNumber && cb.batch_number === batchNumber))
+                        .reduce((s, cb) => s + (Number(cb.quantity_used) || 0), 0);
+                }, 0);
+                const totalDishOutput = prod.actual_output || prod.production_quantity;
+
                 return {
                     type: 'production',
                     name: prod.item_name || 'Production Run',
                     batch_number: outputBatch?.batch_number || prod.production_number || '',
-                    quantity: prod.actual_output || prod.production_quantity,
-                    info: `${prod.production_number || 'Production'} — ${prod.status || 'completed'}${prod.chef_name ? ` by ${prod.chef_name}` : ''}`,
+                    quantity: meatUsedFromBatch > 0 ? meatUsedFromBatch : totalDishOutput,
+                    info: `${prod.production_number || 'Production'} — ${prod.status || 'completed'}${prod.chef_name ? ` by ${prod.chef_name}` : ''}${meatUsedFromBatch > 0 ? ` • Produced ${formatKg(totalDishOutput)} kg total dish output` : ''}`,
                     date: prod.completed_at || prod.started_at,
                     children: outputChildren,
                 };
@@ -1091,7 +1180,18 @@ export const getBatchGenealogyTree = async (searchTerm) => {
 
             if (childCuts.length > 0) {
                 // Has child cuts — build subtree for each
-                for (const cut of childCuts) {
+                const operationGroups = new Map();
+                childCuts.forEach(cut => {
+                    const operation = allButcheringOrders.find(o => o.id === cut.butchering_order_id) ||
+                        allButcheringOrders.find(o => o.source_batch_id === batch.id && (o.child_batch_ids || []).includes(cut.id));
+                    const key = operation?.id || cut.butchering_order_id || 'legacy';
+                    if (!operationGroups.has(key)) operationGroups.set(key, { operation, cuts: [] });
+                    operationGroups.get(key).cuts.push(cut);
+                });
+
+                for (const { operation, cuts: operationCuts } of operationGroups.values()) {
+                    const operationChildren = [];
+                    for (const cut of operationCuts) {
                     const cutChildren = [];
 
                     // Find productions using this cut
@@ -1104,6 +1204,22 @@ export const getBatchGenealogyTree = async (searchTerm) => {
                         cutChildren.push(...orderNodes);
                     }
 
+                    // A cut can be sold/used in several operations. Keep its
+                    // live balance as a separate terminal branch so it cannot
+                    // be mistaken for quantity already supplied to customers.
+                    const cutRemaining = Number(cut.remaining_qty ?? cut.remaining_weight_kg ?? 0);
+                    if (!cut.is_waste && cutRemaining > 0.001) {
+                        cutChildren.push({
+                            type: 'leftover',
+                            name: 'Available balance of this cut',
+                            batch_number: cut.batch_number || cut.id,
+                            quantity: cutRemaining,
+                            date: cut.updated_at || cut.created_at,
+                            info: 'Still in stock; available for the next operation or order',
+                            children: [],
+                        });
+                    }
+
                     const cutQty = (cut.weight_kg !== undefined && cut.weight_kg !== null && cut.weight_kg !== '')
                         ? cut.weight_kg
                         : (cut.quantity !== undefined && cut.quantity !== null && cut.quantity !== '')
@@ -1114,15 +1230,32 @@ export const getBatchGenealogyTree = async (searchTerm) => {
                                     ? cut.initial_quantity
                                     : null;
 
-                    children.push({
+                    operationChildren.push({
                         type: 'child',
                         name: cut.item_name || cut.cut_name || 'Cut Batch',
                         batch_number: cut.batch_number || cut.id,
-                        quantity: (cutQty !== null && cutQty !== undefined && cutQty !== '') ? formatKg(cutQty) : null,
+                        quantity: (cutQty !== null && cutQty !== undefined && cutQty !== '') ? Number(cutQty) : null,
                         date: cut.created_at || cut.expiry_date,
                         info: cut.is_waste ? 'Waste/Trim' : (cut.destination_item_name ? `→ ${cut.destination_item_name}` : 'Usable Cut'),
                         children: cutChildren,
                     });
+                    }
+
+                    const isLegacy = !operation;
+                    children.push({
+                        type: 'butcher',
+                        name: isLegacy ? 'Butchering operation (legacy record)' : `Butchering operation ${operation.order_no || ''}`.trim(),
+                        batch_number: operation?.order_no || '',
+                        quantity: operation?.input_weight_kg ?? operationCuts.reduce((sum, cut) => sum + (Number(cut.initial_quantity ?? cut.quantity) || 0), 0),
+                        date: operation?.date || operationCuts[0]?.created_at,
+                        info: isLegacy ? 'Historic cut outputs (operation identifier was not stored)' : `Input ${formatKg(operation.input_weight_kg)} kg → usable ${formatKg(operation.output_weight_kg)} kg${Number(operation.waste_weight_kg) ? `, waste ${formatKg(operation.waste_weight_kg)} kg` : ''}`,
+                        children: operationChildren,
+                    });
+                }
+
+                const remaining = Number(batch.remaining_weight_kg ?? batch.remaining_qty ?? batch.quantity ?? 0);
+                if (remaining > 0.05) {
+                    children.push({ type: 'leftover', name: 'Unprocessed parent balance', batch_number: batch.batch_number || batch.id, quantity: remaining, date: batch.updated_at || batch.butchering_at, info: 'Still available for a separate butchering operation', children: [] });
                 }
             } else {
                 // Leaf batch — check for productions and orders
@@ -1145,7 +1278,9 @@ export const getBatchGenealogyTree = async (searchTerm) => {
                 (batch.parent_batch_id ? 'child' :
                     (batch.source === 'production' ? 'production' : 'parent'));
 
-            const parentQty = (batch.weight_kg !== undefined && batch.weight_kg !== null && batch.weight_kg !== '')
+            const parentQty = (batch.initial_quantity !== undefined && batch.initial_quantity !== null && batch.initial_quantity !== '')
+                ? batch.initial_quantity
+                : (batch.weight_kg !== undefined && batch.weight_kg !== null && batch.weight_kg !== '')
                 ? batch.weight_kg
                 : (batch.quantity !== undefined && batch.quantity !== null && batch.quantity !== '')
                     ? batch.quantity
@@ -1195,6 +1330,7 @@ export const createButcherPurchaseOrder = async (poData) => {
 
     const formattedItems = (poData.items || []).map(i => ({
         ...i,
+        item_type: 'raw_meat',
         quantity: Number(i.quantity) || 0,
         unit_price: Number(i.unit_price) || 0,
         purchase_price: (Number(i.quantity) || 0) * (Number(i.unit_price) || 0),
@@ -1244,11 +1380,40 @@ export const receiveButcherPO = async (poId) => {
         const item = items[i];
         const itemName = item.item_name || 'Raw Meat';
         const qty = Number(item.quantity) || 1;
+        const unitPrice = Number(item.unit_price ?? item.received_price ?? item.cost_price ?? 0);
         const newBatchRef = doc(collection(db, BATCHES));
         const batchNo = `BT-RM-${new Date().toISOString().substring(2, 10).replace(/-/g, '')}-${Math.floor(100 + Math.random() * 900)}`;
 
+        // Register in inventory_items if not exists or update cost
+        const normKey = itemName.toLowerCase().trim();
+        let itemId = existingItemMap.get(normKey) || null;
+        if (!itemId) {
+            const newItemRef = doc(collection(db, ITEMS));
+            itemId = newItemRef.id;
+            bRef.set(newItemRef, {
+                name: itemName,
+                item_type: 'raw_meat',
+                category_name: 'Raw Meat',
+                vendor: vendorName,
+                supplier: vendorName,
+                unit: 'kg',
+                cost_price: unitPrice,
+                current_stock: qty,
+                status: 'active',
+                created_at: serverTimestamp(),
+                updated_at: serverTimestamp(),
+            });
+            existingItemMap.set(normKey, itemId);
+        } else if (unitPrice > 0) {
+            bRef.update(doc(db, ITEMS, itemId), {
+                cost_price: unitPrice,
+                updated_at: serverTimestamp(),
+            });
+        }
+
         const batchData = {
             batch_number: batchNo,
+            item_id: itemId,
             item_name: itemName,
             item_type: 'raw_meat',
             category: 'Raw Meat',
@@ -1257,6 +1422,8 @@ export const receiveButcherPO = async (poId) => {
             weight_kg: qty,
             initial_quantity: qty,
             unit: 'kg',
+            cost_price: unitPrice,
+            unit_price: unitPrice,
             vendor_name: vendorName,
             supplier: vendorName,
             po_id: poId,
@@ -1272,26 +1439,6 @@ export const receiveButcherPO = async (poId) => {
 
         bRef.set(newBatchRef, batchData);
         createdBatches.push({ id: newBatchRef.id, ...batchData, created_at: new Date().toISOString() });
-
-        // Register in inventory_items if not exists
-        const normKey = itemName.toLowerCase().trim();
-        if (!existingItemMap.has(normKey)) {
-            const newItemRef = doc(collection(db, ITEMS));
-            bRef.set(newItemRef, {
-                name: itemName,
-                item_type: 'raw_meat',
-                category_name: 'Raw Meat',
-                vendor: vendorName,
-                supplier: vendorName,
-                unit: 'kg',
-                cost_price: Number(item.unit_price) || 0,
-                current_stock: qty,
-                status: 'active',
-                created_at: serverTimestamp(),
-                updated_at: serverTimestamp(),
-            });
-            existingItemMap.set(normKey, newItemRef.id);
-        }
     }
 
     // Update PO status
@@ -1574,7 +1721,9 @@ export const mapCutToCKInventory = async ({ cutBatch, destinationItem, transferW
         expiryDateValue = exp.toISOString().substring(0, 10);
     }
 
-    const ckBatchData = {
+        const resolvedCost = Number(cutBatch.cost_price ?? cutBatch.unit_price ?? destinationItem.cost_price ?? 0);
+
+        const ckBatchData = {
         batch_number: ckBatchNo,
         item_id: destinationItem.id,
         item_name: destinationItem.name,
@@ -1585,7 +1734,8 @@ export const mapCutToCKInventory = async ({ cutBatch, destinationItem, transferW
         remaining_qty: transferQty,
         remaining_weight_kg: transferQty,
         unit: destinationItem.unit || 'kg',
-        cost_price: destinationItem.cost_price || 0,
+        cost_price: resolvedCost,
+        unit_price: resolvedCost,
         vendor_name: cutBatch.vendor_name || cutBatch.supplier || 'Central Kitchen Butcher',
         supplier: cutBatch.supplier || cutBatch.vendor_name || 'Central Kitchen Butcher',
         parent_batch_id: cutBatch.id,
@@ -1604,6 +1754,14 @@ export const mapCutToCKInventory = async ({ cutBatch, destinationItem, transferW
     };
 
     bRef.set(newCkBatchRef, ckBatchData);
+
+    // If destination item in inventory_items had 0 cost, update it with the true vendor cost
+    if ((!destinationItem.cost_price || destinationItem.cost_price === 0) && resolvedCost > 0) {
+        bRef.update(destItemDocRef, {
+            cost_price: resolvedCost,
+            updated_at: serverTimestamp(),
+        });
+    }
 
     await bRef.commit();
 

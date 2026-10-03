@@ -63,8 +63,8 @@ const MapCutToCKModal = ({ cutBatch, isOpen, onClose, onSuccess }) => {
         getItems({ status: 'active' })
             .then(data => {
                 if (isMounted) {
-                    // Butchered cuts belong in meat inventory; hide unrelated groceries.
-                    const activeList = (data || []).filter(i => ['raw_meat', 'cooked_meat'].includes(i.item_type));
+                    // Butchered cuts are raw meat; only show raw_meat inventory items.
+                    const activeList = (data || []).filter(i => i.item_type === 'raw_meat');
                     setItems(activeList);
 
                     // Try to auto-select best matching raw meat item

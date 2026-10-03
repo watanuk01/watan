@@ -34,6 +34,8 @@ const PurchaseHistory = () => {
     const navigate = useNavigate();
     const { userProfile, currentUser } = useAuth();
     const isRestaurantUser = ['restaurant_manager', 'restaurant_manager_non_managed'].includes(userProfile?.role);
+    // Chefs and butchers may review purchase history, but cannot alter a PO.
+    const canEditPurchaseHistory = !['chef', 'butcher'].includes(userProfile?.role);
     const restaurantId = isRestaurantUser ? (userProfile?.restaurant_id || currentUser?.uid || '') : '';
 
     const [orders, setOrders] = useState([]);
@@ -337,6 +339,7 @@ const PurchaseHistory = () => {
 
     // ── Edit PO helpers ──
     const openEditModal = (order) => {
+        if (!canEditPurchaseHistory) return;
         setEditModal(order);
         setEditData({
             vendor: order.vendor || '',
@@ -362,6 +365,7 @@ const PurchaseHistory = () => {
     };
 
     const handleSaveEdit = async () => {
+        if (!canEditPurchaseHistory) return;
         if (!editModal || !editData) return;
         setSavingEdit(true);
         try {
@@ -568,7 +572,7 @@ const PurchaseHistory = () => {
                                                     >
                                                         <MdVisibility size={22} />
                                                     </button>
-                                                    {order.status !== 'cancelled' && (
+                                                    {canEditPurchaseHistory && order.status !== 'cancelled' && (
                                                         <button
                                                             className="btn btn-ghost btn-sm"
                                                             onClick={(e) => { e.stopPropagation(); openEditModal(order); }}
