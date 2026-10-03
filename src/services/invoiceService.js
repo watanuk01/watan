@@ -449,7 +449,7 @@ export const regenerateAllInvoiceVat = async () => {
  * @param {Object} updates — { line_items, discount_type, discount_value, notes }
  */
 export const updateInvoice = async (invoiceId, updates) => {
-    const { line_items, discount_type, discount_value, notes, status } = updates;
+    const { line_items, discount_type, discount_value, notes, status, sync_inventory = true } = updates;
 
     // Fetch existing invoice to compare quantity changes for Central Kitchen inventory adjustment
     let existingInvoice = null;
@@ -476,7 +476,7 @@ export const updateInvoice = async (invoiceId, updates) => {
     });
 
     // Sync inventory if line_items are being updated and existing invoice is present
-    if (existingInvoice && line_items) {
+    if (sync_inventory && existingInvoice && line_items) {
         const oldQtyMap = {};
         (existingInvoice.line_items || []).forEach(item => {
             if (item.item_id) {

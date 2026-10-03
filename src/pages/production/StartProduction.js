@@ -511,6 +511,7 @@ const StartProduction = () => {
                                 <span>Ingredient</span>
                                 <span style={{ textAlign: 'right' }}>Required</span>
                                 <span style={{ textAlign: 'right' }}>Available</span>
+                                <span style={{ textAlign: 'right' }}>FIFO Cost/kg</span>
                                 <span style={{ textAlign: 'center' }}>Status</span>
                             </div>
 
@@ -519,6 +520,7 @@ const StartProduction = () => {
                                     <div key={i} className="recipe-ingredient-row">
                                         <div className="skeleton" style={{ width: 28, height: 28, borderRadius: '50%' }} />
                                         <div className="skeleton skeleton-text" style={{ width: '60%' }} />
+                                        <div className="skeleton skeleton-text" style={{ width: 60 }} />
                                         <div className="skeleton skeleton-text" style={{ width: 60 }} />
                                         <div className="skeleton skeleton-text" style={{ width: 60 }} />
                                         <div className="skeleton skeleton-text" style={{ width: 60 }} />
@@ -551,6 +553,9 @@ const StartProduction = () => {
                                         </span>
                                         <span className={`ing-available ${(!ing.sufficient || ing.missing) ? 'insufficient-value' : ''}`}>
                                             {ing.missing ? '---' : `${ing.available_stock.toFixed(2)} ${ing.master_unit}`}
+                                        </span>
+                                        <span className="ing-available" title="Cost from the available raw-meat batches, oldest batch first">
+                                            {ing.missing ? '---' : `£${Number(ing.cost_price_per_unit || 0).toFixed(2)}`}
                                         </span>
                                         <span className="ing-status">
                                             {ing.missing ? (

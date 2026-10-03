@@ -30,6 +30,7 @@ const NODE_CONFIG = {
     vendor: { color: 'var(--color-info)', icon: MdLocalShipping },
     parent: { color: 'var(--color-warning)', icon: MdInventory2 },
     butcher: { color: 'var(--color-primary)', icon: MdContentCut },
+    leftover: { color: 'var(--color-warning)', icon: MdInventory2 },
     child: { color: 'var(--color-success)', icon: MdQrCodeScanner },
     production: { color: '#ec4899', icon: MdOutlineKitchen },
     restaurant: { color: 'var(--color-success)', icon: MdStore },
@@ -256,6 +257,11 @@ const BatchTraceability = () => {
                                     transition: 'transform 0.2s ease',
                                 }}
                             >
+                                <div className="genealogy-key">
+                                    <span><b>Parent batch</b> = original supplier stock</span>
+                                    <span><b>Butchering operation</b> = one separate cut (for example 10 kg, then 4 kg)</span>
+                                    <span><b>Available balance</b> = stock not yet used or supplied</span>
+                                </div>
                                 <TreeNode node={genealogy} />
                             </div>
                         </div>

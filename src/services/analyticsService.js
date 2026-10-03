@@ -84,10 +84,328 @@ export const clearCache = () => {
     _butcheringCache = null;
 };
 
+export const resolveVendorName = (data) => {
+    if (!data) return null;
+    let name = null;
+
+    if (typeof data.vendor === 'string') name = data.vendor;
+    else if (data.vendor && typeof data.vendor === 'object') name = data.vendor.name || data.vendor.label || data.vendor.vendor_name;
+
+    if (!name && typeof data.vendor_name === 'string') name = data.vendor_name;
+    if (!name && typeof data.supplier_name === 'string') name = data.supplier_name;
+    if (!name && typeof data.supplier === 'string') name = data.supplier;
+    else if (!name && data.supplier && typeof data.supplier === 'object') name = data.supplier.name || data.supplier.label;
+
+    if (!name && data.vendorDetails) {
+        name = typeof data.vendorDetails === 'object' ? (data.vendorDetails.name || data.vendorDetails.vendor_name) : data.vendorDetails;
+    }
+    if (!name && data.supplierDetails) {
+        name = typeof data.supplierDetails === 'object' ? (data.supplierDetails.name || data.supplierDetails.supplier_name) : data.supplierDetails;
+    }
+
+    if (!name && data.items && Array.isArray(data.items) && data.items.length > 0) {
+        for (const item of data.items) {
+            if (typeof item.vendor === 'string') { name = item.vendor; break; }
+            if (item.vendor && typeof item.vendor === 'object' && item.vendor.name) { name = item.vendor.name; break; }
+            if (item.vendor_name) { name = item.vendor_name; break; }
+            if (item.supplier) { name = typeof item.supplier === 'string' ? item.supplier : item.supplier.name; break; }
+        }
+    }
+
+    if (!name) return null;
+    const str = String(name).trim();
+    const lower = str.toLowerCase();
+
+    // Exclude internal non-vendor names
+    if (!str || lower.includes('central kitchen') || ['unknown', 'n/a', 'none', 'null', 'undefined'].includes(lower)) {
+        return null;
+    }
+
+    // Capitalize vendor names cleanly (e.g. 'atlantic' -> 'Atlantic', 'pickstock' -> 'Pickstock')
+    return str.charAt(0).toUpperCase() + str.slice(1);
+};
+
+// Groups raw meat into a human-readable type for the operational meat-flow report.
+export const getMeatType = (row = {}) => {
+    const text = `${row.cut_name || ''} ${row.item_name || row.name || ''} ${row.category_name || row.category || ''} ${row.species || ''} ${row.animal_type || ''} ${row.meat_type || ''}`.toLowerCase();
+    if (/mutton/.test(text)) return 'Mutton';
+    if (/lamb|sheep|hindshank|handshank|backstrp|backstrap|cannon|saddle|rack/.test(text)) return 'Lamb';
+    if (/chicken|poultry|wings|thigh|drumstick/.test(text)) return 'Chicken';
+    if (/beef|cow|steak|veal|brisket|sirloin|ribeye|rump/.test(text)) return 'Beef';
+    if (/goat/.test(text)) return 'Goat';
+    if (/fish|prawn|salmon|cod|seafood/.test(text)) return 'Seafood';
+
+    const fallback = row.category_name || row.category || row.item_name || row.cut_name;
+    if (fallback && !['raw meat', 'meat', 'uncategorized', 'general', 'other raw meat'].includes(fallback.toLowerCase().trim())) {
+        return fallback;
+    }
+    return 'Raw Meat (General)';
+};
+
+/**
+ * Checks whether an item, batch, or PO line is raw meat.
+ * Cross-references category, item master list, parent documents, and naming.
+ */
+export const isRawMeat = (item, parentDoc = null, itemMap = null) => {
+    if (!item) return false;
+    const itType = String(item.item_type || item.type || '').toLowerCase().trim();
+    if (itType === 'raw_meat') return true;
+    if (itType === 'cooked_meat') return false;
+
+    if (parentDoc?.is_butcher_po || parentDoc?.is_butcher_inventory || item.is_butcher_po || item.is_butcher_inventory) return true;
+    if (parentDoc?.po_number && String(parentDoc.po_number).startsWith('MPO')) return true;
+
+    const cat = String(item.category_name || item.category || '').toLowerCase().trim();
+    if (cat.includes('raw meat') || cat === 'raw_meat' || cat === 'meat') return true;
+
+    const itemId = item.item_id || item.id;
+    if (itemId && itemMap && itemMap.has(itemId)) {
+        const master = itemMap.get(itemId);
+        const mType = String(master.item_type || master.type || '').toLowerCase().trim();
+        if (mType === 'raw_meat') return true;
+        const mCat = String(master.category_name || master.category || '').toLowerCase().trim();
+        if (mCat.includes('raw meat') || mCat === 'meat') return true;
+    }
+
+    const name = String(item.item_name || item.name || item.cut_name || '').toLowerCase().trim();
+    if (/lamb|mutton|chicken|beef|goat|carcass|veal|steer|heifer|hindshank|handshank|backstrp|backstrap|cannon|shank|chop|rib|loin|saddle|shoulder|leg|neck|breast|flank|tenderloin|sirloin|rump|mince|keema/.test(name)) {
+        if (/cooked|fried|grilled|shawarma|wrap|burger|biryani|curry|box|meal/.test(name)) return false;
+        return true;
+    }
+
+    return false;
+};
+
+/**
+ * Procurement -> CK orders -> live batch balance, grouped by meat type.
+ * Accurately supports Date range, Restaurant, Vendor, and Meat Type filters.
+ */
+export const fetchMeatFlowAnalytics = async (filters = {}) => {
+    const [purchaseOrders, orders, batches, inventoryItems] = await Promise.all([
+        getPurchaseOrders(),
+        getOrders(),
+        getBatches(),
+        getInventoryItems(),
+    ]);
+
+    const itemMap = new Map((inventoryItems || []).map(item => [item.id, item]));
+    const batchById = new Map((batches || []).map(batch => [batch.id, batch]));
+    const poById = new Map((purchaseOrders || []).map(po => [po.id, po]));
+
+    const normalize = str => String(str || '').toLowerCase().trim();
+
+    const inRange = (dateVal) => {
+        if (!filters.dateFrom && !filters.dateTo) return true;
+        if (!dateVal) return false;
+        const d = toDate(dateVal);
+        if (!d || isNaN(d.getTime())) return false;
+        const ts = d.getTime();
+        if (filters.dateFrom && ts < filters.dateFrom.getTime()) return false;
+        if (filters.dateTo && ts > filters.dateTo.getTime()) return false;
+        return true;
+    };
+
+    const vendorMatches = (recordVendor, targetVendor) => {
+        if (!targetVendor) return true;
+        if (!recordVendor) return false;
+        const r = normalize(recordVendor);
+        const t = normalize(targetVendor);
+        return r === t || r.includes(t) || t.includes(r);
+    };
+
+    const restaurantMatches = (record, targetId, targetName) => {
+        if (!targetId && !targetName) return true;
+        const rid = normalize(record.restaurant_id || record.location_id || record.id);
+        const rname = normalize(record.restaurant_name || record.location_name || record.name);
+        const tid = normalize(targetId);
+        const tname = normalize(targetName);
+
+        if (tid && (rid === tid || rname === tid || rid.includes(tid) || tid.includes(rid))) return true;
+        if (tname && (rname === tname || rid === tname || rname.includes(tname) || tname.includes(rname))) return true;
+        return false;
+    };
+
+    const typeMatches = type => !filters.meatType || type === filters.meatType;
+
+    const rows = new Map();
+    const add = (type, key, quantity) => {
+        if (!typeMatches(type)) return;
+        if (!rows.has(type)) rows.set(type, {
+            meat_type: type,
+            procured_kg: 0,
+            all_time_procured_kg: 0,
+            ordered_kg: 0,
+            remaining_kg: 0,
+        });
+        rows.get(type)[key] += Number(quantity) || 0;
+    };
+
+    // ── 1. Procurement: Purchases from Vendors ──
+    purchaseOrders.forEach(po => {
+        const poVendor = resolveVendorName(po);
+        if (!vendorMatches(poVendor, filters.vendorName)) return;
+
+        // Restaurant scope:
+        // Central Kitchen is the procurement hub. If a specific restaurant is selected:
+        // Exclude only if the PO is explicitly assigned to a DIFFERENT restaurant.
+        if (filters.restaurantId || filters.restaurantName) {
+            if (po.restaurant_id || po.restaurant_name) {
+                if (!restaurantMatches(po, filters.restaurantId, filters.restaurantName)) return;
+            }
+        }
+
+        const poDate = po.created_at || po.received_at || po.order_date || po.expected_delivery_date;
+        const isPeriod = inRange(poDate);
+
+        (po.items || []).forEach(item => {
+            if (!isRawMeat(item, po, itemMap)) return;
+            const qty = Number(item.received_quantity ?? item.quantity ?? item.weight_kg ?? item.weight ?? 0);
+            if (qty > 0) {
+                const meatType = getMeatType(item);
+                add(meatType, 'all_time_procured_kg', qty);
+                if (isPeriod) {
+                    add(meatType, 'procured_kg', qty);
+                }
+            }
+        });
+    });
+
+    // ── 2. Restaurant Orders: Orders placed by restaurants to CK ──
+    orders.forEach(order => {
+        const orderDate = order.created_at || order.order_date || order.date;
+        if (!inRange(orderDate)) return;
+
+        if (!restaurantMatches(order, filters.restaurantId, filters.restaurantName)) return;
+
+        const handledItemIds = new Set();
+
+        // 2A. Check batch allocations (traceability)
+        (order.batch_allocations || []).forEach(allocation => {
+            const refs = allocation.batches || [];
+            refs.forEach(ref => {
+                const batch = batchById.get(ref.batch_id);
+                const bVendor = resolveVendorName(batch)
+                    || (batch?.parent_batch_id && resolveVendorName(batchById.get(batch.parent_batch_id)))
+                    || (batch?.po_id && resolveVendorName(poById.get(batch.po_id)))
+                    || (batch?.item_id && resolveVendorName(itemMap.get(batch.item_id)))
+                    || (allocation?.item_id && resolveVendorName(itemMap.get(allocation.item_id)));
+
+                if (!vendorMatches(bVendor, filters.vendorName)) return;
+
+                if (isRawMeat(batch || allocation, order, itemMap)) {
+                    const qty = Number(ref.quantity_deducted ?? ref.quantity ?? 0);
+                    if (qty > 0) {
+                        add(getMeatType(batch || allocation), 'ordered_kg', qty);
+                        if (allocation.item_id) handledItemIds.add(allocation.item_id);
+                    }
+                }
+            });
+        });
+
+        // 2B. Fallback to order.items for unallocated or pending orders
+        (order.items || []).forEach(item => {
+            if (handledItemIds.has(item.item_id)) return;
+            if (!isRawMeat(item, order, itemMap)) return;
+
+            const master = item.item_id ? itemMap.get(item.item_id) : null;
+            const itemVendor = resolveVendorName(item) || resolveVendorName(master);
+            if (!vendorMatches(itemVendor, filters.vendorName)) return;
+
+            const qty = Number(item.base_quantity ?? item.quantity ?? 0);
+            if (qty > 0) {
+                add(getMeatType(item), 'ordered_kg', qty);
+            }
+        });
+    });
+
+    // ── 3. Current Live Remaining Balance (Physical stock in batches) ──
+    batches.forEach(batch => {
+        if (!isRawMeat(batch, null, itemMap)) return;
+
+        if (filters.restaurantId || filters.restaurantName) {
+            if (batch.restaurant_id || batch.restaurant_name) {
+                if (!restaurantMatches(batch, filters.restaurantId, filters.restaurantName)) return;
+            }
+        }
+
+        const bVendor = resolveVendorName(batch)
+            || (batch.parent_batch_id && resolveVendorName(batchById.get(batch.parent_batch_id)))
+            || (batch.po_id && resolveVendorName(poById.get(batch.po_id)))
+            || (batch.item_id && resolveVendorName(itemMap.get(batch.item_id)));
+
+        if (!vendorMatches(bVendor, filters.vendorName)) return;
+
+        const rem = Number(batch.remaining_weight_kg ?? batch.remaining_qty ?? batch.quantity ?? 0);
+        if (rem > 0) {
+            add(getMeatType(batch), 'remaining_kg', rem);
+        }
+    });
+
+    // ── 4. Build Vendor & Meat Type Option Lists (Unfiltered by vendor/type) ──
+    const vendorSet = new Set();
+    const meatTypeSet = new Set(['Lamb', 'Chicken', 'Beef', 'Mutton', 'Goat']);
+
+    purchaseOrders.forEach(po => {
+        const v = resolveVendorName(po);
+        const hasMeat = (po.items || []).some(i => isRawMeat(i, po, itemMap));
+        if (v && (hasMeat || po.is_butcher_po || (po.po_number && String(po.po_number).startsWith('MPO')))) vendorSet.add(v);
+        (po.items || []).filter(i => isRawMeat(i, po, itemMap)).forEach(i => meatTypeSet.add(getMeatType(i)));
+    });
+
+    batches.forEach(b => {
+        if (isRawMeat(b, null, itemMap)) {
+            const v = resolveVendorName(b)
+                || (b.parent_batch_id && resolveVendorName(batchById.get(b.parent_batch_id)))
+                || (b.po_id && resolveVendorName(poById.get(b.po_id)));
+            if (v) vendorSet.add(v);
+            meatTypeSet.add(getMeatType(b));
+        }
+    });
+
+    inventoryItems.forEach(item => {
+        if (isRawMeat(item, null, null)) {
+            const v = resolveVendorName(item);
+            if (v) vendorSet.add(v);
+            meatTypeSet.add(getMeatType(item));
+        }
+    });
+
+    const vendors = [...vendorSet].filter(Boolean).sort();
+    const meatTypes = [...meatTypeSet].filter(Boolean).sort();
+
+    // ── 5. Prepare Output Rows with Full Inventory Reconciliation ──
+    const outputRows = [...rows.values()]
+        .map(row => {
+            const opening_stock_kg = Math.max(0, row.remaining_kg - row.procured_kg + row.ordered_kg);
+            const period_balance_kg = row.procured_kg - row.ordered_kg;
+            return {
+                ...row,
+                opening_stock_kg,
+                period_balance_kg,
+            };
+        })
+        .filter(row => filters.meatType ? true : (row.procured_kg > 0 || row.ordered_kg > 0 || row.remaining_kg > 0 || row.all_time_procured_kg > 0))
+        .sort((a, b) => a.meat_type.localeCompare(b.meat_type));
+
+    return {
+        vendors,
+        meatTypes,
+        rows: outputRows,
+    };
+};
+
 const getOrders = async () => {
     if (_orderCache) return _orderCache;
     const snap = await getDocs(collection(db, 'orders'));
-    _orderCache = snap.docs.map(d => ({ id: d.id, ...d.data(), created_at: toDate(d.data().created_at) }));
+    _orderCache = snap.docs.map(d => {
+        const data = d.data();
+        const dateVal = data.created_at || data.createdAt || data.order_date || data.orderDate || data.date || data.timestamp || data.updated_at;
+        return {
+            id: d.id,
+            ...data,
+            created_at: toDate(dateVal),
+        };
+    });
     return _orderCache;
 };
 
@@ -835,45 +1153,7 @@ export const fetchTopOrderedItems = async (limit = 500, filters = {}) => {
     return { items, categories: [...categorySet].sort() };
 };
 
-const resolveVendorName = (data) => {
-    let name = null;
-
-    if (typeof data.vendor === 'string') name = data.vendor;
-    else if (data.vendor && typeof data.vendor === 'object') name = data.vendor.name || data.vendor.label || data.vendor.vendor_name;
-
-    if (!name && typeof data.vendor_name === 'string') name = data.vendor_name;
-    if (!name && typeof data.supplier_name === 'string') name = data.supplier_name;
-    if (!name && typeof data.supplier === 'string') name = data.supplier;
-    else if (!name && data.supplier && typeof data.supplier === 'object') name = data.supplier.name || data.supplier.label;
-
-    if (!name && data.vendorDetails) {
-        name = typeof data.vendorDetails === 'object' ? (data.vendorDetails.name || data.vendorDetails.vendor_name) : data.vendorDetails;
-    }
-    if (!name && data.supplierDetails) {
-        name = typeof data.supplierDetails === 'object' ? (data.supplierDetails.name || data.supplierDetails.supplier_name) : data.supplierDetails;
-    }
-
-    if (!name && data.items && Array.isArray(data.items) && data.items.length > 0) {
-        for (const item of data.items) {
-            if (typeof item.vendor === 'string') { name = item.vendor; break; }
-            if (item.vendor && typeof item.vendor === 'object' && item.vendor.name) { name = item.vendor.name; break; }
-            if (item.vendor_name) { name = item.vendor_name; break; }
-            if (item.supplier) { name = typeof item.supplier === 'string' ? item.supplier : item.supplier.name; break; }
-        }
-    }
-
-    if (!name) return null;
-    const str = String(name).trim();
-    const lower = str.toLowerCase();
-
-    // Exclude internal non-vendor names
-    if (!str || lower.includes('central kitchen') || ['unknown', 'n/a', 'none', 'null', 'undefined'].includes(lower)) {
-        return null;
-    }
-
-    // Capitalize vendor names cleanly (e.g. 'atlantic' -> 'Atlantic', 'pickstock' -> 'Pickstock')
-    return str.charAt(0).toUpperCase() + str.slice(1);
-};
+// resolveVendorName moved to top of file
 
 const getRecordTotalValue = (data) => {
     // 1. Direct header value

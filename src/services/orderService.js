@@ -19,6 +19,7 @@ import {
     serverTimestamp,
     onSnapshot,
     Timestamp,
+    increment,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { deductStockFIFO, adjustStock } from './inventoryService';
@@ -27,6 +28,7 @@ import { addStockFromDelivery } from './restaurantInventoryService';
 
 // ─── COLLECTION ───
 const ORDERS = 'orders';
+const BATCHES = 'inventory_batches';
 
 // ─── STATUS CONSTANTS ───
 export const ORDER_STATUSES = [
@@ -557,6 +559,64 @@ export const pickupOrder = async (orderId, { verifiedItems, missingItems }) => {
         newItemCount = updatedItems.length;
     }
 
+    // `batch_allocations` is the traceability source of truth. Previously it
+    // retained the requested quantity after a driver reduced a line (5 kg → 4
+    // kg), so the invoice was correct but the genealogy still claimed 5 kg.
+    // Trim each allocation to the verified quantity and return the unused part
+    // to the exact FIFO batch that supplied it.
+    const verifiedByItemId = new Map((verifiedItems || []).map(item => [item.item_id, Number(item.quantity) || 0]));
+    const updatedAllocations = [];
+    for (const allocation of (order.batch_allocations || [])) {
+        if (!verifiedByItemId.has(allocation.item_id)) {
+            updatedAllocations.push(allocation);
+            continue;
+        }
+
+        let qtyToKeep = Math.max(0, verifiedByItemId.get(allocation.item_id));
+        const updatedBatches = [];
+        let releasedQty = 0;
+        for (const batch of (allocation.batches || [])) {
+            const allocatedQty = Number(batch.quantity_deducted ?? batch.quantity ?? 0);
+            const keptQty = Math.min(allocatedQty, qtyToKeep);
+            const release = Math.max(0, allocatedQty - keptQty);
+            qtyToKeep = Math.max(0, qtyToKeep - keptQty);
+            releasedQty += release;
+
+            if (release > 0.001 && batch.batch_id) {
+                await updateDoc(doc(db, BATCHES, batch.batch_id), {
+                    remaining_qty: increment(release),
+                    remaining_weight_kg: increment(release),
+                    status: 'available',
+                    updated_at: serverTimestamp(),
+                });
+            }
+            if (keptQty > 0.001) {
+                updatedBatches.push({ ...batch, quantity: keptQty, quantity_deducted: keptQty });
+            }
+        }
+
+        if (releasedQty > 0.001) {
+            // Grocery has no batches; meat stock is restored alongside its batch.
+            await adjustStock(allocation.item_id, releasedQty, `Pickup quantity correction for ${order.order_number || orderId}`);
+        }
+        const verifiedQty = verifiedByItemId.get(allocation.item_id);
+        updatedAllocations.push({ ...allocation, quantity: verifiedQty, batches: updatedBatches });
+    }
+
+    const updatedDispatchQrItems = (order.dispatch_qr_items || []).map(item => {
+        if (!verifiedByItemId.has(item.item_id)) return item;
+        const allocation = updatedAllocations.find(a => a.item_id === item.item_id);
+        const activeBatchNumbers = (allocation?.batches || [])
+            .map(batch => batch.batch_number || batch.batch_id)
+            .filter(Boolean);
+        return {
+            ...item,
+            quantity: verifiedByItemId.get(item.item_id),
+            // Do not leave a fully released FIFO batch on the delivery QR.
+            batch_numbers: activeBatchNumbers,
+        };
+    });
+
     const orderRef = doc(db, ORDERS, orderId);
     await updateDoc(orderRef, {
         status: 'out_for_delivery',
@@ -567,16 +627,25 @@ export const pickupOrder = async (orderId, { verifiedItems, missingItems }) => {
         total: Math.round(newTotal * 100) / 100,
         verified_items: verifiedItems || [],
         missing_items: missingItems || [],
+        batch_allocations: updatedAllocations,
+        dispatch_qr_items: updatedDispatchQrItems,
         picked_up_at: serverTimestamp(),
         dispatched_at: serverTimestamp(),
         updated_at: serverTimestamp(),
     });
 
-    // Auto-sync the invoice to reflect the actual received quantities if there are missing items
+    // Sync every invoice (including grocery/meat split invoices) to the actual
+    // pickup quantity. Stock was restored above from the exact FIFO batches,
+    // therefore invoice recalculation must not restore it a second time.
     if (order.invoice_id && missingItems && missingItems.length > 0) {
         try {
-            const invoice = await getInvoiceById(order.invoice_id);
-            if (invoice) {
+            const invoiceIds = [...new Set([
+                order.invoice_id,
+                ...(order.split_invoices || []).map(invoice => invoice.id),
+            ].filter(Boolean))];
+            for (const invoiceId of invoiceIds) {
+                const invoice = await getInvoiceById(invoiceId);
+                if (!invoice) continue;
                 const updatedLineItems = (invoice.line_items || []).map(li => {
                     const verified = (verifiedItems || []).find(vi => vi.item_id === li.item_id);
                     if (verified) {
@@ -585,11 +654,12 @@ export const pickupOrder = async (orderId, { verifiedItems, missingItems }) => {
                     return li;
                 }).filter(li => li.quantity > 0);
 
-                await updateInvoice(order.invoice_id, {
+                await updateInvoice(invoiceId, {
                     line_items: updatedLineItems,
                     discount_type: invoice.discount_type,
                     discount_value: invoice.discount_value,
-                    notes: invoice.notes
+                    notes: invoice.notes,
+                    sync_inventory: false,
                 });
             }
         } catch (err) {

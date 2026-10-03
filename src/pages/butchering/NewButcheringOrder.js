@@ -410,8 +410,9 @@ const NewButcheringOrder = () => {
             const sanitizedBatches = (batchList || []).map(sanitize);
             const sanitizedCuts = (cutList || []).map(sanitize);
             const sanitizedAnimals = animalList || [];
-            // A butchered cut must map to a meat item, never grocery inventory.
-            const activeCkItems = (itemsList || []).filter(item => ['raw_meat', 'cooked_meat'].includes(item.item_type));
+            // Butcher cuts are raw meat. Do not offer grocery or cooked-meat
+            // inventory as a mapping destination.
+            const activeCkItems = (itemsList || []).filter(item => item.item_type === 'raw_meat');
 
             setBatches(sanitizedBatches);
             setCutMaster(sanitizedCuts);

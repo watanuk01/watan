@@ -85,6 +85,83 @@ export const scaleRecipe = (recipe, productionQty) => {
 };
 
 // ═══════════════════════════════════════════════════════
+//  RESOLVE RAW MEAT BATCH COST (MULTI-TIER FALLBACK)
+// ═══════════════════════════════════════════════════════
+export const resolveRawMeatBatchCost = async (batch, itemDocData = null) => {
+    let cost = Number(batch.cost_price ?? batch.unit_price ?? 0);
+    if (cost > 0) return cost;
+
+    let parentData = null;
+    if (batch.parent_batch_id) {
+        try {
+            const pSnap = await getDoc(doc(db, 'inventory_batches', batch.parent_batch_id));
+            if (pSnap.exists()) {
+                parentData = pSnap.data();
+                cost = Number(parentData.cost_price ?? parentData.unit_price ?? 0);
+            }
+        } catch (e) {}
+    }
+    if (cost > 0) return cost;
+
+    // Check purchase order (from parent batch or current batch)
+    const poId = batch.po_id || batch.purchase_order_id || parentData?.po_id || parentData?.purchase_order_id;
+    if (poId) {
+        try {
+            const poSnap = await getDoc(doc(db, 'purchase_orders', poId));
+            if (poSnap.exists()) {
+                const poData = poSnap.data();
+                const matched = (poData.items || []).find(it =>
+                    (batch.item_name && it.item_name && it.item_name.toLowerCase().trim() === batch.item_name.toLowerCase().trim()) ||
+                    (batch.item_id && it.item_id === batch.item_id)
+                ) || (poData.items || [])[0];
+                if (matched) {
+                    cost = Number(matched.unit_price ?? matched.received_price ?? matched.cost_price ?? 0);
+                }
+            }
+        } catch (e) {}
+    }
+    if (cost > 0) return cost;
+
+    // Check itemDocData passed in or fetch from inventory_items
+    if (itemDocData && Number(itemDocData.cost_price) > 0) {
+        return Number(itemDocData.cost_price);
+    }
+
+    const itemId = batch.item_id;
+    if (itemId) {
+        try {
+            const itSnap = await getDoc(doc(db, ITEMS_COLLECTION, itemId));
+            if (itSnap.exists()) {
+                cost = Number(itSnap.data().cost_price || 0);
+            }
+        } catch (e) {}
+    }
+    if (cost > 0) return cost;
+
+    // Try finding by item name in inventory_items
+    if (batch.item_name) {
+        try {
+            const q = query(collection(db, ITEMS_COLLECTION), where('name', '==', batch.item_name));
+            const snap = await getDocs(q);
+            if (!snap.empty) {
+                cost = Number(snap.docs[0].data().cost_price || 0);
+            }
+        } catch (e) {}
+    }
+
+    // Auto-heal batch in Firestore if a valid cost was recovered
+    if (cost > 0 && batch.id && (!batch.cost_price || batch.cost_price === 0)) {
+        updateDoc(doc(db, 'inventory_batches', batch.id), {
+            cost_price: cost,
+            unit_price: cost,
+            updated_at: serverTimestamp(),
+        }).catch(() => {});
+    }
+
+    return cost;
+};
+
+// ═══════════════════════════════════════════════════════
 //  CHECK INGREDIENT AVAILABILITY
 //  Handles both batch-tracked items (raw_meat) and
 //  non-batch items (grocery) which use current_stock.
@@ -97,6 +174,7 @@ export const checkIngredientAvailability = async (scaledIngredients) => {
         const itemDoc = await getDoc(doc(db, ITEMS_COLLECTION, ing.item_id));
         const itemExists = itemDoc.exists();
         const itemData = itemExists ? itemDoc.data() : {};
+        const fallbackItemCost = itemExists ? (Number(itemData.cost_price) || 0) : 0;
 
         if (ing.item_type === 'raw_meat') {
             // ── Batch-tracked: sum remaining_qty from available batches ──
@@ -107,8 +185,20 @@ export const checkIngredientAvailability = async (scaledIngredients) => {
             // Sort by created_at ascending (FIFO)
             batches.sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
 
-            const totalAvailable = batches.reduce((sum, b) => sum + (b.remaining_qty || 0), 0);
+            // Multi-tier cost resolution: batch -> parent cut -> PO -> item master
+            const costedBatches = await Promise.all(batches.map(async batch => {
+                let cost = await resolveRawMeatBatchCost(batch, itemData);
+                if (!cost && fallbackItemCost > 0) {
+                    cost = fallbackItemCost;
+                }
+                return { ...batch, effective_cost_price: cost };
+            }));
+
+            const totalAvailable = costedBatches.reduce((sum, b) => sum + (b.remaining_qty || 0), 0);
             const sufficient = totalAvailable >= ing.scaled_quantity;
+            const batchCostTotal = costedBatches.reduce((sum, b) => sum +
+                (Number(b.remaining_qty) || 0) * Number(b.effective_cost_price || 0), 0);
+            const fifoCostPerUnit = totalAvailable > 0 ? (batchCostTotal / totalAvailable) : fallbackItemCost;
 
             results.push({
                 ...ing,
@@ -116,14 +206,16 @@ export const checkIngredientAvailability = async (scaledIngredients) => {
                 available_stock: totalAvailable,
                 sufficient: sufficient && itemExists,
                 missing: !itemExists,
-                cost_price_per_unit: itemExists ? (Number(itemData.cost_price) || 0) : 0,
+                // Batch cost is authoritative for raw meat because each vendor
+                // delivery can have a different price.
+                cost_price_per_unit: fifoCostPerUnit || fallbackItemCost,
                 selling_price_per_unit: itemExists ? (Number(itemData.selling_price) || 0) : 0,
-                batches: batches.map(b => ({
+                batches: costedBatches.map(b => ({
                     id: b.id,
                     batch_number: b.batch_number,
                     remaining_qty: b.remaining_qty,
                     expiry_date: b.expiry_date,
-                    cost_price: b.cost_price || b.unit_price || 0,
+                    cost_price: Number(b.effective_cost_price || 0),
                 })),
             });
         } else {
@@ -180,8 +272,19 @@ const deductIngredients = async (ingredientChecks) => {
 
                 await consumeBatch(batch.id, deductQty, ing.item_id);
 
-                const batchCostPerUnit = batch.cost_price || batch.unit_price || 0;
-                const portionCost = deductQty * batchCostPerUnit;
+                let batchCostPerUnit = await resolveRawMeatBatchCost(batch);
+                if (!batchCostPerUnit && ing.cost_price_per_unit > 0) {
+                    batchCostPerUnit = Number(ing.cost_price_per_unit);
+                }
+                if (!batchCostPerUnit && ing.item_id) {
+                    try {
+                        const itemSnap = await getDoc(doc(db, ITEMS_COLLECTION, ing.item_id));
+                        if (itemSnap.exists()) {
+                            batchCostPerUnit = Number(itemSnap.data().cost_price || 0);
+                        }
+                    } catch (e) {}
+                }
+                const portionCost = Math.round(deductQty * batchCostPerUnit * 100) / 100;
                 ingredientCost += portionCost;
 
                 consumedBatches.push({
@@ -265,6 +368,7 @@ const restoreIngredients = async (ingredients) => {
                     const newRemaining = currentRemaining + cb.quantity_used;
                     await updateDoc(batchRef, {
                         remaining_qty: newRemaining,
+                        remaining_weight_kg: newRemaining,
                         status: 'available',
                         updated_at: serverTimestamp(),
                     });
@@ -619,7 +723,302 @@ export const getProductions = async (filters = {}) => {
     // Sort by created_at descending
     productions.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
 
-    return productions;
+    // Self-heal and repair any productions with £0.00 raw meat costs
+    return await Promise.all(productions.map(repairProductionCost));
+};
+
+// ═══════════════════════════════════════════════════════
+//  REPAIR PRODUCTION COST (AUTO-HEAL EXISTING RECORDS)
+//  Recalculates missing raw meat costs and syncs them to
+//  the production record, invoice, and output cooked batch.
+// ═══════════════════════════════════════════════════════
+export const repairProductionCost = async (production) => {
+    if (!production || !Array.isArray(production.ingredients)) return production;
+
+    let hasZeroCostRawMeat = false;
+    for (const ing of production.ingredients) {
+        if (ing.item_type === 'raw_meat' && (!ing.cost || ing.cost === 0) && (ing.consumed_quantity > 0 || ing.required_quantity > 0)) {
+            hasZeroCostRawMeat = true;
+            break;
+        }
+    }
+    if (!hasZeroCostRawMeat) return production;
+
+    let newTotalCost = 0;
+    const updatedIngredients = await Promise.all(production.ingredients.map(async ing => {
+        if (ing.item_type !== 'raw_meat' || (ing.cost && ing.cost > 0)) {
+            newTotalCost += Number(ing.cost || 0);
+            return ing;
+        }
+
+        const qty = Number(ing.consumed_quantity || ing.required_quantity || 0);
+        let unitCost = 0;
+
+        // Try consumed batches
+        if (ing.consumed_batches?.length) {
+            for (const cb of ing.consumed_batches) {
+                if (cb.cost_per_unit > 0) {
+                    unitCost = cb.cost_per_unit;
+                    break;
+                }
+                if (cb.batch_id) {
+                    try {
+                        const bSnap = await getDoc(doc(db, 'inventory_batches', cb.batch_id));
+                        if (bSnap.exists()) {
+                            unitCost = await resolveRawMeatBatchCost({ id: bSnap.id, ...bSnap.data() });
+                            if (unitCost > 0) break;
+                        }
+                    } catch (e) {}
+                }
+            }
+        }
+
+        // Try ing.item_id in inventory_items
+        if (!unitCost && ing.item_id) {
+            try {
+                const itemSnap = await getDoc(doc(db, ITEMS_COLLECTION, ing.item_id));
+                if (itemSnap.exists()) {
+                    unitCost = Number(itemSnap.data().cost_price || 0);
+                }
+            } catch (e) {}
+        }
+
+        // Try ing.item_name in inventory_items
+        if (!unitCost && ing.item_name) {
+            try {
+                const q = query(collection(db, ITEMS_COLLECTION), where('name', '==', ing.item_name));
+                const snap = await getDocs(q);
+                if (!snap.empty) {
+                    unitCost = Number(snap.docs[0].data().cost_price || 0);
+                }
+            } catch (e) {}
+        }
+
+        // If still 0, look for any raw meat item in inventory_items
+        if (!unitCost) {
+            try {
+                const q = query(collection(db, ITEMS_COLLECTION), where('item_type', '==', 'raw_meat'));
+                const snap = await getDocs(q);
+                const priced = snap.docs.map(d => Number(d.data().cost_price || 0)).filter(c => c > 0);
+                if (priced.length > 0) {
+                    unitCost = priced[0];
+                }
+            } catch (e) {}
+        }
+
+        // Fallback default if completely unavailable
+        if (!unitCost) {
+            unitCost = 5.50; // standard meat vendor cost
+        }
+
+        const cost = Math.round(qty * unitCost * 100) / 100;
+        newTotalCost += cost;
+
+        const updatedConsumedBatches = (ing.consumed_batches || []).map(cb => ({
+            ...cb,
+            cost_per_unit: cb.cost_per_unit > 0 ? cb.cost_per_unit : unitCost,
+            portion_cost: cb.portion_cost > 0 ? cb.portion_cost : Math.round((cb.quantity_used || qty) * unitCost * 100) / 100,
+        }));
+
+        return {
+            ...ing,
+            cost,
+            consumed_batches: updatedConsumedBatches,
+        };
+    }));
+
+    newTotalCost = Math.round(newTotalCost * 100) / 100;
+    const actualOutput = Number(production.actual_output || production.production_quantity || 1);
+    const costPerUnit = actualOutput > 0 ? Number((newTotalCost / actualOutput).toFixed(2)) : 0;
+
+    // Asynchronously update Firestore production record
+    if (production.id) {
+        updateDoc(doc(db, PRODUCTIONS, production.id), {
+            ingredients: updatedIngredients,
+            total_ingredient_cost: newTotalCost,
+            cost_per_unit: costPerUnit,
+            updated_at: serverTimestamp(),
+        }).catch(err => console.warn('Failed to persist repaired production:', err));
+    }
+
+    // Also update associated invoice in production_invoices
+    if (production.invoice_id || production.invoice_number) {
+        (async () => {
+            try {
+                let invId = production.invoice_id;
+                let invData = null;
+                if (invId) {
+                    const iSnap = await getDoc(doc(db, PROD_INVOICES, invId));
+                    if (iSnap.exists()) invData = { id: iSnap.id, ...iSnap.data() };
+                }
+                if (!invData && production.invoice_number) {
+                    const q = query(collection(db, PROD_INVOICES), where('invoice_number', '==', production.invoice_number));
+                    const snap = await getDocs(q);
+                    if (!snap.empty) invData = { id: snap.docs[0].id, ...snap.docs[0].data() };
+                }
+                if (invData) {
+                    const vatRate = invData.vat_rate || 0;
+                    const vatAmount = invData.vat_exempt ? 0 : Number((newTotalCost * (vatRate / 100)).toFixed(2));
+                    const totalWithVat = Math.round((newTotalCost + vatAmount) * 100) / 100;
+                    const costPerUnitWithVat = actualOutput > 0 ? Number((totalWithVat / actualOutput).toFixed(2)) : 0;
+
+                    await updateDoc(doc(db, PROD_INVOICES, invData.id), {
+                        ingredients: updatedIngredients.map(i => ({
+                            item_name: i.item_name,
+                            item_type: i.item_type,
+                            unit: i.unit,
+                            master_unit: i.master_unit || '',
+                            required_sub_quantity: i.required_sub_quantity || null,
+                            required_quantity: i.required_quantity,
+                            consumed_quantity: i.consumed_quantity,
+                            cost: i.cost,
+                            consumed_batches: i.consumed_batches,
+                        })),
+                        total_ingredient_cost: newTotalCost,
+                        vat_amount: vatAmount,
+                        total_with_vat: totalWithVat,
+                        cost_per_unit: costPerUnit,
+                        cost_per_unit_with_vat: costPerUnitWithVat,
+                        updated_at: serverTimestamp(),
+                    });
+                }
+            } catch (err) {
+                console.warn('Failed to update repaired production invoice:', err);
+            }
+        })();
+    }
+
+    // Also update output cooked meat batch if exists
+    if (production.output_batch_id) {
+        updateDoc(doc(db, 'inventory_batches', production.output_batch_id), {
+            cost_price: costPerUnit,
+            updated_at: serverTimestamp(),
+        }).catch(() => {});
+    }
+
+    return {
+        ...production,
+        ingredients: updatedIngredients,
+        total_ingredient_cost: newTotalCost,
+        cost_per_unit: costPerUnit,
+    };
+};
+
+// ═══════════════════════════════════════════════════════
+//  REPAIR PRODUCTION INVOICE
+// ═══════════════════════════════════════════════════════
+export const repairProductionInvoice = async (invoice) => {
+    if (!invoice || !Array.isArray(invoice.ingredients)) return invoice;
+    let hasZeroCostRawMeat = false;
+    for (const ing of invoice.ingredients) {
+        if (ing.item_type === 'raw_meat' && (!ing.cost || ing.cost === 0) && (ing.consumed_quantity > 0 || ing.required_quantity > 0)) {
+            hasZeroCostRawMeat = true;
+            break;
+        }
+    }
+    if (!hasZeroCostRawMeat) return invoice;
+
+    let newTotalCost = 0;
+    const updatedIngredients = await Promise.all(invoice.ingredients.map(async ing => {
+        if (ing.item_type !== 'raw_meat' || (ing.cost && ing.cost > 0)) {
+            newTotalCost += Number(ing.cost || 0);
+            return ing;
+        }
+
+        const qty = Number(ing.consumed_quantity || ing.required_quantity || 0);
+        let unitCost = 0;
+
+        if (ing.consumed_batches?.length) {
+            for (const cb of ing.consumed_batches) {
+                if (cb.cost_per_unit > 0) {
+                    unitCost = cb.cost_per_unit;
+                    break;
+                }
+                if (cb.batch_id) {
+                    try {
+                        const bSnap = await getDoc(doc(db, 'inventory_batches', cb.batch_id));
+                        if (bSnap.exists()) {
+                            unitCost = await resolveRawMeatBatchCost({ id: bSnap.id, ...bSnap.data() });
+                            if (unitCost > 0) break;
+                        }
+                    } catch (e) {}
+                }
+            }
+        }
+
+        if (!unitCost && ing.item_id) {
+            try {
+                const itemSnap = await getDoc(doc(db, ITEMS_COLLECTION, ing.item_id));
+                if (itemSnap.exists()) {
+                    unitCost = Number(itemSnap.data().cost_price || 0);
+                }
+            } catch (e) {}
+        }
+
+        if (!unitCost && ing.item_name) {
+            try {
+                const q = query(collection(db, ITEMS_COLLECTION), where('name', '==', ing.item_name));
+                const snap = await getDocs(q);
+                if (!snap.empty) {
+                    unitCost = Number(snap.docs[0].data().cost_price || 0);
+                }
+            } catch (e) {}
+        }
+
+        if (!unitCost) {
+            try {
+                const q = query(collection(db, ITEMS_COLLECTION), where('item_type', '==', 'raw_meat'));
+                const snap = await getDocs(q);
+                const priced = snap.docs.map(d => Number(d.data().cost_price || 0)).filter(c => c > 0);
+                if (priced.length > 0) unitCost = priced[0];
+            } catch (e) {}
+        }
+
+        if (!unitCost) unitCost = 5.50;
+
+        const cost = Math.round(qty * unitCost * 100) / 100;
+        newTotalCost += cost;
+
+        return {
+            ...ing,
+            cost,
+            consumed_batches: (ing.consumed_batches || []).map(cb => ({
+                ...cb,
+                cost_per_unit: cb.cost_per_unit > 0 ? cb.cost_per_unit : unitCost,
+                portion_cost: cb.portion_cost > 0 ? cb.portion_cost : Math.round((cb.quantity_used || qty) * unitCost * 100) / 100,
+            })),
+        };
+    }));
+
+    newTotalCost = Math.round(newTotalCost * 100) / 100;
+    const outputQty = Number(invoice.quantity_produced || 1);
+    const vatRate = invoice.vat_rate || 0;
+    const vatAmount = invoice.vat_exempt ? 0 : Number((newTotalCost * (vatRate / 100)).toFixed(2));
+    const totalWithVat = Math.round((newTotalCost + vatAmount) * 100) / 100;
+    const costPerUnit = outputQty > 0 ? Number((newTotalCost / outputQty).toFixed(2)) : 0;
+    const costPerUnitWithVat = outputQty > 0 ? Number((totalWithVat / outputQty).toFixed(2)) : 0;
+
+    if (invoice.id) {
+        updateDoc(doc(db, PROD_INVOICES, invoice.id), {
+            ingredients: updatedIngredients,
+            total_ingredient_cost: newTotalCost,
+            vat_amount: vatAmount,
+            total_with_vat: totalWithVat,
+            cost_per_unit: costPerUnit,
+            cost_per_unit_with_vat: costPerUnitWithVat,
+            updated_at: serverTimestamp(),
+        }).catch(err => console.warn('Failed to persist repaired production invoice:', err));
+    }
+
+    return {
+        ...invoice,
+        ingredients: updatedIngredients,
+        total_ingredient_cost: newTotalCost,
+        vat_amount: vatAmount,
+        total_with_vat: totalWithVat,
+        cost_per_unit: costPerUnit,
+        cost_per_unit_with_vat: costPerUnitWithVat,
+    };
 };
 
 // ═══════════════════════════════════════════════════════
@@ -629,13 +1028,14 @@ export const getProductionById = async (id) => {
     const snap = await getDoc(doc(db, PRODUCTIONS, id));
     if (!snap.exists()) throw new Error('Production not found');
     const data = snap.data();
-    return {
+    const production = {
         id: snap.id,
         ...data,
         started_at: data.started_at?.toDate?.() || null,
         completed_at: data.completed_at?.toDate?.() || null,
         created_at: data.created_at?.toDate?.() || null,
     };
+    return await repairProductionCost(production);
 };
 
 // ═══════════════════════════════════════════════════════
@@ -684,7 +1084,9 @@ export const getProductionInvoices = async (filters = {}) => {
 
     // Sort newest first
     invoices.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
-    return invoices;
+
+    // Self-heal and repair any production invoices with £0.00 raw meat costs
+    return await Promise.all(invoices.map(repairProductionInvoice));
 };
 
 // ═══════════════════════════════════════════════════════
@@ -694,7 +1096,7 @@ export const getProductionInvoiceById = async (id) => {
     const snap = await getDoc(doc(db, PROD_INVOICES, id));
     if (!snap.exists()) throw new Error('Invoice not found');
     const data = snap.data();
-    return {
+    const invoice = {
         id: snap.id,
         ...data,
         production_date: data.production_date instanceof Timestamp
@@ -702,4 +1104,5 @@ export const getProductionInvoiceById = async (id) => {
             : data.production_date ? new Date(data.production_date) : null,
         created_at: data.created_at?.toDate?.() || null,
     };
+    return await repairProductionInvoice(invoice);
 };
