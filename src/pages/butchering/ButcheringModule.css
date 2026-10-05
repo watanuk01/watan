@@ -670,6 +670,23 @@ select option {
     padding: 16px 64px 48px;
 }
 
+.genealogy-key {
+    display: flex;
+    justify-content: center;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+    padding: var(--space-3) var(--space-4);
+    color: var(--color-text-secondary);
+    font-size: var(--text-xs);
+}
+
+.genealogy-key span {
+    padding: 4px 8px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-full);
+    background: var(--color-bg-subtle);
+}
+
 .tree-node-column {
     display: flex;
     flex-direction: column;
@@ -774,6 +791,7 @@ select option {
 .tree-node.vendor { border-left: 3px solid var(--color-info); }
 .tree-node.parent { border-left: 3px solid var(--color-warning); }
 .tree-node.butcher { border-left: 3px solid var(--color-primary); }
+.tree-node.leftover { border-left: 3px solid #a16207; background: rgba(245, 158, 11, 0.09); }
 .tree-node.child { border-left: 3px solid var(--color-success); }
 .tree-node.production { border-left: 3px solid #ec4899; }
 .tree-node.restaurant { border-left: 3px solid var(--color-success); }
@@ -786,6 +804,7 @@ select option {
 .tree-node.vendor .tree-node-icon { color: var(--color-info); }
 .tree-node.parent .tree-node-icon { color: var(--color-warning); }
 .tree-node.butcher .tree-node-icon { color: var(--color-primary); }
+.tree-node.leftover .tree-node-icon { color: #a16207; }
 .tree-node.child .tree-node-icon { color: var(--color-success); }
 .tree-node.production .tree-node-icon { color: #ec4899; }
 .tree-node.restaurant .tree-node-icon { color: var(--color-success); }

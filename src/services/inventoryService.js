@@ -589,6 +589,9 @@ export const addBatch = async (data) => {
     const batchData = {
         ...data,
         batch_number: batchNumber,
+        // Preserve the received/produced amount. The remaining fields are
+        // reduced as stock is used and cannot prove the original quantity.
+        initial_quantity: data.initial_quantity ?? data.quantity,
         remaining_qty: data.quantity,
         status: 'available',
         source: data.source || 'unknown', // track batch origin
@@ -636,6 +639,7 @@ export const consumeBatch = async (batchId, quantity, itemId) => {
     const newRemaining = batch.remaining_qty - quantity;
     const updates = {
         remaining_qty: newRemaining,
+        remaining_weight_kg: newRemaining,
         updated_at: serverTimestamp(),
     };
     if (newRemaining === 0) {

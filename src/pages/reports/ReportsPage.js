@@ -21,6 +21,7 @@ import {
     fetchTopOrderedItems,
     fetchRestaurantList,
     fetchButcheringAnalytics,
+    fetchMeatFlowAnalytics,
     formatCurrency,
     clearCache,
     startOfDay,
@@ -45,6 +46,7 @@ const TABS = [
     { id: 'vendors', label: 'Vendor Performance', icon: MdInventory2 },
     { id: 'batches', label: 'Batch Analytics', icon: MdBarChart },
     { id: 'butcher', label: 'Butchering & Yield', icon: MdContentCut },
+    { id: 'meat-flow', label: 'Meat Flow', icon: MdContentCut },
     { id: 'transfers', label: 'Stock Transfers', icon: MdSync },
     { id: 'petty-cash', label: 'Petty Cash', icon: MdShoppingCart },
 ];
@@ -95,6 +97,249 @@ const KpiCard = ({ label, value, sub, color }) => (
         {sub && <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4 }}>{sub}</div>}
     </div>
 );
+
+const MeatFlowReport = ({ data, vendor, meatType, onVendorChange, onMeatTypeChange, datePreset, selectedRestaurant }) => {
+    const qty = value => Number(value || 0).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const activePeriodLabel = REPORT_PRESETS.find(p => p.id === datePreset)?.label || datePreset;
+
+    if (!data) return (
+        <div className="meat-flow-loading">
+            <MdSync className="spin" style={{ fontSize: 28, color: '#ef4444' }} />
+            <span>Loading meat flow analytics…</span>
+        </div>
+    );
+
+    // Aggregate KPIs
+    const totalOpening = data.rows.reduce((s, r) => s + (r.opening_stock_kg || 0), 0);
+    const totalProcured = data.rows.reduce((s, r) => s + (r.procured_kg || 0), 0);
+    const totalAllTimeProcured = data.rows.reduce((s, r) => s + (r.all_time_procured_kg || 0), 0);
+    const totalOrdered = data.rows.reduce((s, r) => s + (r.ordered_kg || 0), 0);
+    const totalPeriodBalance = data.rows.reduce((s, r) => s + (r.period_balance_kg || 0), 0);
+    const totalRemaining = data.rows.reduce((s, r) => s + (r.remaining_kg || 0), 0);
+    const maxProcured = Math.max(...data.rows.map(r => r.procured_kg || 0), 1);
+
+    const DOT_COLORS = ['#ef4444', '#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6', '#14b8a6', '#f97316', '#ec4899'];
+
+    return (
+        <div className="meat-flow-container">
+            {/* ── Scope Banner with Inline Filters ── */}
+            <div className="meat-flow-banner">
+                <div className="meat-flow-banner-left">
+                    <div className="meat-flow-icon-wrap">
+                        <MdContentCut />
+                    </div>
+                    <div>
+                        <div className="meat-flow-banner-title">
+                            Raw Meat Procurement &amp; Inventory Flow
+                        </div>
+                        <div className="meat-flow-banner-subtitle">
+                            Tracking opening stock, vendor intake, restaurant orders from CK, and live chiller balance.
+                        </div>
+                    </div>
+                </div>
+                <div className="meat-flow-filter-row">
+                    <div className="meat-flow-filter-group">
+                        <span className="meat-flow-filter-label">Vendor</span>
+                        <select className="meat-flow-filter-select" value={vendor} onChange={e => onVendorChange(e.target.value)}>
+                            <option value="">All Vendors</option>
+                            {data.vendors.map(name => <option key={name} value={name}>{name}</option>)}
+                        </select>
+                    </div>
+                    <div className="meat-flow-filter-group">
+                        <span className="meat-flow-filter-label">Meat Type</span>
+                        <select className="meat-flow-filter-select" value={meatType} onChange={e => onMeatTypeChange(e.target.value)}>
+                            <option value="">All Types</option>
+                            {data.meatTypes.map(name => <option key={name} value={name}>{name}</option>)}
+                        </select>
+                    </div>
+                    {(vendor || meatType) && (
+                        <button
+                            type="button"
+                            className="meat-flow-reset-btn"
+                            onClick={() => { onVendorChange(''); onMeatTypeChange(''); }}
+                            title="Clear vendor & meat type filters"
+                        >
+                            <MdClose style={{ fontSize: 11 }} /> Clear
+                        </button>
+                    )}
+                </div>
+            </div>
+
+            {/* Active Filter Pills */}
+            <div className="meat-flow-active-pills">
+                <span className="meat-flow-pill">
+                    <span className="pill-dot" />
+                    <strong>Period:</strong> {activePeriodLabel}
+                </span>
+                <span className="meat-flow-pill">
+                    <MdStore style={{ fontSize: 12, marginRight: 1 }} />
+                    <strong>Scope:</strong> {selectedRestaurant || 'All Restaurants'}
+                </span>
+                {vendor && (
+                    <span className="meat-flow-pill">
+                        <MdStore style={{ fontSize: 12, marginRight: 1 }} />
+                        <strong>Vendor:</strong> {vendor}
+                    </span>
+                )}
+                {meatType && (
+                    <span className="meat-flow-pill">
+                        <MdContentCut style={{ fontSize: 12, marginRight: 1 }} />
+                        <strong>Type:</strong> {meatType}
+                    </span>
+                )}
+            </div>
+
+            {/* ── KPI Cards ── */}
+            <div className="meat-flow-kpi-grid">
+                <div className="meat-flow-kpi blue-glow">
+                    <div className="meat-flow-kpi-top">
+                        <span className="meat-flow-kpi-label">Opening Stock</span>
+                        <div className="meat-flow-kpi-icon blue"><MdInventory2 /></div>
+                    </div>
+                    <div className="meat-flow-kpi-value blue">{qty(totalOpening)} kg</div>
+                    <div className="meat-flow-kpi-sub">
+                        <span>Balance at start of {activePeriodLabel.toLowerCase()}</span>
+                    </div>
+                </div>
+
+                <div className="meat-flow-kpi green-glow">
+                    <div className="meat-flow-kpi-top">
+                        <span className="meat-flow-kpi-label">Procured ({activePeriodLabel})</span>
+                        <div className="meat-flow-kpi-icon green"><MdTrendingUp /></div>
+                    </div>
+                    <div className="meat-flow-kpi-value green">{qty(totalProcured)} kg</div>
+                    <div className="meat-flow-kpi-sub">
+                        <span>All-time received: {qty(totalAllTimeProcured)} kg</span>
+                    </div>
+                </div>
+
+                <div className="meat-flow-kpi red-glow">
+                    <div className="meat-flow-kpi-top">
+                        <span className="meat-flow-kpi-label">Restaurant Ordered</span>
+                        <div className="meat-flow-kpi-icon red"><MdShoppingCart /></div>
+                    </div>
+                    <div className="meat-flow-kpi-value red">{qty(totalOrdered)} kg</div>
+                    <div className="meat-flow-kpi-sub">
+                        <span>Dispatched from CK in period</span>
+                    </div>
+                </div>
+
+                <div className="meat-flow-kpi gold-glow">
+                    <div className="meat-flow-kpi-top">
+                        <span className="meat-flow-kpi-label">Current Live Stock</span>
+                        <div className="meat-flow-kpi-icon gold"><MdInventory2 /></div>
+                    </div>
+                    <div className="meat-flow-kpi-value gold">{qty(totalRemaining)} kg</div>
+                    <div className="meat-flow-kpi-sub">
+                        <span>Live batch balance in chiller</span>
+                    </div>
+                </div>
+            </div>
+
+            {/* ── Inventory Reconciliation Formula Bar ── */}
+            <div className="meat-flow-reconciliation-bar">
+                <div className="reconcile-item">
+                    <span>Opening Stock:</span> <strong>{qty(totalOpening)} kg</strong>
+                </div>
+                <span className="reconcile-op">+</span>
+                <div className="reconcile-item">
+                    <span>Procured in Period:</span> <strong style={{ color: '#22c55e' }}>{qty(totalProcured)} kg</strong>
+                </div>
+                <span className="reconcile-op">−</span>
+                <div className="reconcile-item">
+                    <span>Restaurant Orders:</span> <strong style={{ color: '#f59e0b' }}>{qty(totalOrdered)} kg</strong>
+                </div>
+                <span className="reconcile-op">=</span>
+                <div className="reconcile-item highlight">
+                    <span>Current Live Remaining:</span> <strong style={{ color: '#c9a96e' }}>{qty(totalRemaining)} kg</strong>
+                </div>
+            </div>
+
+            {/* ── Data Table ── */}
+            <div className="meat-flow-table-card">
+                <div className="meat-flow-table-header">
+                    <div className="meat-flow-table-title">
+                        <div className="meat-flow-table-title-icon"><MdBarChart /></div>
+                        <h3>Meat Procurement &amp; Inventory Flow</h3>
+                    </div>
+                    <span className="meat-flow-table-count">
+                        {data.rows.length} type{data.rows.length !== 1 ? 's' : ''}
+                    </span>
+                </div>
+                <div className="meat-flow-table-inner">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Meat Type</th>
+                                <th>Opening Stock (kg)</th>
+                                <th>Procured in Period (kg)</th>
+                                <th>Ordered by Restaurants (kg)</th>
+                                <th>Period Net Change (kg)</th>
+                                <th>Current Remaining (kg)</th>
+                                <th>Total Procured to Date (kg)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {data.rows.length ? data.rows.map((row, idx) => {
+                                const barPct = maxProcured > 0 ? Math.min((row.procured_kg / maxProcured) * 100, 100) : 0;
+                                return (
+                                    <tr key={row.meat_type}>
+                                        <td className="meat-type-cell">
+                                            <span className="meat-type-dot" style={{ background: DOT_COLORS[idx % DOT_COLORS.length] }} />
+                                            {row.meat_type}
+                                        </td>
+                                        <td className="meat-flow-val-opening">{qty(row.opening_stock_kg)}</td>
+                                        <td>
+                                            <div className="meat-flow-bar-wrap">
+                                                <span className="meat-flow-val-procured">{qty(row.procured_kg)}</span>
+                                                {row.procured_kg > 0 && (
+                                                    <div className="meat-flow-bar">
+                                                        <div className="meat-flow-bar-fill" style={{ width: `${barPct}%`, background: '#22c55e' }} />
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </td>
+                                        <td className="meat-flow-val-ordered">{qty(row.ordered_kg)}</td>
+                                        <td className={`meat-flow-val-balance ${row.period_balance_kg >= 0 ? 'positive' : 'negative'}`}>
+                                            {row.period_balance_kg >= 0 ? '+' : ''}{qty(row.period_balance_kg)}
+                                        </td>
+                                        <td className="meat-flow-val-remaining">{qty(row.remaining_kg)}</td>
+                                        <td className="meat-flow-val-alltime">{qty(row.all_time_procured_kg)}</td>
+                                    </tr>
+                                );
+                            }) : (
+                                <tr>
+                                    <td colSpan="7">
+                                        <div className="meat-flow-table-empty">
+                                            <div className="meat-flow-table-empty-icon"><MdContentCut /></div>
+                                            <p>No raw-meat movement found for the selected filters.</p>
+                                        </div>
+                                    </td>
+                                </tr>
+                            )}
+                        </tbody>
+                        {data.rows.length > 0 && (
+                            <tfoot>
+                                <tr>
+                                    <td style={{ fontWeight: 800 }}>Totals</td>
+                                    <td className="meat-flow-val-opening">{qty(totalOpening)}</td>
+                                    <td className="meat-flow-val-procured">{qty(totalProcured)}</td>
+                                    <td className="meat-flow-val-ordered">{qty(totalOrdered)}</td>
+                                    <td className={`meat-flow-val-balance ${totalPeriodBalance >= 0 ? 'positive' : 'negative'}`}>
+                                        {totalPeriodBalance >= 0 ? '+' : ''}{qty(totalPeriodBalance)}
+                                    </td>
+                                    <td className="meat-flow-val-remaining">{qty(totalRemaining)}</td>
+                                    <td className="meat-flow-val-alltime">{qty(totalAllTimeProcured)}</td>
+                                </tr>
+                            </tfoot>
+                        )}
+                    </table>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 
 const TransferReport = ({ data, filters, selectedRestaurant, datePreset, onResetFilters }) => {
     const formatQty = value => Number(value || 0).toLocaleString('en-GB', { minimumFractionDigits: 1, maximumFractionDigits: 2 });
@@ -1206,6 +1451,7 @@ const ReportsPage = () => {
     const [butcheringData, setButcheringData] = useState(null);
     const [transferData, setTransferData] = useState(null);
     const [pettyCashData, setPettyCashData] = useState(null);
+    const [meatFlowData, setMeatFlowData] = useState(null);
 
     // Filter state
     const [datePreset, setDatePreset] = useState('today');
@@ -1215,6 +1461,8 @@ const ReportsPage = () => {
     const [appliedCustomTo, setAppliedCustomTo] = useState('');
     const [selectedRestaurant, setSelectedRestaurant] = useState('');
     const [restaurantOptions, setRestaurantOptions] = useState([]);
+    const [selectedVendor, setSelectedVendor] = useState('');
+    const [selectedMeatType, setSelectedMeatType] = useState('');
 
     // Email modal
     const [showEmailModal, setShowEmailModal] = useState(false);
@@ -1251,8 +1499,13 @@ const ReportsPage = () => {
         return filters;
     }, [datePreset, appliedCustomFrom, appliedCustomTo, selectedRestaurant, restaurantOptions]);
 
+    const meatFlowDataRef = useRef(meatFlowData);
+    meatFlowDataRef.current = meatFlowData;
+
     const loadTab = useCallback(async (t) => {
-        setLoading(true);
+        if (t !== 'meat-flow' || !meatFlowDataRef.current) {
+            setLoading(true);
+        }
         const filters = getFilters();
         try {
             if (t === 'restaurants') {
@@ -1267,6 +1520,8 @@ const ReportsPage = () => {
                 setBatches(await fetchBatchAnalytics(filters));
             } else if (t === 'butcher') {
                 setButcheringData(await fetchButcheringAnalytics(filters));
+            } else if (t === 'meat-flow') {
+                setMeatFlowData(await fetchMeatFlowAnalytics({ ...filters, vendorName: selectedVendor, meatType: selectedMeatType }));
             } else if (t === 'transfers') {
                 setTransferData(await getStockTransferAnalytics(filters));
             } else if (t === 'petty-cash') {
@@ -1278,7 +1533,7 @@ const ReportsPage = () => {
         } finally {
             setLoading(false);
         }
-    }, [getFilters]);
+    }, [getFilters, selectedVendor, selectedMeatType]);
 
     // Reload on tab change or filter change
     useEffect(() => {
@@ -1292,6 +1547,9 @@ const ReportsPage = () => {
         setVendors(null);
         setBatches(null);
         setButcheringData(null);
+        setMeatFlowData(null);
+        setTransferData(null);
+        setPettyCashData(null);
         setTimeout(() => loadTab(tab), 50);
     };
 
@@ -1566,6 +1824,48 @@ const ReportsPage = () => {
                         styles: { cellPadding: 2 },
                     });
                 }
+            }
+
+            else if (tab === 'meat-flow' && meatFlowData?.rows?.length) {
+                const totalOpening = meatFlowData.rows.reduce((s, r) => s + (r.opening_stock_kg || 0), 0);
+                const totalProcured = meatFlowData.rows.reduce((s, r) => s + (r.procured_kg || 0), 0);
+                const totalOrdered = meatFlowData.rows.reduce((s, r) => s + (r.ordered_kg || 0), 0);
+                const totalBalance = meatFlowData.rows.reduce((s, r) => s + (r.period_balance_kg || 0), 0);
+                const totalRemaining = meatFlowData.rows.reduce((s, r) => s + (r.remaining_kg || 0), 0);
+                const totalAllTime = meatFlowData.rows.reduce((s, r) => s + (r.all_time_procured_kg || 0), 0);
+
+                doc.setFontSize(9.5);
+                doc.setFont('helvetica', 'bold');
+                doc.setTextColor(30, 30, 46);
+                doc.text(`Raw Meat Procurement & Inventory Flow: Opening: ${totalOpening.toFixed(2)} kg | Period Procured: ${totalProcured.toFixed(2)} kg | Ordered: ${totalOrdered.toFixed(2)} kg | Net Change: ${totalBalance >= 0 ? '+' : ''}${totalBalance.toFixed(2)} kg | Live Remaining: ${totalRemaining.toFixed(2)} kg`, 14, startY);
+                startY += 6;
+
+                autoTable(doc, {
+                    startY,
+                    head: [['Meat Type', 'Opening Stock (kg)', 'Procured in Period (kg)', 'Ordered by Restaurants (kg)', 'Period Net Change (kg)', 'Current Remaining (kg)', 'Total Procured to Date (kg)']],
+                    body: [
+                        ...meatFlowData.rows.map(r => [
+                            r.meat_type,
+                            Number(r.opening_stock_kg || 0).toFixed(2),
+                            Number(r.procured_kg || 0).toFixed(2),
+                            Number(r.ordered_kg || 0).toFixed(2),
+                            `${r.period_balance_kg >= 0 ? '+' : ''}${Number(r.period_balance_kg || 0).toFixed(2)}`,
+                            Number(r.remaining_kg || 0).toFixed(2),
+                            Number(r.all_time_procured_kg || 0).toFixed(2),
+                        ]),
+                        [
+                            'Totals',
+                            totalOpening.toFixed(2),
+                            totalProcured.toFixed(2),
+                            totalOrdered.toFixed(2),
+                            `${totalBalance >= 0 ? '+' : ''}${totalBalance.toFixed(2)}`,
+                            totalRemaining.toFixed(2),
+                            totalAllTime.toFixed(2),
+                        ],
+                    ],
+                    headStyles, bodyStyles,
+                    styles: { cellPadding: 2.5 },
+                });
             }
 
             // Footer
@@ -1851,6 +2151,58 @@ const ReportsPage = () => {
                 `;
             }
 
+            else if (tab === 'meat-flow' && meatFlowData?.rows?.length) {
+                const totalOpening = meatFlowData.rows.reduce((s, r) => s + (r.opening_stock_kg || 0), 0);
+                const totalProcured = meatFlowData.rows.reduce((s, r) => s + (r.procured_kg || 0), 0);
+                const totalOrdered = meatFlowData.rows.reduce((s, r) => s + (r.ordered_kg || 0), 0);
+                const totalBalance = meatFlowData.rows.reduce((s, r) => s + (r.period_balance_kg || 0), 0);
+                const totalRemaining = meatFlowData.rows.reduce((s, r) => s + (r.remaining_kg || 0), 0);
+                const totalAllTime = meatFlowData.rows.reduce((s, r) => s + (r.all_time_procured_kg || 0), 0);
+
+                const rows = meatFlowData.rows.map((r, i) => `
+                    <tr style="border-bottom: 1px solid #e2e8f0; ${i % 2 === 1 ? 'background-color: #f8fafc;' : ''}">
+                        <td style="padding: 10px; font-weight: 600;">${r.meat_type}</td>
+                        <td style="padding: 10px; text-align: right;">${Number(r.opening_stock_kg || 0).toFixed(2)}</td>
+                        <td style="padding: 10px; text-align: right; color: #16a34a; font-weight: 600;">${Number(r.procured_kg || 0).toFixed(2)}</td>
+                        <td style="padding: 10px; text-align: right; color: #ea580c; font-weight: 600;">${Number(r.ordered_kg || 0).toFixed(2)}</td>
+                        <td style="padding: 10px; text-align: right; font-weight: bold; color: ${r.period_balance_kg >= 0 ? '#16a34a' : '#dc2626'};">${r.period_balance_kg >= 0 ? '+' : ''}${Number(r.period_balance_kg || 0).toFixed(2)}</td>
+                        <td style="padding: 10px; text-align: right; font-weight: bold; color: #c9a96e;">${Number(r.remaining_kg || 0).toFixed(2)}</td>
+                        <td style="padding: 10px; text-align: right; color: #7c3aed;">${Number(r.all_time_procured_kg || 0).toFixed(2)}</td>
+                    </tr>
+                `).join('');
+
+                bodyHtml = `
+                    <div style="background: #f8fafc; padding: 12px 16px; border-radius: 6px; margin-bottom: 16px; font-size: 13px;">
+                        <strong>Reconciliation Formula:</strong> Opening Stock (${totalOpening.toFixed(2)} kg) + Procured (${totalProcured.toFixed(2)} kg) − Ordered (${totalOrdered.toFixed(2)} kg) = <strong>Remaining (${totalRemaining.toFixed(2)} kg)</strong>
+                    </div>
+                    <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                        <thead>
+                            <tr style="background: #1e1e2e; color: #c9a96e; text-align: right;">
+                                <th style="padding: 10px; text-align: left;">Meat Type</th>
+                                <th style="padding: 10px;">Opening (kg)</th>
+                                <th style="padding: 10px;">Procured (kg)</th>
+                                <th style="padding: 10px;">Ordered (kg)</th>
+                                <th style="padding: 10px;">Net Change</th>
+                                <th style="padding: 10px;">Current Stock (kg)</th>
+                                <th style="padding: 10px;">All-Time (kg)</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                        <tfoot>
+                            <tr style="background: #e2e8f0; font-weight: bold; text-align: right;">
+                                <td style="padding: 10px; text-align: left;">Totals</td>
+                                <td style="padding: 10px;">${totalOpening.toFixed(2)}</td>
+                                <td style="padding: 10px; color: #16a34a;">${totalProcured.toFixed(2)}</td>
+                                <td style="padding: 10px; color: #ea580c;">${totalOrdered.toFixed(2)}</td>
+                                <td style="padding: 10px; color: ${totalBalance >= 0 ? '#16a34a' : '#dc2626'};">${totalBalance >= 0 ? '+' : ''}${totalBalance.toFixed(2)}</td>
+                                <td style="padding: 10px; color: #b45309;">${totalRemaining.toFixed(2)}</td>
+                                <td style="padding: 10px; color: #7c3aed;">${totalAllTime.toFixed(2)}</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                `;
+            }
+
             const htmlContent = `
                 <div style="font-family: Arial, Helvetica, sans-serif; background-color: #f1f5f9; padding: 24px; color: #1e293b;">
                     <div style="max-width: 900px; margin: 0 auto; background: #ffffff; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); overflow: hidden;">
@@ -1975,6 +2327,7 @@ const ReportsPage = () => {
                         {tab === 'vendors' && <VendorPerformance data={vendors} />}
                         {tab === 'batches' && <BatchAnalyticsTab data={batches} />}
                         {tab === 'butcher' && <ButcheringYieldTab data={butcheringData} />}
+                        {tab === 'meat-flow' && <MeatFlowReport data={meatFlowData} vendor={selectedVendor} meatType={selectedMeatType} onVendorChange={setSelectedVendor} onMeatTypeChange={setSelectedMeatType} datePreset={datePreset} selectedRestaurant={selectedRestaurant} />}
                         {tab === 'transfers' && <TransferReport data={transferData} filters={getFilters()} selectedRestaurant={selectedRestaurant} datePreset={datePreset} onResetFilters={() => { setDatePreset('all_time'); setSelectedRestaurant(''); }} />}
                         {tab === 'petty-cash' && <PettyCashReport data={pettyCashData} />}
                     </>

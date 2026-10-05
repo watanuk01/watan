@@ -59,7 +59,8 @@ const CutTypesAdmin = () => {
                 getItems({ status: 'active' }),
             ]);
             setAnimals(list || []);
-            setCkItems((itemsList || []).filter(i => ['raw_meat', 'cooked_meat'].includes(i.item_type)));
+            // Butcher cuts are raw meat — only show raw_meat items in CK mapping dropdown
+            setCkItems((itemsList || []).filter(i => i.item_type === 'raw_meat'));
         } catch (err) {
             console.error(err);
             toast.error('Failed to load animals');

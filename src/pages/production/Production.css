@@ -201,7 +201,7 @@
 
 .recipe-ingredient-row {
     display: grid;
-    grid-template-columns: auto 1fr 120px 120px 120px;
+    grid-template-columns: auto 1fr 120px 120px 120px 120px;
     gap: var(--space-3);
     align-items: center;
     padding: var(--space-3) 0;
@@ -252,7 +252,7 @@
 /* Header for recipe ingredients grid */
 .recipe-ingredient-header {
     display: grid;
-    grid-template-columns: auto 1fr 120px 120px 120px;
+    grid-template-columns: auto 1fr 120px 120px 120px 120px;
     gap: var(--space-3);
     padding: var(--space-2) 0 var(--space-3);
     border-bottom: 2px solid var(--color-divider);
