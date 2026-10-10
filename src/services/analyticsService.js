@@ -6,7 +6,7 @@
  * Filter object: { dateFrom: Date, dateTo: Date, restaurantId?: string, restaurantName?: string }
  */
 
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, getDocs, query, where, limit, Timestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 
 export const formatCurrency = (n) =>
@@ -63,7 +63,6 @@ export const getPresetDates = (presetId) => {
 let _orderCache = null;
 let _wasteCache = null;
 let _invoiceCache = null;
-let _eposCache = null;
 let _vendorCache = null;
 let _batchCache = null;
 let _inventoryItemsCache = null;
@@ -75,7 +74,6 @@ export const clearCache = () => {
     _orderCache = null;
     _wasteCache = null;
     _invoiceCache = null;
-    _eposCache = null;
     _vendorCache = null;
     _batchCache = null;
     _inventoryItemsCache = null;
@@ -125,18 +123,30 @@ export const resolveVendorName = (data) => {
     return str.charAt(0).toUpperCase() + str.slice(1);
 };
 
-// Groups raw meat into a human-readable type for the operational meat-flow report.
-export const getMeatType = (row = {}) => {
-    const text = `${row.cut_name || ''} ${row.item_name || row.name || ''} ${row.category_name || row.category || ''} ${row.species || ''} ${row.animal_type || ''} ${row.meat_type || ''}`.toLowerCase();
+// Detects primary animal/meat classification for cuts, portions, and cooked items.
+export const detectMeatType = (row) => {
+    if (!row) return null;
+    const text = (typeof row === 'string'
+        ? row
+        : `${row.cut_name || ''} ${row.item_name || row.name || ''} ${row.category_name || row.category || ''} ${row.species || ''} ${row.animal_type || ''} ${row.meat_type || ''}`
+    ).toLowerCase();
+
     if (/mutton/.test(text)) return 'Mutton';
-    if (/lamb|sheep|hindshank|handshank|backstrp|backstrap|cannon|saddle|rack/.test(text)) return 'Lamb';
-    if (/chicken|poultry|wings|thigh|drumstick/.test(text)) return 'Chicken';
+    if (/lamb|sheep|hindshank|handshank|backstrp|backstrap|cannon|saddle|rack|maicha|paya|nehari|nihari|chops/.test(text)) return 'Lamb';
+    if (/chicken|poultry|wings|thigh|drumstick|boti|tikka/.test(text)) return 'Chicken';
     if (/beef|cow|steak|veal|brisket|sirloin|ribeye|rump/.test(text)) return 'Beef';
     if (/goat/.test(text)) return 'Goat';
     if (/fish|prawn|salmon|cod|seafood/.test(text)) return 'Seafood';
+    return null;
+};
 
-    const fallback = row.category_name || row.category || row.item_name || row.cut_name;
-    if (fallback && !['raw meat', 'meat', 'uncategorized', 'general', 'other raw meat'].includes(fallback.toLowerCase().trim())) {
+// Groups raw meat into a human-readable type for the operational meat-flow report.
+export const getMeatType = (row = {}) => {
+    const detected = detectMeatType(row);
+    if (detected) return detected;
+
+    const fallback = typeof row === 'string' ? row : (row.category_name || row.category || row.item_name || row.cut_name);
+    if (fallback && !['raw meat', 'meat', 'uncategorized', 'general', 'other raw meat'].includes(String(fallback).toLowerCase().trim())) {
         return fallback;
     }
     return 'Raw Meat (General)';
@@ -181,12 +191,14 @@ export const isRawMeat = (item, parentDoc = null, itemMap = null) => {
  * Accurately supports Date range, Restaurant, Vendor, and Meat Type filters.
  */
 export const fetchMeatFlowAnalytics = async (filters = {}) => {
-    const [purchaseOrders, orders, batches, inventoryItems] = await Promise.all([
-        getPurchaseOrders(),
-        getOrders(),
-        getBatches(),
-        getInventoryItems(),
-    ]);
+    try {
+        const [purchaseOrders, orders, batches, inventoryItems, eposEvents] = await Promise.all([
+            getPurchaseOrders(),
+            getOrders(),
+            getBatches(),
+            getInventoryItems(),
+            getEpos(filters),
+        ]);
 
     const itemMap = new Map((inventoryItems || []).map(item => [item.id, item]));
     const batchById = new Map((batches || []).map(batch => [batch.id, batch]));
@@ -236,22 +248,27 @@ export const fetchMeatFlowAnalytics = async (filters = {}) => {
             all_time_procured_kg: 0,
             ordered_kg: 0,
             remaining_kg: 0,
+            procured_cost: 0,
+            transfer_cost: 0,
+            epos_sold_kg: 0,
+            epos_sales: 0,
         });
         rows.get(type)[key] += Number(quantity) || 0;
     };
 
-    // ── 1. Procurement: Purchases from Vendors ──
+    const isSpecificRestaurant = Boolean(filters.restaurantId || filters.restaurantName);
+
+    // ── 1. Procurement: Purchases from Vendors (weight + cost) ──
     purchaseOrders.forEach(po => {
         const poVendor = resolveVendorName(po);
         if (!vendorMatches(poVendor, filters.vendorName)) return;
 
         // Restaurant scope:
-        // Central Kitchen is the procurement hub. If a specific restaurant is selected:
-        // Exclude only if the PO is explicitly assigned to a DIFFERENT restaurant.
-        if (filters.restaurantId || filters.restaurantName) {
-            if (po.restaurant_id || po.restaurant_name) {
-                if (!restaurantMatches(po, filters.restaurantId, filters.restaurantName)) return;
-            }
+        // Central Kitchen is the procurement hub. If a specific restaurant is selected,
+        // only include POs explicitly placed for that restaurant.
+        if (isSpecificRestaurant) {
+            const hasRest = po.restaurant_id || po.restaurant_name;
+            if (!hasRest || !restaurantMatches(po, filters.restaurantId, filters.restaurantName)) return;
         }
 
         const poDate = po.created_at || po.received_at || po.order_date || po.expected_delivery_date;
@@ -265,12 +282,15 @@ export const fetchMeatFlowAnalytics = async (filters = {}) => {
                 add(meatType, 'all_time_procured_kg', qty);
                 if (isPeriod) {
                     add(meatType, 'procured_kg', qty);
+                    // Vendor cost = qty × unit price (received_price takes precedence)
+                    const unitCost = Number(item.received_price ?? item.unit_price ?? item.price ?? item.cost_price ?? 0);
+                    add(meatType, 'procured_cost', qty * unitCost);
                 }
             }
         });
     });
 
-    // ── 2. Restaurant Orders: Orders placed by restaurants to CK ──
+    // ── 2. Restaurant Orders: Orders placed by restaurants to CK (weight + transfer cost) ──
     orders.forEach(order => {
         const orderDate = order.created_at || order.order_date || order.date;
         if (!inRange(orderDate)) return;
@@ -292,12 +312,31 @@ export const fetchMeatFlowAnalytics = async (filters = {}) => {
 
                 if (!vendorMatches(bVendor, filters.vendorName)) return;
 
-                if (isRawMeat(batch || allocation, order, itemMap)) {
-                    const qty = Number(ref.quantity_deducted ?? ref.quantity ?? 0);
-                    if (qty > 0) {
-                        add(getMeatType(batch || allocation), 'ordered_kg', qty);
-                        if (allocation.item_id) handledItemIds.add(allocation.item_id);
+                const isRaw = isRawMeat(batch || allocation, order, itemMap);
+                const mt = detectMeatType(batch || allocation) || (isRaw ? getMeatType(batch || allocation) : null);
+                if (!mt) return;
+
+                const qty = Number(ref.quantity_deducted ?? ref.quantity ?? 0);
+                if (qty > 0) {
+                    if (isRaw) {
+                        add(mt, 'ordered_kg', qty);
                     }
+                    // Transfer cost: price CK charges to restaurant
+                    const transferPrice = Number(
+                        allocation.unit_price ?? allocation.price ?? allocation.cost_price
+                        ?? ref.unit_price ?? ref.price
+                        ?? batch?.selling_price ?? batch?.cost_price ?? batch?.unit_price
+                        ?? 0
+                    );
+                    add(mt, 'transfer_cost', qty * transferPrice);
+
+                    if (isSpecificRestaurant) {
+                        const unitVendorCost = Number(batch?.cost_price ?? batch?.unit_price ?? allocation?.cost_price ?? 0);
+                        add(mt, 'procured_cost', qty * unitVendorCost);
+                        add(mt, 'procured_kg', qty);
+                    }
+
+                    if (allocation.item_id) handledItemIds.add(allocation.item_id);
                 }
             });
         });
@@ -305,15 +344,29 @@ export const fetchMeatFlowAnalytics = async (filters = {}) => {
         // 2B. Fallback to order.items for unallocated or pending orders
         (order.items || []).forEach(item => {
             if (handledItemIds.has(item.item_id)) return;
-            if (!isRawMeat(item, order, itemMap)) return;
 
             const master = item.item_id ? itemMap.get(item.item_id) : null;
             const itemVendor = resolveVendorName(item) || resolveVendorName(master);
             if (!vendorMatches(itemVendor, filters.vendorName)) return;
 
+            const isRaw = isRawMeat(item, order, itemMap);
+            const mt = detectMeatType(item) || detectMeatType(master) || (isRaw ? getMeatType(item) : null);
+            if (!mt) return;
+
             const qty = Number(item.base_quantity ?? item.quantity ?? 0);
             if (qty > 0) {
-                add(getMeatType(item), 'ordered_kg', qty);
+                if (isRaw) {
+                    add(mt, 'ordered_kg', qty);
+                }
+                // Transfer cost from order line items
+                const transferPrice = Number(item.selling_price ?? item.unit_price ?? item.price ?? master?.selling_price ?? master?.cost_price ?? 0);
+                add(mt, 'transfer_cost', qty * transferPrice);
+
+                if (isSpecificRestaurant) {
+                    const unitVendorCost = Number(item.cost_price ?? master?.cost_price ?? master?.price ?? 0);
+                    add(mt, 'procured_cost', qty * unitVendorCost);
+                    add(mt, 'procured_kg', qty);
+                }
             }
         });
     });
@@ -322,10 +375,9 @@ export const fetchMeatFlowAnalytics = async (filters = {}) => {
     batches.forEach(batch => {
         if (!isRawMeat(batch, null, itemMap)) return;
 
-        if (filters.restaurantId || filters.restaurantName) {
-            if (batch.restaurant_id || batch.restaurant_name) {
-                if (!restaurantMatches(batch, filters.restaurantId, filters.restaurantName)) return;
-            }
+        // If specific restaurant selected, only match batches stored at that restaurant
+        if (isSpecificRestaurant) {
+            if (!restaurantMatches(batch, filters.restaurantId, filters.restaurantName)) return;
         }
 
         const bVendor = resolveVendorName(batch)
@@ -338,6 +390,66 @@ export const fetchMeatFlowAnalytics = async (filters = {}) => {
         const rem = Number(batch.remaining_weight_kg ?? batch.remaining_qty ?? batch.quantity ?? 0);
         if (rem > 0) {
             add(getMeatType(batch), 'remaining_kg', rem);
+        }
+    });
+
+    // ── 3B. EPOS Sales: Restaurant POS revenue & sold meat weight ──
+    (eposEvents || []).forEach(ev => {
+        const evDate = ev.order_date || ev.received_at || ev.event_date || ev.created_at;
+        if (!inRange(evDate)) return;
+
+        if (!restaurantMatches(ev, filters.restaurantId, filters.restaurantName)) return;
+
+        const results = ev.processing_result?.results || [];
+        if (results.length > 0) {
+            results.forEach(r => {
+                let mt = detectMeatType(r.menu_item || r.epos_item_name);
+                if (!mt && r.deductions?.length) {
+                    for (const d of r.deductions) {
+                        const dMt = detectMeatType(d);
+                        if (dMt) { mt = dMt; break; }
+                    }
+                }
+                if (!mt || !typeMatches(mt)) return;
+
+                const qtySold = Number(r.quantity_sold ?? 1);
+                const unitPrice = Number(r.portion_selling_price ?? 0);
+                const revenue = qtySold * unitPrice;
+
+                // Meat weight in kg from recipe deductions
+                let meatKg = 0;
+                if (r.deductions?.length) {
+                    r.deductions.forEach(d => {
+                        const dMt = detectMeatType(d);
+                        if (dMt !== mt && d.item_type !== 'cooked_meat' && d.item_type !== 'raw_meat') return;
+                        const req = Number(d.required || 0);
+                        const u = (d.unit || '').toLowerCase();
+                        if (u === 'kg') meatKg += req;
+                        else if (u === 'g' || u === 'grams') meatKg += req / 1000;
+                        else if (u === 'portions' || u === 'pcs') meatKg += req * 0.35;
+                        else meatKg += req > 1 ? req * 0.35 : req;
+                    });
+                }
+                if (meatKg === 0) meatKg = qtySold * 0.35;
+
+                if (meatKg > 0) add(mt, 'epos_sold_kg', meatKg);
+                if (revenue > 0) add(mt, 'epos_sales', revenue);
+            });
+        } else {
+            // Fallback for unprocessed line items
+            const lineItems = ev.items || ev.line_items || ev.raw_payload?.line_items || [];
+            lineItems.forEach(item => {
+                const mt = detectMeatType(item.epos_item_name || item.item_name || item.name);
+                if (!mt || !typeMatches(mt)) return;
+
+                const qty = Number(item.quantity ?? item.qty ?? 1);
+                const price = Number(item.unit_price ?? item.price ?? item.selling_price ?? 0);
+                const revenue = Number(item.total ?? item.line_total ?? (qty * price));
+                const meatKg = qty * 0.35;
+
+                if (meatKg > 0) add(mt, 'epos_sold_kg', meatKg);
+                if (revenue > 0) add(mt, 'epos_sales', revenue);
+            });
         }
     });
 
@@ -373,25 +485,52 @@ export const fetchMeatFlowAnalytics = async (filters = {}) => {
     const vendors = [...vendorSet].filter(Boolean).sort();
     const meatTypes = [...meatTypeSet].filter(Boolean).sort();
 
-    // ── 5. Prepare Output Rows with Full Inventory Reconciliation ──
+    // ── 5. Prepare Output Rows with Full Inventory Reconciliation & Margins ──
     const outputRows = [...rows.values()]
         .map(row => {
             const opening_stock_kg = Math.max(0, row.remaining_kg - row.procured_kg + row.ordered_kg);
             const period_balance_kg = row.procured_kg - row.ordered_kg;
+            const baseCost = isSpecificRestaurant && row.transfer_cost > 0 ? row.transfer_cost : row.procured_cost;
+            const margin = row.epos_sales - baseCost;
+            const margin_pct = baseCost > 0 ? ((margin / baseCost) * 100) : 0;
             return {
                 ...row,
                 opening_stock_kg,
                 period_balance_kg,
+                margin,
+                margin_pct,
             };
         })
-        .filter(row => filters.meatType ? true : (row.procured_kg > 0 || row.ordered_kg > 0 || row.remaining_kg > 0 || row.all_time_procured_kg > 0))
+        .filter(row => {
+            if (filters.meatType) return true;
+            if (filters.vendorName) {
+                return row.procured_kg > 0 || row.ordered_kg > 0 || row.remaining_kg > 0 || row.all_time_procured_kg > 0;
+            }
+            return row.procured_kg > 0 || row.ordered_kg > 0 || row.remaining_kg > 0 || row.all_time_procured_kg > 0 || row.epos_sales > 0;
+        })
         .sort((a, b) => a.meat_type.localeCompare(b.meat_type));
 
-    return {
-        vendors,
-        meatTypes,
-        rows: outputRows,
-    };
+        console.log('[fetchMeatFlowAnalytics] Generated report:', {
+            filters,
+            rowCount: outputRows.length,
+            vendorsCount: vendors.length,
+            meatTypesCount: meatTypes.length,
+            rows: outputRows,
+        });
+
+        return {
+            vendors,
+            meatTypes,
+            rows: outputRows,
+        };
+    } catch (err) {
+        console.error('fetchMeatFlowAnalytics failed:', err);
+        return {
+            vendors: [],
+            meatTypes: [],
+            rows: [],
+        };
+    }
 };
 
 const getOrders = async () => {
@@ -416,19 +555,62 @@ const getWaste = async () => {
     return _wasteCache;
 };
 
-const getEpos = async () => {
-    if (_eposCache) return _eposCache;
-    const snap = await getDocs(collection(db, 'epos_events'));
-    _eposCache = snap.docs.map(d => {
-        const data = d.data();
-        const dateVal = data.order_date || data.received_at || data.created_at || data.event_date || data.timestamp;
-        return {
-            id: d.id,
-            ...data,
-            received_at: toDate(dateVal),
-        };
-    });
-    return _eposCache;
+const getEpos = async (filters = {}) => {
+    try {
+        const constraints = [];
+        if (filters.restaurantId) {
+            constraints.push(where('restaurant_id', '==', filters.restaurantId));
+        }
+        if (filters.dateFrom) {
+            const fromD = filters.dateFrom instanceof Date ? filters.dateFrom : new Date(filters.dateFrom);
+            constraints.push(where('received_at', '>=', Timestamp.fromDate(fromD)));
+        }
+        if (filters.dateTo) {
+            const toD = filters.dateTo instanceof Date ? filters.dateTo : new Date(filters.dateTo);
+            const endD = new Date(toD);
+            if (endD.getHours() === 0 && endD.getMinutes() === 0) endD.setHours(23, 59, 59, 999);
+            constraints.push(where('received_at', '<=', Timestamp.fromDate(endD)));
+        }
+
+        // Cap query limit so we never hang or buffer thousands of full event payloads
+        constraints.push(limit(200));
+
+        const fetchPromise = (async () => {
+            try {
+                const q = query(collection(db, 'epos_events'), ...constraints);
+                const snap = await getDocs(q);
+                return snap.docs.map(d => {
+                    const data = d.data();
+                    const dateVal = data.order_date || data.received_at || data.created_at || data.event_date || data.timestamp;
+                    return {
+                        id: d.id,
+                        ...data,
+                        received_at: toDate(dateVal),
+                    };
+                });
+            } catch (err) {
+                console.warn('Constrained EPOS query fallback:', err.message);
+                const qSimple = query(collection(db, 'epos_events'), limit(100));
+                const snapSimple = await getDocs(qSimple);
+                return snapSimple.docs.map(d => {
+                    const data = d.data();
+                    const dateVal = data.order_date || data.received_at || data.created_at || data.event_date || data.timestamp;
+                    return {
+                        id: d.id,
+                        ...data,
+                        received_at: toDate(dateVal),
+                    };
+                });
+            }
+        })();
+
+        // 3-second timeout race to ensure Meat Flow NEVER hangs waiting for EPOS
+        const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve([]), 3000));
+        return await Promise.race([fetchPromise, timeoutPromise]);
+    } catch (err) {
+        console.warn('getEpos failed gracefully:', err);
+        return [];
+    }
 };
 
 const getPurchaseOrders = async () => {

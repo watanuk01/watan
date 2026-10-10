@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import {
     MdShoppingCart,
@@ -51,6 +52,10 @@ const newId = () => String(_idCounter++);
 
 const ButcherPurchaseOrder = () => {
     const navigate = useNavigate();
+    const { userProfile, isButcher, isChef } = useAuth();
+    const isButcherRole = (typeof isButcher === 'function' ? isButcher() : false) || userProfile?.role === 'butcher';
+    const isChefRole = (typeof isChef === 'function' ? isChef() : false) || userProfile?.role === 'chef';
+    const canReviewOrder = !isButcherRole && !isChefRole && !['butcher', 'chef'].includes(userProfile?.role);
     const [tab, setTab] = useState('new'); // 'new' | 'history'
 
     // ── Form State ──
@@ -209,6 +214,7 @@ const ButcherPurchaseOrder = () => {
 
     // ── Edit/Review Received PO ──
     const openEditModal = (po) => {
+        if (!canReviewOrder) return;
         setEditPO(po);
         setEditData({
             vendor: po.vendor || po.vendor_name || '',
@@ -556,7 +562,7 @@ const ButcherPurchaseOrder = () => {
                                             <td style={{ color: 'var(--color-text-muted)', fontSize: 12 }}>{safeDate(po.created_at)}</td>
                                             <td onClick={e => e.stopPropagation()}>
                                                 <div style={{ display: 'flex', gap: 4 }}>
-                                                    {po.status === 'ordered' && (
+                                                    {!isButcherRole && !isChefRole && po.status === 'ordered' && (
                                                         <button
                                                             className="btn btn-sm"
                                                             style={{ background: 'rgba(34,197,94,0.1)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)', fontSize: 11 }}
@@ -566,7 +572,7 @@ const ButcherPurchaseOrder = () => {
                                                             <MdLocalShipping size={12} /> {receiving === po.id ? '...' : 'Received'}
                                                         </button>
                                                     )}
-                                                    {po.status === 'received' && (
+                                                    {canReviewOrder && po.status === 'received' && (
                                                         <button
                                                             className="btn btn-sm"
                                                             style={{ background: 'rgba(59,130,246,0.1)', color: '#3b82f6', border: '1px solid rgba(59,130,246,0.3)', fontSize: 11 }}
@@ -658,7 +664,7 @@ const ButcherPurchaseOrder = () => {
                             </table>
                         </div>
                         <div className="modal-foot">
-                            {detailPO.status === 'ordered' && (
+                            {!isButcherRole && !isChefRole && detailPO.status === 'ordered' && (
                                 <button className="btn btn-primary btn-md" onClick={() => { handleReceive(detailPO.id); setDetailPO(null); }}>
                                     <MdCheckCircle /> Mark as Received
                                 </button>
@@ -677,7 +683,7 @@ const ButcherPurchaseOrder = () => {
             {/* ═══════════════════════════════════════════
                 EDIT / REVIEW MODAL
             ═══════════════════════════════════════════ */}
-            {editPO && editData && (
+            {canReviewOrder && editPO && editData && (
                 <div className="butcher-modal-overlay" onClick={() => { setEditPO(null); setEditData(null); }}>
                     <div className="butcher-modal" style={{ maxWidth: 720, maxHeight: '92vh', overflow: 'auto' }} onClick={e => e.stopPropagation()}>
                         <div className="modal-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
