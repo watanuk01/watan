@@ -256,18 +256,19 @@ export const fetchMeatFlowAnalytics = async (filters = {}) => {
         rows.get(type)[key] += Number(quantity) || 0;
     };
 
+    const isSpecificRestaurant = Boolean(filters.restaurantId || filters.restaurantName);
+
     // ── 1. Procurement: Purchases from Vendors (weight + cost) ──
     purchaseOrders.forEach(po => {
         const poVendor = resolveVendorName(po);
         if (!vendorMatches(poVendor, filters.vendorName)) return;
 
         // Restaurant scope:
-        // Central Kitchen is the procurement hub. If a specific restaurant is selected:
-        // Exclude only if the PO is explicitly assigned to a DIFFERENT restaurant.
-        if (filters.restaurantId || filters.restaurantName) {
-            if (po.restaurant_id || po.restaurant_name) {
-                if (!restaurantMatches(po, filters.restaurantId, filters.restaurantName)) return;
-            }
+        // Central Kitchen is the procurement hub. If a specific restaurant is selected,
+        // only include POs explicitly placed for that restaurant.
+        if (isSpecificRestaurant) {
+            const hasRest = po.restaurant_id || po.restaurant_name;
+            if (!hasRest || !restaurantMatches(po, filters.restaurantId, filters.restaurantName)) return;
         }
 
         const poDate = po.created_at || po.received_at || po.order_date || po.expected_delivery_date;
@@ -328,6 +329,13 @@ export const fetchMeatFlowAnalytics = async (filters = {}) => {
                         ?? 0
                     );
                     add(mt, 'transfer_cost', qty * transferPrice);
+
+                    if (isSpecificRestaurant) {
+                        const unitVendorCost = Number(batch?.cost_price ?? batch?.unit_price ?? allocation?.cost_price ?? 0);
+                        add(mt, 'procured_cost', qty * unitVendorCost);
+                        add(mt, 'procured_kg', qty);
+                    }
+
                     if (allocation.item_id) handledItemIds.add(allocation.item_id);
                 }
             });
@@ -351,8 +359,14 @@ export const fetchMeatFlowAnalytics = async (filters = {}) => {
                     add(mt, 'ordered_kg', qty);
                 }
                 // Transfer cost from order line items
-                const transferPrice = Number(item.unit_price ?? item.price ?? item.cost_price ?? master?.selling_price ?? master?.cost_price ?? 0);
+                const transferPrice = Number(item.selling_price ?? item.unit_price ?? item.price ?? master?.selling_price ?? master?.cost_price ?? 0);
                 add(mt, 'transfer_cost', qty * transferPrice);
+
+                if (isSpecificRestaurant) {
+                    const unitVendorCost = Number(item.cost_price ?? master?.cost_price ?? master?.price ?? 0);
+                    add(mt, 'procured_cost', qty * unitVendorCost);
+                    add(mt, 'procured_kg', qty);
+                }
             }
         });
     });
@@ -361,10 +375,9 @@ export const fetchMeatFlowAnalytics = async (filters = {}) => {
     batches.forEach(batch => {
         if (!isRawMeat(batch, null, itemMap)) return;
 
-        if (filters.restaurantId || filters.restaurantName) {
-            if (batch.restaurant_id || batch.restaurant_name) {
-                if (!restaurantMatches(batch, filters.restaurantId, filters.restaurantName)) return;
-            }
+        // If specific restaurant selected, only match batches stored at that restaurant
+        if (isSpecificRestaurant) {
+            if (!restaurantMatches(batch, filters.restaurantId, filters.restaurantName)) return;
         }
 
         const bVendor = resolveVendorName(batch)
@@ -477,8 +490,9 @@ export const fetchMeatFlowAnalytics = async (filters = {}) => {
         .map(row => {
             const opening_stock_kg = Math.max(0, row.remaining_kg - row.procured_kg + row.ordered_kg);
             const period_balance_kg = row.procured_kg - row.ordered_kg;
-            const margin = row.epos_sales - row.procured_cost;
-            const margin_pct = row.procured_cost > 0 ? ((margin / row.procured_cost) * 100) : 0;
+            const baseCost = isSpecificRestaurant && row.transfer_cost > 0 ? row.transfer_cost : row.procured_cost;
+            const margin = row.epos_sales - baseCost;
+            const margin_pct = baseCost > 0 ? ((margin / baseCost) * 100) : 0;
             return {
                 ...row,
                 opening_stock_kg,
@@ -495,6 +509,14 @@ export const fetchMeatFlowAnalytics = async (filters = {}) => {
             return row.procured_kg > 0 || row.ordered_kg > 0 || row.remaining_kg > 0 || row.all_time_procured_kg > 0 || row.epos_sales > 0;
         })
         .sort((a, b) => a.meat_type.localeCompare(b.meat_type));
+
+        console.log('[fetchMeatFlowAnalytics] Generated report:', {
+            filters,
+            rowCount: outputRows.length,
+            vendorsCount: vendors.length,
+            meatTypesCount: meatTypes.length,
+            rows: outputRows,
+        });
 
         return {
             vendors,
