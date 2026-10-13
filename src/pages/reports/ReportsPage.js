@@ -103,9 +103,11 @@ const MeatFlowReport = ({ data, vendor, meatType, onVendorChange, onMeatTypeChan
     const activePeriodLabel = REPORT_PRESETS.find(p => p.id === datePreset)?.label || datePreset;
 
     if (!data) return (
-        <div className="meat-flow-loading">
-            <MdSync className="spin" style={{ fontSize: 28, color: '#ef4444' }} />
-            <span>Loading meat flow analytics…</span>
+        <div className="meat-flow-loading" style={{ minHeight: 380 }}>
+            <MdSync className="spin" style={{ fontSize: 36, color: 'var(--color-primary, #c9a96e)' }} />
+            <span style={{ fontSize: 14, color: 'var(--color-text-secondary, #94a3b8)', fontWeight: 500 }}>
+                Loading meat flow analytics…
+            </span>
         </div>
     );
 
@@ -336,6 +338,155 @@ const MeatFlowReport = ({ data, vendor, meatType, onVendorChange, onMeatTypeChan
                     </table>
                 </div>
             </div>
+
+            {/* ── Cost & Sales Analysis ── */}
+            {data.rows.length > 0 && (() => {
+                const totalProcuredCost = data.rows.reduce((s, r) => s + (r.procured_cost || 0), 0);
+                const totalTransferCost = data.rows.reduce((s, r) => s + (r.transfer_cost || 0), 0);
+                const totalEposSoldKg = data.rows.reduce((s, r) => s + (r.epos_sold_kg || 0), 0);
+                const totalEposSales = data.rows.reduce((s, r) => s + (r.epos_sales || 0), 0);
+                const totalMargin = totalEposSales - totalProcuredCost;
+                const totalMarginPct = totalProcuredCost > 0 ? ((totalMargin / totalProcuredCost) * 100) : 0;
+                const ckMarkup = totalTransferCost - totalProcuredCost;
+
+                return (
+                    <>
+                        {/* Cost KPI Cards */}
+                        <div className="meat-flow-kpi-grid" style={{ marginTop: 20 }}>
+                            <div className="meat-flow-kpi" style={{ borderColor: 'rgba(239,68,68,0.3)' }}>
+                                <div className="meat-flow-kpi-top">
+                                    <span className="meat-flow-kpi-label">Vendor Purchase Cost</span>
+                                    <div className="meat-flow-kpi-icon red"><MdTrendingDown /></div>
+                                </div>
+                                <div className="meat-flow-kpi-value red">{formatCurrency(totalProcuredCost)}</div>
+                                <div className="meat-flow-kpi-sub">
+                                    <span>Cost paid to vendor in period</span>
+                                </div>
+                            </div>
+
+                            <div className="meat-flow-kpi" style={{ borderColor: 'rgba(59,130,246,0.3)' }}>
+                                <div className="meat-flow-kpi-top">
+                                    <span className="meat-flow-kpi-label">CK Transfer Cost</span>
+                                    <div className="meat-flow-kpi-icon blue"><MdArrowForward /></div>
+                                </div>
+                                <div className="meat-flow-kpi-value blue">{formatCurrency(totalTransferCost)}</div>
+                                <div className="meat-flow-kpi-sub">
+                                    <span>CK markup: <strong style={{ color: ckMarkup >= 0 ? '#22c55e' : '#ef4444' }}>{formatCurrency(ckMarkup)}</strong></span>
+                                </div>
+                            </div>
+
+                            <div className="meat-flow-kpi" style={{ borderColor: 'rgba(34,197,94,0.3)' }}>
+                                <div className="meat-flow-kpi-top">
+                                    <span className="meat-flow-kpi-label">EPOS Sales Revenue</span>
+                                    <div className="meat-flow-kpi-icon green"><MdReceiptLong /></div>
+                                </div>
+                                <div className="meat-flow-kpi-value green">{formatCurrency(totalEposSales)}</div>
+                                <div className="meat-flow-kpi-sub">
+                                    <span>Sold: {qty(totalEposSoldKg)} kg via restaurants</span>
+                                </div>
+                            </div>
+
+                            <div className="meat-flow-kpi" style={{ borderColor: totalMargin >= 0 ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)' }}>
+                                <div className="meat-flow-kpi-top">
+                                    <span className="meat-flow-kpi-label">Gross Margin</span>
+                                    <div className={`meat-flow-kpi-icon ${totalMargin >= 0 ? 'green' : 'red'}`}>{totalMargin >= 0 ? <MdTrendingUp /> : <MdTrendingDown />}</div>
+                                </div>
+                                <div className={`meat-flow-kpi-value ${totalMargin >= 0 ? 'green' : 'red'}`}>{formatCurrency(totalMargin)}</div>
+                                <div className="meat-flow-kpi-sub">
+                                    <span>Margin: <strong>{totalMarginPct >= 0 ? '+' : ''}{totalMarginPct.toFixed(1)}%</strong> (EPOS − Vendor Cost)</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Cost Pipeline Flow */}
+                        <div className="meat-flow-reconciliation-bar" style={{ marginTop: 12 }}>
+                            <div className="reconcile-item">
+                                <span>Vendor Cost:</span> <strong style={{ color: '#ef4444' }}>{formatCurrency(totalProcuredCost)}</strong>
+                            </div>
+                            <span className="reconcile-op">→</span>
+                            <div className="reconcile-item">
+                                <span>CK Sells at:</span> <strong style={{ color: '#3b82f6' }}>{formatCurrency(totalTransferCost)}</strong>
+                            </div>
+                            <span className="reconcile-op">→</span>
+                            <div className="reconcile-item">
+                                <span>Restaurant EPOS:</span> <strong style={{ color: '#22c55e' }}>{formatCurrency(totalEposSales)}</strong>
+                            </div>
+                            <span className="reconcile-op">=</span>
+                            <div className="reconcile-item highlight">
+                                <span>Gross Margin:</span> <strong style={{ color: totalMargin >= 0 ? '#22c55e' : '#ef4444' }}>{formatCurrency(totalMargin)}</strong>
+                            </div>
+                        </div>
+
+                        {/* Cost & Sales Breakdown Table */}
+                        <div className="meat-flow-table-card" style={{ marginTop: 16 }}>
+                            <div className="meat-flow-table-header">
+                                <div className="meat-flow-table-title">
+                                    <div className="meat-flow-table-title-icon" style={{ background: 'rgba(59,130,246,0.15)', color: '#3b82f6' }}><MdReceiptLong /></div>
+                                    <h3>Cost &amp; Sales Breakdown</h3>
+                                </div>
+                                <span className="meat-flow-table-count" style={{ color: '#3b82f6' }}>
+                                    Vendor → CK → Restaurant → EPOS
+                                </span>
+                            </div>
+                            <div className="meat-flow-table-inner">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Meat Type</th>
+                                            <th>Procured (kg)</th>
+                                            <th>Vendor Cost (£)</th>
+                                            <th>CK Transfer Cost (£)</th>
+                                            <th>CK Markup (£)</th>
+                                            <th>EPOS Sold (kg)</th>
+                                            <th>EPOS Revenue (£)</th>
+                                            <th>Gross Margin (£)</th>
+                                            <th>Margin %</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {data.rows.map((row, idx) => {
+                                            const ckMk = (row.transfer_cost || 0) - (row.procured_cost || 0);
+                                            return (
+                                                <tr key={`cost-${row.meat_type}`}>
+                                                    <td className="meat-type-cell">
+                                                        <span className="meat-type-dot" style={{ background: DOT_COLORS[idx % DOT_COLORS.length] }} />
+                                                        {row.meat_type}
+                                                    </td>
+                                                    <td style={{ textAlign: 'right' }}>{qty(row.procured_kg)}</td>
+                                                    <td style={{ textAlign: 'right', color: '#ef4444', fontWeight: 600 }}>{formatCurrency(row.procured_cost)}</td>
+                                                    <td style={{ textAlign: 'right', color: '#3b82f6', fontWeight: 600 }}>{formatCurrency(row.transfer_cost)}</td>
+                                                    <td style={{ textAlign: 'right', color: ckMk >= 0 ? '#22c55e' : '#ef4444', fontWeight: 600 }}>{formatCurrency(ckMk)}</td>
+                                                    <td style={{ textAlign: 'right' }}>{qty(row.epos_sold_kg)}</td>
+                                                    <td style={{ textAlign: 'right', color: '#22c55e', fontWeight: 600 }}>{formatCurrency(row.epos_sales)}</td>
+                                                    <td style={{ textAlign: 'right', fontWeight: 700, color: row.margin >= 0 ? '#22c55e' : '#ef4444' }}>{formatCurrency(row.margin)}</td>
+                                                    <td style={{ textAlign: 'right', fontWeight: 600, color: row.margin_pct >= 0 ? '#22c55e' : '#ef4444' }}>
+                                                        {row.margin_pct >= 0 ? '+' : ''}{(row.margin_pct || 0).toFixed(1)}%
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                    <tfoot>
+                                        <tr>
+                                            <td style={{ fontWeight: 800 }}>Totals</td>
+                                            <td style={{ textAlign: 'right', fontWeight: 700 }}>{qty(totalProcured)}</td>
+                                            <td style={{ textAlign: 'right', fontWeight: 700, color: '#ef4444' }}>{formatCurrency(totalProcuredCost)}</td>
+                                            <td style={{ textAlign: 'right', fontWeight: 700, color: '#3b82f6' }}>{formatCurrency(totalTransferCost)}</td>
+                                            <td style={{ textAlign: 'right', fontWeight: 700, color: ckMarkup >= 0 ? '#22c55e' : '#ef4444' }}>{formatCurrency(ckMarkup)}</td>
+                                            <td style={{ textAlign: 'right', fontWeight: 700 }}>{qty(totalEposSoldKg)}</td>
+                                            <td style={{ textAlign: 'right', fontWeight: 700, color: '#22c55e' }}>{formatCurrency(totalEposSales)}</td>
+                                            <td style={{ textAlign: 'right', fontWeight: 800, color: totalMargin >= 0 ? '#22c55e' : '#ef4444' }}>{formatCurrency(totalMargin)}</td>
+                                            <td style={{ textAlign: 'right', fontWeight: 700, color: totalMarginPct >= 0 ? '#22c55e' : '#ef4444' }}>
+                                                {totalMarginPct >= 0 ? '+' : ''}{totalMarginPct.toFixed(1)}%
+                                            </td>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+                        </div>
+                    </>
+                );
+            })()}
         </div>
     );
 };
@@ -1499,13 +1650,8 @@ const ReportsPage = () => {
         return filters;
     }, [datePreset, appliedCustomFrom, appliedCustomTo, selectedRestaurant, restaurantOptions]);
 
-    const meatFlowDataRef = useRef(meatFlowData);
-    meatFlowDataRef.current = meatFlowData;
-
     const loadTab = useCallback(async (t) => {
-        if (t !== 'meat-flow' || !meatFlowDataRef.current) {
-            setLoading(true);
-        }
+        setLoading(true);
         const filters = getFilters();
         try {
             if (t === 'restaurants') {
@@ -1530,6 +1676,9 @@ const ReportsPage = () => {
         } catch (e) {
             toast.error('Failed to load analytics data');
             console.error(e);
+            if (t === 'meat-flow') {
+                setMeatFlowData({ vendors: [], meatTypes: [], rows: [] });
+            }
         } finally {
             setLoading(false);
         }
@@ -1866,6 +2015,56 @@ const ReportsPage = () => {
                     headStyles, bodyStyles,
                     styles: { cellPadding: 2.5 },
                 });
+
+                // Cost & Sales Breakdown table
+                const totalProcuredCost = meatFlowData.rows.reduce((s, r) => s + (r.procured_cost || 0), 0);
+                const totalTransferCost = meatFlowData.rows.reduce((s, r) => s + (r.transfer_cost || 0), 0);
+                const totalEposSoldKg = meatFlowData.rows.reduce((s, r) => s + (r.epos_sold_kg || 0), 0);
+                const totalEposSales = meatFlowData.rows.reduce((s, r) => s + (r.epos_sales || 0), 0);
+                const totalMargin = totalEposSales - totalProcuredCost;
+                const totalMarginPct = totalProcuredCost > 0 ? ((totalMargin / totalProcuredCost) * 100) : 0;
+                const ckMarkup = totalTransferCost - totalProcuredCost;
+
+                let costStartY = doc.lastAutoTable?.finalY ? doc.lastAutoTable.finalY + 10 : startY + 60;
+                doc.setFontSize(9.5);
+                doc.setFont('helvetica', 'bold');
+                doc.setTextColor(30, 30, 46);
+                doc.text(`Cost & Sales Analysis: Vendor Cost: ${formatCurrency(totalProcuredCost)} | CK Transfer: ${formatCurrency(totalTransferCost)} | EPOS Revenue: ${formatCurrency(totalEposSales)} | Margin: ${formatCurrency(totalMargin)} (${totalMarginPct >= 0 ? '+' : ''}${totalMarginPct.toFixed(1)}%)`, 14, costStartY);
+                costStartY += 6;
+
+                autoTable(doc, {
+                    startY: costStartY,
+                    head: [['Meat Type', 'Procured (kg)', 'Vendor Cost (£)', 'CK Transfer (£)', 'CK Markup (£)', 'EPOS Sold (kg)', 'EPOS Revenue (£)', 'Margin (£)', 'Margin %']],
+                    body: [
+                        ...meatFlowData.rows.map(r => {
+                            const ckMk = (r.transfer_cost || 0) - (r.procured_cost || 0);
+                            return [
+                                r.meat_type,
+                                Number(r.procured_kg || 0).toFixed(2),
+                                formatCurrency(r.procured_cost || 0),
+                                formatCurrency(r.transfer_cost || 0),
+                                formatCurrency(ckMk),
+                                Number(r.epos_sold_kg || 0).toFixed(2),
+                                formatCurrency(r.epos_sales || 0),
+                                formatCurrency(r.margin || 0),
+                                `${(r.margin_pct || 0) >= 0 ? '+' : ''}${(r.margin_pct || 0).toFixed(1)}%`,
+                            ];
+                        }),
+                        [
+                            'Totals',
+                            totalProcured.toFixed(2),
+                            formatCurrency(totalProcuredCost),
+                            formatCurrency(totalTransferCost),
+                            formatCurrency(ckMarkup),
+                            totalEposSoldKg.toFixed(2),
+                            formatCurrency(totalEposSales),
+                            formatCurrency(totalMargin),
+                            `${totalMarginPct >= 0 ? '+' : ''}${totalMarginPct.toFixed(1)}%`,
+                        ],
+                    ],
+                    headStyles, bodyStyles,
+                    styles: { cellPadding: 2.5 },
+                });
             }
 
             // Footer
@@ -2171,11 +2370,36 @@ const ReportsPage = () => {
                     </tr>
                 `).join('');
 
+                const totalProcuredCost = meatFlowData.rows.reduce((s, r) => s + (r.procured_cost || 0), 0);
+                const totalTransferCost = meatFlowData.rows.reduce((s, r) => s + (r.transfer_cost || 0), 0);
+                const totalEposSoldKg = meatFlowData.rows.reduce((s, r) => s + (r.epos_sold_kg || 0), 0);
+                const totalEposSales = meatFlowData.rows.reduce((s, r) => s + (r.epos_sales || 0), 0);
+                const totalMargin = totalEposSales - totalProcuredCost;
+                const totalMarginPct = totalProcuredCost > 0 ? ((totalMargin / totalProcuredCost) * 100) : 0;
+                const ckMarkup = totalTransferCost - totalProcuredCost;
+
+                const costRows = meatFlowData.rows.map((r, i) => {
+                    const ckMk = (r.transfer_cost || 0) - (r.procured_cost || 0);
+                    return `
+                        <tr style="border-bottom: 1px solid #e2e8f0; ${i % 2 === 1 ? 'background-color: #f8fafc;' : ''}">
+                            <td style="padding: 10px; font-weight: 600;">${r.meat_type}</td>
+                            <td style="padding: 10px; text-align: right;">${Number(r.procured_kg || 0).toFixed(2)}</td>
+                            <td style="padding: 10px; text-align: right; color: #dc2626; font-weight: 600;">${formatCurrency(r.procured_cost || 0)}</td>
+                            <td style="padding: 10px; text-align: right; color: #2563eb; font-weight: 600;">${formatCurrency(r.transfer_cost || 0)}</td>
+                            <td style="padding: 10px; text-align: right; color: ${ckMk >= 0 ? '#16a34a' : '#dc2626'}; font-weight: 600;">${formatCurrency(ckMk)}</td>
+                            <td style="padding: 10px; text-align: right;">${Number(r.epos_sold_kg || 0).toFixed(2)}</td>
+                            <td style="padding: 10px; text-align: right; color: #16a34a; font-weight: 600;">${formatCurrency(r.epos_sales || 0)}</td>
+                            <td style="padding: 10px; text-align: right; font-weight: bold; color: ${(r.margin || 0) >= 0 ? '#16a34a' : '#dc2626'};">${formatCurrency(r.margin || 0)}</td>
+                            <td style="padding: 10px; text-align: right; font-weight: 600; color: ${(r.margin_pct || 0) >= 0 ? '#16a34a' : '#dc2626'};">${(r.margin_pct || 0) >= 0 ? '+' : ''}${(r.margin_pct || 0).toFixed(1)}%</td>
+                        </tr>
+                    `;
+                }).join('');
+
                 bodyHtml = `
                     <div style="background: #f8fafc; padding: 12px 16px; border-radius: 6px; margin-bottom: 16px; font-size: 13px;">
                         <strong>Reconciliation Formula:</strong> Opening Stock (${totalOpening.toFixed(2)} kg) + Procured (${totalProcured.toFixed(2)} kg) − Ordered (${totalOrdered.toFixed(2)} kg) = <strong>Remaining (${totalRemaining.toFixed(2)} kg)</strong>
                     </div>
-                    <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 24px;">
                         <thead>
                             <tr style="background: #1e1e2e; color: #c9a96e; text-align: right;">
                                 <th style="padding: 10px; text-align: left;">Meat Type</th>
@@ -2197,6 +2421,39 @@ const ReportsPage = () => {
                                 <td style="padding: 10px; color: ${totalBalance >= 0 ? '#16a34a' : '#dc2626'};">${totalBalance >= 0 ? '+' : ''}${totalBalance.toFixed(2)}</td>
                                 <td style="padding: 10px; color: #b45309;">${totalRemaining.toFixed(2)}</td>
                                 <td style="padding: 10px; color: #7c3aed;">${totalAllTime.toFixed(2)}</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+
+                    <div style="background: #eff6ff; padding: 12px 16px; border-radius: 6px; margin-bottom: 16px; font-size: 13px; color: #1e3a8a;">
+                        <strong>Cost &amp; Sales Summary:</strong> Vendor Cost: ${formatCurrency(totalProcuredCost)} | CK Transfer: ${formatCurrency(totalTransferCost)} | EPOS Revenue: ${formatCurrency(totalEposSales)} | <strong>Gross Margin: ${formatCurrency(totalMargin)} (${totalMarginPct >= 0 ? '+' : ''}${totalMarginPct.toFixed(1)}%)</strong>
+                    </div>
+                    <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                        <thead>
+                            <tr style="background: #1e1e2e; color: #c9a96e; text-align: right;">
+                                <th style="padding: 10px; text-align: left;">Meat Type</th>
+                                <th style="padding: 10px;">Procured (kg)</th>
+                                <th style="padding: 10px;">Vendor Cost (£)</th>
+                                <th style="padding: 10px;">CK Transfer (£)</th>
+                                <th style="padding: 10px;">CK Markup (£)</th>
+                                <th style="padding: 10px;">EPOS Sold (kg)</th>
+                                <th style="padding: 10px;">EPOS Revenue (£)</th>
+                                <th style="padding: 10px;">Gross Margin (£)</th>
+                                <th style="padding: 10px;">Margin %</th>
+                            </tr>
+                        </thead>
+                        <tbody>${costRows}</tbody>
+                        <tfoot>
+                            <tr style="background: #e2e8f0; font-weight: bold; text-align: right;">
+                                <td style="padding: 10px; text-align: left;">Totals</td>
+                                <td style="padding: 10px;">${totalProcured.toFixed(2)}</td>
+                                <td style="padding: 10px; color: #dc2626;">${formatCurrency(totalProcuredCost)}</td>
+                                <td style="padding: 10px; color: #2563eb;">${formatCurrency(totalTransferCost)}</td>
+                                <td style="padding: 10px; color: ${ckMarkup >= 0 ? '#16a34a' : '#dc2626'};">${formatCurrency(ckMarkup)}</td>
+                                <td style="padding: 10px;">${totalEposSoldKg.toFixed(2)}</td>
+                                <td style="padding: 10px; color: #16a34a;">${formatCurrency(totalEposSales)}</td>
+                                <td style="padding: 10px; color: ${totalMargin >= 0 ? '#16a34a' : '#dc2626'};">${formatCurrency(totalMargin)}</td>
+                                <td style="padding: 10px; color: ${totalMarginPct >= 0 ? '#16a34a' : '#dc2626'};">${totalMarginPct >= 0 ? '+' : ''}${totalMarginPct.toFixed(1)}%</td>
                             </tr>
                         </tfoot>
                     </table>
@@ -2317,8 +2574,11 @@ const ReportsPage = () => {
 
             <div ref={reportRef}>
                 {loading ? (
-                    <div style={{ textAlign: 'center', padding: 80, color: 'var(--color-text-muted)' }}>
-                        Loading analytics…
+                    <div className="meat-flow-loading" style={{ minHeight: 380 }}>
+                        <MdSync className="spin" style={{ fontSize: 36, color: 'var(--color-primary, #c9a96e)' }} />
+                        <span style={{ fontSize: 14, color: 'var(--color-text-secondary, #94a3b8)', fontWeight: 500 }}>
+                            Loading analytics data…
+                        </span>
                     </div>
                 ) : (
                     <>
