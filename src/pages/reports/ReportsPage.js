@@ -195,29 +195,29 @@ const MeatFlowReport = ({ data, vendor, meatType, onVendorChange, onMeatTypeChan
             <div className="meat-flow-kpi-grid">
                 <div className="meat-flow-kpi blue-glow">
                     <div className="meat-flow-kpi-top">
-                        <span className="meat-flow-kpi-label">Opening Stock</span>
+                        <span className="meat-flow-kpi-label">Derived Opening Estimate</span>
                         <div className="meat-flow-kpi-icon blue"><MdInventory2 /></div>
                     </div>
                     <div className="meat-flow-kpi-value blue">{qty(totalOpening)} kg</div>
                     <div className="meat-flow-kpi-sub">
-                        <span>Balance at start of {activePeriodLabel.toLowerCase()}</span>
+                        <span>Not a recorded stocktake; see data note below</span>
                     </div>
                 </div>
 
                 <div className="meat-flow-kpi green-glow">
                     <div className="meat-flow-kpi-top">
-                        <span className="meat-flow-kpi-label">Procured ({activePeriodLabel})</span>
+                        <span className="meat-flow-kpi-label">Received ({activePeriodLabel})</span>
                         <div className="meat-flow-kpi-icon green"><MdTrendingUp /></div>
                     </div>
                     <div className="meat-flow-kpi-value green">{qty(totalProcured)} kg</div>
                     <div className="meat-flow-kpi-sub">
-                        <span>All-time received: {qty(totalAllTimeProcured)} kg</span>
+                        <span>Recorded PO receipts to date: {qty(totalAllTimeProcured)} kg</span>
                     </div>
                 </div>
 
                 <div className="meat-flow-kpi red-glow">
                     <div className="meat-flow-kpi-top">
-                        <span className="meat-flow-kpi-label">Restaurant Ordered</span>
+                        <span className="meat-flow-kpi-label">Dispatched to Restaurants</span>
                         <div className="meat-flow-kpi-icon red"><MdShoppingCart /></div>
                     </div>
                     <div className="meat-flow-kpi-value red">{qty(totalOrdered)} kg</div>
@@ -241,23 +241,27 @@ const MeatFlowReport = ({ data, vendor, meatType, onVendorChange, onMeatTypeChan
             {/* ── Inventory Reconciliation Formula Bar ── */}
             <div className="meat-flow-reconciliation-bar">
                 <div className="reconcile-item">
-                    <span>Opening Stock:</span> <strong>{qty(totalOpening)} kg</strong>
+                    <span>Derived opening estimate:</span> <strong>{qty(totalOpening)} kg</strong>
                 </div>
                 <span className="reconcile-op">+</span>
                 <div className="reconcile-item">
-                    <span>Procured in Period:</span> <strong style={{ color: '#22c55e' }}>{qty(totalProcured)} kg</strong>
+                    <span>Received in Period:</span> <strong style={{ color: '#22c55e' }}>{qty(totalProcured)} kg</strong>
                 </div>
                 <span className="reconcile-op">−</span>
                 <div className="reconcile-item">
-                    <span>Restaurant Orders:</span> <strong style={{ color: '#f59e0b' }}>{qty(totalOrdered)} kg</strong>
+                    <span>Dispatched:</span> <strong style={{ color: '#f59e0b' }}>{qty(totalOrdered)} kg</strong>
                 </div>
                 <span className="reconcile-op">=</span>
                 <div className="reconcile-item highlight">
-                    <span>Current Live Remaining:</span> <strong style={{ color: '#c9a96e' }}>{qty(totalRemaining)} kg</strong>
+                    <span>Current live stock:</span> <strong style={{ color: '#c9a96e' }}>{qty(totalRemaining)} kg</strong>
                 </div>
             </div>
 
             {/* ── Data Table ── */}
+            <p style={{ margin: '10px 2px 0', fontSize: 12, color: 'var(--color-text-muted, #94a3b8)' }}>
+                Data note: procurement includes received POs only; dispatch includes orders prepared for collection or later only. “Derived opening” is a comparison estimate, not a physical opening balance. Cutting, cooking, waste and manual adjustments require a dated stocktake to reconcile exactly.
+            </p>
+
             <div className="meat-flow-table-card">
                 <div className="meat-flow-table-header">
                     <div className="meat-flow-table-title">
@@ -273,12 +277,12 @@ const MeatFlowReport = ({ data, vendor, meatType, onVendorChange, onMeatTypeChan
                         <thead>
                             <tr>
                                 <th>Meat Type</th>
-                                <th>Opening Stock (kg)</th>
-                                <th>Procured in Period (kg)</th>
-                                <th>Ordered by Restaurants (kg)</th>
+                                <th>Derived Opening Estimate (kg)</th>
+                                <th>Received in Period (kg)</th>
+                                <th>Dispatched to Restaurants (kg)</th>
                                 <th>Period Net Change (kg)</th>
                                 <th>Current Remaining (kg)</th>
-                                <th>Total Procured to Date (kg)</th>
+                                <th>Recorded PO Receipts to Date (kg)</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -388,7 +392,7 @@ const MeatFlowReport = ({ data, vendor, meatType, onVendorChange, onMeatTypeChan
 
                             <div className="meat-flow-kpi" style={{ borderColor: totalMargin >= 0 ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)' }}>
                                 <div className="meat-flow-kpi-top">
-                                    <span className="meat-flow-kpi-label">Gross Margin</span>
+                                    <span className="meat-flow-kpi-label">Revenue − Period Purchase Spend</span>
                                     <div className={`meat-flow-kpi-icon ${totalMargin >= 0 ? 'green' : 'red'}`}>{totalMargin >= 0 ? <MdTrendingUp /> : <MdTrendingDown />}</div>
                                 </div>
                                 <div className={`meat-flow-kpi-value ${totalMargin >= 0 ? 'green' : 'red'}`}>{formatCurrency(totalMargin)}</div>
@@ -413,7 +417,7 @@ const MeatFlowReport = ({ data, vendor, meatType, onVendorChange, onMeatTypeChan
                             </div>
                             <span className="reconcile-op">=</span>
                             <div className="reconcile-item highlight">
-                                <span>Gross Margin:</span> <strong style={{ color: totalMargin >= 0 ? '#22c55e' : '#ef4444' }}>{formatCurrency(totalMargin)}</strong>
+                                <span>Difference:</span> <strong style={{ color: totalMargin >= 0 ? '#22c55e' : '#ef4444' }}>{formatCurrency(totalMargin)}</strong>
                             </div>
                         </div>
 
@@ -422,7 +426,7 @@ const MeatFlowReport = ({ data, vendor, meatType, onVendorChange, onMeatTypeChan
                             <div className="meat-flow-table-header">
                                 <div className="meat-flow-table-title">
                                     <div className="meat-flow-table-title-icon" style={{ background: 'rgba(59,130,246,0.15)', color: '#3b82f6' }}><MdReceiptLong /></div>
-                                    <h3>Cost &amp; Sales Breakdown</h3>
+                                    <h3>Sales &amp; Period Spend Comparison</h3>
                                 </div>
                                 <span className="meat-flow-table-count" style={{ color: '#3b82f6' }}>
                                     Vendor → CK → Restaurant → EPOS
@@ -433,11 +437,11 @@ const MeatFlowReport = ({ data, vendor, meatType, onVendorChange, onMeatTypeChan
                                     <thead>
                                         <tr>
                                             <th>Meat Type</th>
-                                            <th>Procured (kg)</th>
+                                            <th>Received (kg)</th>
                                             <th>Vendor Cost (£)</th>
                                             <th>CK Transfer Cost (£)</th>
                                             <th>CK Markup (£)</th>
-                                            <th>EPOS Sold (kg)</th>
+                                            <th>Mapped Recipe kg</th>
                                             <th>EPOS Revenue (£)</th>
                                             <th>Gross Margin (£)</th>
                                             <th>Margin %</th>
@@ -1986,12 +1990,12 @@ const ReportsPage = () => {
                 doc.setFontSize(9.5);
                 doc.setFont('helvetica', 'bold');
                 doc.setTextColor(30, 30, 46);
-                doc.text(`Raw Meat Procurement & Inventory Flow: Opening: ${totalOpening.toFixed(2)} kg | Period Procured: ${totalProcured.toFixed(2)} kg | Ordered: ${totalOrdered.toFixed(2)} kg | Net Change: ${totalBalance >= 0 ? '+' : ''}${totalBalance.toFixed(2)} kg | Live Remaining: ${totalRemaining.toFixed(2)} kg`, 14, startY);
+                doc.text(`Raw Meat Flow: Derived Opening Estimate: ${totalOpening.toFixed(2)} kg | Received: ${totalProcured.toFixed(2)} kg | Dispatched: ${totalOrdered.toFixed(2)} kg | Net Change: ${totalBalance >= 0 ? '+' : ''}${totalBalance.toFixed(2)} kg | Live Stock: ${totalRemaining.toFixed(2)} kg`, 14, startY);
                 startY += 6;
 
                 autoTable(doc, {
                     startY,
-                    head: [['Meat Type', 'Opening Stock (kg)', 'Procured in Period (kg)', 'Ordered by Restaurants (kg)', 'Period Net Change (kg)', 'Current Remaining (kg)', 'Total Procured to Date (kg)']],
+                    head: [['Meat Type', 'Derived Opening (kg)', 'Received in Period (kg)', 'Dispatched to Restaurants (kg)', 'Period Net Change (kg)', 'Current Stock (kg)', 'Recorded PO Receipts to Date (kg)']],
                     body: [
                         ...meatFlowData.rows.map(r => [
                             r.meat_type,
@@ -2029,7 +2033,7 @@ const ReportsPage = () => {
                 doc.setFontSize(9.5);
                 doc.setFont('helvetica', 'bold');
                 doc.setTextColor(30, 30, 46);
-                doc.text(`Cost & Sales Analysis: Vendor Cost: ${formatCurrency(totalProcuredCost)} | CK Transfer: ${formatCurrency(totalTransferCost)} | EPOS Revenue: ${formatCurrency(totalEposSales)} | Margin: ${formatCurrency(totalMargin)} (${totalMarginPct >= 0 ? '+' : ''}${totalMarginPct.toFixed(1)}%)`, 14, costStartY);
+                doc.text(`Sales vs Period Spend: Vendor Cost: ${formatCurrency(totalProcuredCost)} | CK Transfer: ${formatCurrency(totalTransferCost)} | EPOS Revenue: ${formatCurrency(totalEposSales)} | Difference: ${formatCurrency(totalMargin)} (${totalMarginPct >= 0 ? '+' : ''}${totalMarginPct.toFixed(1)}%)`, 14, costStartY);
                 costStartY += 6;
 
                 autoTable(doc, {
@@ -2397,18 +2401,18 @@ const ReportsPage = () => {
 
                 bodyHtml = `
                     <div style="background: #f8fafc; padding: 12px 16px; border-radius: 6px; margin-bottom: 16px; font-size: 13px;">
-                        <strong>Reconciliation Formula:</strong> Opening Stock (${totalOpening.toFixed(2)} kg) + Procured (${totalProcured.toFixed(2)} kg) − Ordered (${totalOrdered.toFixed(2)} kg) = <strong>Remaining (${totalRemaining.toFixed(2)} kg)</strong>
+                        <strong>Data scope:</strong> received purchase orders and dispatched restaurant orders only. Derived opening (${totalOpening.toFixed(2)} kg) is a comparison estimate from the live stock snapshot, not a physical stocktake. Cutting, cooking, waste and adjustments are excluded.
                     </div>
                     <table style="width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 24px;">
                         <thead>
                             <tr style="background: #1e1e2e; color: #c9a96e; text-align: right;">
                                 <th style="padding: 10px; text-align: left;">Meat Type</th>
-                                <th style="padding: 10px;">Opening (kg)</th>
-                                <th style="padding: 10px;">Procured (kg)</th>
-                                <th style="padding: 10px;">Ordered (kg)</th>
+                                <th style="padding: 10px;">Derived Opening (kg)</th>
+                                <th style="padding: 10px;">Received (kg)</th>
+                                <th style="padding: 10px;">Dispatched (kg)</th>
                                 <th style="padding: 10px;">Net Change</th>
                                 <th style="padding: 10px;">Current Stock (kg)</th>
-                                <th style="padding: 10px;">All-Time (kg)</th>
+                                <th style="padding: 10px;">Recorded PO Receipts (kg)</th>
                             </tr>
                         </thead>
                         <tbody>${rows}</tbody>
@@ -2432,11 +2436,11 @@ const ReportsPage = () => {
                         <thead>
                             <tr style="background: #1e1e2e; color: #c9a96e; text-align: right;">
                                 <th style="padding: 10px; text-align: left;">Meat Type</th>
-                                <th style="padding: 10px;">Procured (kg)</th>
+                                <th style="padding: 10px;">Received (kg)</th>
                                 <th style="padding: 10px;">Vendor Cost (£)</th>
                                 <th style="padding: 10px;">CK Transfer (£)</th>
                                 <th style="padding: 10px;">CK Markup (£)</th>
-                                <th style="padding: 10px;">EPOS Sold (kg)</th>
+                                <th style="padding: 10px;">Mapped Recipe kg</th>
                                 <th style="padding: 10px;">EPOS Revenue (£)</th>
                                 <th style="padding: 10px;">Gross Margin (£)</th>
                                 <th style="padding: 10px;">Margin %</th>
