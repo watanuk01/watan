@@ -12,7 +12,7 @@ import {
     MdExpandLess, MdSearch, MdTrendingUp, MdTrendingDown,
     MdContentCut, MdSync, MdArrowForward, MdCheckCircle,
     MdHourglassEmpty, MdCancel, MdLocalShipping, MdSwapHoriz,
-    MdReceiptLong,
+    MdReceiptLong, MdInfoOutline,
 } from 'react-icons/md';
 import {
     fetchRestaurantComparison,
@@ -96,6 +96,12 @@ const KpiCard = ({ label, value, sub, color }) => (
         <div className="kpi-label">{label}</div>
         {sub && <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4 }}>{sub}</div>}
     </div>
+);
+
+const InfoHint = ({ text }) => (
+    <span className="meat-flow-info" tabIndex="0" role="img" aria-label={text} data-tooltip={text}>
+        <MdInfoOutline />
+    </span>
 );
 
 const MeatFlowReport = ({ data, vendor, meatType, onVendorChange, onMeatTypeChange, datePreset, selectedRestaurant }) => {
@@ -195,45 +201,45 @@ const MeatFlowReport = ({ data, vendor, meatType, onVendorChange, onMeatTypeChan
             <div className="meat-flow-kpi-grid">
                 <div className="meat-flow-kpi blue-glow">
                     <div className="meat-flow-kpi-top">
-                        <span className="meat-flow-kpi-label">Derived Opening Estimate</span>
+                        <span className="meat-flow-kpi-label">Estimated Starting Stock <InfoHint text="An estimated amount of meat at the start of this period. It is calculated from today's stock, meat received and meat sent out; it is not a physical stock count." /></span>
                         <div className="meat-flow-kpi-icon blue"><MdInventory2 /></div>
                     </div>
                     <div className="meat-flow-kpi-value blue">{qty(totalOpening)} kg</div>
                     <div className="meat-flow-kpi-sub">
-                        <span>Not a recorded stocktake; see data note below</span>
+                        <span>Estimated from movement; not a physical count</span>
                     </div>
                 </div>
 
                 <div className="meat-flow-kpi green-glow">
                     <div className="meat-flow-kpi-top">
-                        <span className="meat-flow-kpi-label">Received ({activePeriodLabel})</span>
+                        <span className="meat-flow-kpi-label">Meat Received <InfoHint text="Meat actually received from suppliers during the selected period. Pending or cancelled purchase orders are not included." /></span>
                         <div className="meat-flow-kpi-icon green"><MdTrendingUp /></div>
                     </div>
                     <div className="meat-flow-kpi-value green">{qty(totalProcured)} kg</div>
                     <div className="meat-flow-kpi-sub">
-                        <span>Recorded PO receipts to date: {qty(totalAllTimeProcured)} kg</span>
+                        <span>Total supplier receipts: {qty(totalAllTimeProcured)} kg</span>
                     </div>
                 </div>
 
                 <div className="meat-flow-kpi red-glow">
                     <div className="meat-flow-kpi-top">
-                        <span className="meat-flow-kpi-label">Dispatched to Restaurants</span>
+                        <span className="meat-flow-kpi-label">Meat Sent to Restaurants <InfoHint text="Meat sent from Central Kitchen to restaurants during the selected period. Only prepared, collected, dispatched or delivered orders are included." /></span>
                         <div className="meat-flow-kpi-icon red"><MdShoppingCart /></div>
                     </div>
                     <div className="meat-flow-kpi-value red">{qty(totalOrdered)} kg</div>
                     <div className="meat-flow-kpi-sub">
-                        <span>Dispatched from CK in period</span>
+                        <span>Sent from Central Kitchen in this period</span>
                     </div>
                 </div>
 
                 <div className="meat-flow-kpi gold-glow">
                     <div className="meat-flow-kpi-top">
-                        <span className="meat-flow-kpi-label">Current Live Stock</span>
+                        <span className="meat-flow-kpi-label">Meat in Stock Now <InfoHint text="The total remaining weight in all current raw-meat batches. Compare this with a physical chiller stock count." /></span>
                         <div className="meat-flow-kpi-icon gold"><MdInventory2 /></div>
                     </div>
                     <div className="meat-flow-kpi-value gold">{qty(totalRemaining)} kg</div>
                     <div className="meat-flow-kpi-sub">
-                        <span>Live batch balance in chiller</span>
+                        <span>Remaining weight across live batches</span>
                     </div>
                 </div>
             </div>
@@ -241,19 +247,19 @@ const MeatFlowReport = ({ data, vendor, meatType, onVendorChange, onMeatTypeChan
             {/* ── Inventory Reconciliation Formula Bar ── */}
             <div className="meat-flow-reconciliation-bar">
                 <div className="reconcile-item">
-                    <span>Derived opening estimate:</span> <strong>{qty(totalOpening)} kg</strong>
+                    <span>Estimated Starting Stock:</span> <strong>{qty(totalOpening)} kg</strong>
                 </div>
                 <span className="reconcile-op">+</span>
                 <div className="reconcile-item">
-                    <span>Received in Period:</span> <strong style={{ color: '#22c55e' }}>{qty(totalProcured)} kg</strong>
+                    <span>Meat Received:</span> <strong style={{ color: '#22c55e' }}>{qty(totalProcured)} kg</strong>
                 </div>
                 <span className="reconcile-op">−</span>
                 <div className="reconcile-item">
-                    <span>Dispatched:</span> <strong style={{ color: '#f59e0b' }}>{qty(totalOrdered)} kg</strong>
+                    <span>Meat Sent:</span> <strong style={{ color: '#f59e0b' }}>{qty(totalOrdered)} kg</strong>
                 </div>
                 <span className="reconcile-op">=</span>
                 <div className="reconcile-item highlight">
-                    <span>Current live stock:</span> <strong style={{ color: '#c9a96e' }}>{qty(totalRemaining)} kg</strong>
+                    <span>Meat in Stock Now:</span> <strong style={{ color: '#c9a96e' }}>{qty(totalRemaining)} kg</strong>
                 </div>
             </div>
 
@@ -266,7 +272,7 @@ const MeatFlowReport = ({ data, vendor, meatType, onVendorChange, onMeatTypeChan
                 <div className="meat-flow-table-header">
                     <div className="meat-flow-table-title">
                         <div className="meat-flow-table-title-icon"><MdBarChart /></div>
-                        <h3>Meat Procurement &amp; Inventory Flow</h3>
+                        <h3>Meat Stock Movement</h3>
                     </div>
                     <span className="meat-flow-table-count">
                         {data.rows.length} type{data.rows.length !== 1 ? 's' : ''}
@@ -277,12 +283,12 @@ const MeatFlowReport = ({ data, vendor, meatType, onVendorChange, onMeatTypeChan
                         <thead>
                             <tr>
                                 <th>Meat Type</th>
-                                <th>Derived Opening Estimate (kg)</th>
-                                <th>Received in Period (kg)</th>
-                                <th>Dispatched to Restaurants (kg)</th>
-                                <th>Period Net Change (kg)</th>
-                                <th>Current Remaining (kg)</th>
-                                <th>Recorded PO Receipts to Date (kg)</th>
+                                <th>Estimated Starting Stock (kg)</th>
+                                <th>Meat Received (kg)</th>
+                                <th>Meat Sent to Restaurants (kg)</th>
+                                <th>Stock Change (kg)</th>
+                                <th>Meat in Stock Now (kg)</th>
+                                <th>Total Supplier Receipts (kg)</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -359,7 +365,7 @@ const MeatFlowReport = ({ data, vendor, meatType, onVendorChange, onMeatTypeChan
                         <div className="meat-flow-kpi-grid" style={{ marginTop: 20 }}>
                             <div className="meat-flow-kpi" style={{ borderColor: 'rgba(239,68,68,0.3)' }}>
                                 <div className="meat-flow-kpi-top">
-                                    <span className="meat-flow-kpi-label">Vendor Purchase Cost</span>
+                                    <span className="meat-flow-kpi-label">Supplier Cost <InfoHint text="The amount paid to suppliers for meat received during the selected period." /></span>
                                     <div className="meat-flow-kpi-icon red"><MdTrendingDown /></div>
                                 </div>
                                 <div className="meat-flow-kpi-value red">{formatCurrency(totalProcuredCost)}</div>
@@ -370,7 +376,7 @@ const MeatFlowReport = ({ data, vendor, meatType, onVendorChange, onMeatTypeChan
 
                             <div className="meat-flow-kpi" style={{ borderColor: 'rgba(59,130,246,0.3)' }}>
                                 <div className="meat-flow-kpi-top">
-                                    <span className="meat-flow-kpi-label">CK Transfer Cost</span>
+                                    <span className="meat-flow-kpi-label">Amount Charged to Restaurants <InfoHint text="The value Central Kitchen charged restaurants for the meat sent to them." /></span>
                                     <div className="meat-flow-kpi-icon blue"><MdArrowForward /></div>
                                 </div>
                                 <div className="meat-flow-kpi-value blue">{formatCurrency(totalTransferCost)}</div>
@@ -381,7 +387,7 @@ const MeatFlowReport = ({ data, vendor, meatType, onVendorChange, onMeatTypeChan
 
                             <div className="meat-flow-kpi" style={{ borderColor: 'rgba(34,197,94,0.3)' }}>
                                 <div className="meat-flow-kpi-top">
-                                    <span className="meat-flow-kpi-label">EPOS Sales Revenue</span>
+                                    <span className="meat-flow-kpi-label">Restaurant Sales <InfoHint text="Sales value recorded in restaurant EPOS for mapped meat-related menu items during the selected period." /></span>
                                     <div className="meat-flow-kpi-icon green"><MdReceiptLong /></div>
                                 </div>
                                 <div className="meat-flow-kpi-value green">{formatCurrency(totalEposSales)}</div>
@@ -392,7 +398,7 @@ const MeatFlowReport = ({ data, vendor, meatType, onVendorChange, onMeatTypeChan
 
                             <div className="meat-flow-kpi" style={{ borderColor: totalMargin >= 0 ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)' }}>
                                 <div className="meat-flow-kpi-top">
-                                    <span className="meat-flow-kpi-label">Revenue − Period Purchase Spend</span>
+                                    <span className="meat-flow-kpi-label">Sales Compared with Spend <InfoHint text="Restaurant sales minus supplier cost for meat received in this period. This is not actual profit because some meat may still be in stock or may have been bought before this period." /></span>
                                     <div className={`meat-flow-kpi-icon ${totalMargin >= 0 ? 'green' : 'red'}`}>{totalMargin >= 0 ? <MdTrendingUp /> : <MdTrendingDown />}</div>
                                 </div>
                                 <div className={`meat-flow-kpi-value ${totalMargin >= 0 ? 'green' : 'red'}`}>{formatCurrency(totalMargin)}</div>
