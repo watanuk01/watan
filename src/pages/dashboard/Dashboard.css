@@ -2439,6 +2439,51 @@
     color: var(--color-text-secondary);
 }
 
+.meat-flow-info {
+    position: relative;
+    display: inline-flex;
+    vertical-align: middle;
+    margin-left: 4px;
+    color: #94a3b8;
+    font-size: 0.95rem;
+    cursor: help;
+    outline: none;
+}
+
+.meat-flow-info:hover,
+.meat-flow-info:focus {
+    color: #c9a96e;
+}
+
+.meat-flow-info::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    z-index: 20;
+    top: calc(100% + 8px);
+    left: 0;
+    width: 260px;
+    padding: 9px 10px;
+    border-radius: 6px;
+    background: #0f172a;
+    color: #f8fafc;
+    font-size: 0.75rem;
+    font-weight: 400;
+    line-height: 1.4;
+    letter-spacing: normal;
+    text-transform: none;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-3px);
+    transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.meat-flow-info:hover::after,
+.meat-flow-info:focus::after {
+    opacity: 1;
+    transform: translateY(0);
+}
+
 .meat-flow-kpi-icon {
     width: 34px;
     height: 34px;
@@ -2753,4 +2798,4 @@
     font-weight: 600;
 }
 
-
+

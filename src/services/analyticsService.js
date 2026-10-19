@@ -6,7 +6,7 @@
  * Filter object: { dateFrom: Date, dateTo: Date, restaurantId?: string, restaurantName?: string }
  */
 
-import { collection, getDocs, query, where, limit, Timestamp } from 'firebase/firestore';
+import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 
 export const formatCurrency = (n) =>
@@ -137,8 +137,14 @@ export const detectMeatType = (row) => {
     if (/beef|cow|steak|veal|brisket|sirloin|ribeye|rump/.test(text)) return 'Beef';
     if (/goat/.test(text)) return 'Goat';
     if (/fish|prawn|salmon|cod|seafood/.test(text)) return 'Seafood';
+    if (/\bfat\b/.test(text)) return 'Fat';
     return null;
 };
+
+// A few legacy inventory records were saved as raw_meat although they are
+// grocery ingredients. They must not be included in a meat-flow report.
+const isKnownNonMeatFood = (item) => /\b(channa|chickpea|chickpeas)\b/i
+    .test(String(item?.item_name || item?.name || item?.cut_name || ''));
 
 // Groups raw meat into a human-readable type for the operational meat-flow report.
 export const getMeatType = (row = {}) => {
@@ -158,6 +164,9 @@ export const getMeatType = (row = {}) => {
  */
 export const isRawMeat = (item, parentDoc = null, itemMap = null) => {
     if (!item) return false;
+    if (isKnownNonMeatFood(item)) return false;
+    const masterCandidate = itemMap?.get(item.item_id || item.id);
+    if (isKnownNonMeatFood(masterCandidate)) return false;
     const itType = String(item.item_type || item.type || '').toLowerCase().trim();
     if (itType === 'raw_meat') return true;
     if (itType === 'cooked_meat') return false;
@@ -171,6 +180,7 @@ export const isRawMeat = (item, parentDoc = null, itemMap = null) => {
     const itemId = item.item_id || item.id;
     if (itemId && itemMap && itemMap.has(itemId)) {
         const master = itemMap.get(itemId);
+        if (isKnownNonMeatFood(master)) return false;
         const mType = String(master.item_type || master.type || '').toLowerCase().trim();
         if (mType === 'raw_meat') return true;
         const mCat = String(master.category_name || master.category || '').toLowerCase().trim();
@@ -257,9 +267,21 @@ export const fetchMeatFlowAnalytics = async (filters = {}) => {
     };
 
     const isSpecificRestaurant = Boolean(filters.restaurantId || filters.restaurantName);
+    // Only received POs are physical stock. Pending/cancelled POs must not
+    // inflate procurement. The second clause keeps legacy received records.
+    const isReceivedPurchaseOrder = po => {
+        const status = normalize(po.status);
+        return ['received', 'partially_received', 'partially received'].includes(status)
+            || (!status && Boolean(po.received_at));
+    };
+    // Stock leaves CK at ready-for-pickup; pending/cancelled orders have not
+    // been dispatched (or their batch deductions were reversed).
+    const isDispatchedOrder = order => ['ready_for_pickup', 'assigned', 'out_for_delivery', 'delivered', 'completed']
+        .includes(normalize(order.status));
 
     // ── 1. Procurement: Purchases from Vendors (weight + cost) ──
     purchaseOrders.forEach(po => {
+        if (!isReceivedPurchaseOrder(po)) return;
         const poVendor = resolveVendorName(po);
         if (!vendorMatches(poVendor, filters.vendorName)) return;
 
@@ -271,7 +293,9 @@ export const fetchMeatFlowAnalytics = async (filters = {}) => {
             if (!hasRest || !restaurantMatches(po, filters.restaurantId, filters.restaurantName)) return;
         }
 
-        const poDate = po.created_at || po.received_at || po.order_date || po.expected_delivery_date;
+        // Report against the actual receipt date, rather than PO creation or
+        // expected-delivery dates.
+        const poDate = po.received_at || po.created_at;
         const isPeriod = inRange(poDate);
 
         (po.items || []).forEach(item => {
@@ -292,7 +316,8 @@ export const fetchMeatFlowAnalytics = async (filters = {}) => {
 
     // ── 2. Restaurant Orders: Orders placed by restaurants to CK (weight + transfer cost) ──
     orders.forEach(order => {
-        const orderDate = order.created_at || order.order_date || order.date;
+        if (!isDispatchedOrder(order)) return;
+        const orderDate = order.ready_at || order.dispatched_at || order.delivered_at || order.created_at || order.order_date || order.date;
         if (!inRange(orderDate)) return;
 
         if (!restaurantMatches(order, filters.restaurantId, filters.restaurantName)) return;
@@ -301,6 +326,9 @@ export const fetchMeatFlowAnalytics = async (filters = {}) => {
 
         // 2A. Check batch allocations (traceability)
         (order.batch_allocations || []).forEach(allocation => {
+            // The allocation is authoritative even if a vendor filter later
+            // excludes it; otherwise the fallback line can double-count it.
+            if (allocation.item_id) handledItemIds.add(allocation.item_id);
             const refs = allocation.batches || [];
             refs.forEach(ref => {
                 const batch = batchById.get(ref.batch_id);
@@ -335,8 +363,6 @@ export const fetchMeatFlowAnalytics = async (filters = {}) => {
                         add(mt, 'procured_cost', qty * unitVendorCost);
                         add(mt, 'procured_kg', qty);
                     }
-
-                    if (allocation.item_id) handledItemIds.add(allocation.item_id);
                 }
             });
         });
@@ -430,7 +456,9 @@ export const fetchMeatFlowAnalytics = async (filters = {}) => {
                         else meatKg += req > 1 ? req * 0.35 : req;
                     });
                 }
-                if (meatKg === 0) meatKg = qtySold * 0.35;
+                // Do not invent a 350g portion when no mapped recipe deduction
+                // exists. Revenue can still be reported, but sold meat weight
+                // must remain unavailable until the recipe is mapped.
 
                 if (meatKg > 0) add(mt, 'epos_sold_kg', meatKg);
                 if (revenue > 0) add(mt, 'epos_sales', revenue);
@@ -445,7 +473,8 @@ export const fetchMeatFlowAnalytics = async (filters = {}) => {
                 const qty = Number(item.quantity ?? item.qty ?? 1);
                 const price = Number(item.unit_price ?? item.price ?? item.selling_price ?? 0);
                 const revenue = Number(item.total ?? item.line_total ?? (qty * price));
-                const meatKg = qty * 0.35;
+                // An unmapped EPOS line has no defensible meat-weight value.
+                const meatKg = 0;
 
                 if (meatKg > 0) add(mt, 'epos_sold_kg', meatKg);
                 if (revenue > 0) add(mt, 'epos_sales', revenue);
@@ -488,7 +517,10 @@ export const fetchMeatFlowAnalytics = async (filters = {}) => {
     // ── 5. Prepare Output Rows with Full Inventory Reconciliation & Margins ──
     const outputRows = [...rows.values()]
         .map(row => {
-            const opening_stock_kg = Math.max(0, row.remaining_kg - row.procured_kg + row.ordered_kg);
+            // Derived from a live snapshot, not a recorded opening stocktake.
+            // Do not clamp negatives: they expose missing movements instead of
+            // making the report appear reconciled.
+            const opening_stock_kg = row.remaining_kg - row.procured_kg + row.ordered_kg;
             const period_balance_kg = row.procured_kg - row.ordered_kg;
             const baseCost = isSpecificRestaurant && row.transfer_cost > 0 ? row.transfer_cost : row.procured_cost;
             const margin = row.epos_sales - baseCost;
@@ -572,41 +604,26 @@ const getEpos = async (filters = {}) => {
             constraints.push(where('received_at', '<=', Timestamp.fromDate(endD)));
         }
 
-        // Cap query limit so we never hang or buffer thousands of full event payloads
-        constraints.push(limit(200));
-
-        const fetchPromise = (async () => {
-            try {
-                const q = query(collection(db, 'epos_events'), ...constraints);
-                const snap = await getDocs(q);
-                return snap.docs.map(d => {
-                    const data = d.data();
-                    const dateVal = data.order_date || data.received_at || data.created_at || data.event_date || data.timestamp;
-                    return {
-                        id: d.id,
-                        ...data,
-                        received_at: toDate(dateVal),
-                    };
-                });
-            } catch (err) {
-                console.warn('Constrained EPOS query fallback:', err.message);
-                const qSimple = query(collection(db, 'epos_events'), limit(100));
-                const snapSimple = await getDocs(qSimple);
-                return snapSimple.docs.map(d => {
-                    const data = d.data();
-                    const dateVal = data.order_date || data.received_at || data.created_at || data.event_date || data.timestamp;
-                    return {
-                        id: d.id,
-                        ...data,
-                        received_at: toDate(dateVal),
-                    };
-                });
-            }
-        })();
-
-        // 3-second timeout race to ensure Meat Flow NEVER hangs waiting for EPOS
-        const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve([]), 3000));
-        return await Promise.race([fetchPromise, timeoutPromise]);
+        try {
+            const q = query(collection(db, 'epos_events'), ...constraints);
+            const snap = await getDocs(q);
+            return snap.docs.map(d => {
+                const data = d.data();
+                const dateVal = data.order_date || data.received_at || data.created_at || data.event_date || data.timestamp;
+                return { id: d.id, ...data, received_at: toDate(dateVal) };
+            });
+        } catch (err) {
+            // A missing composite index must not turn a valid report into a
+            // partial one. Read all events and let the report's date/location
+            // filters apply below.
+            console.warn('Constrained EPOS query fallback:', err.message);
+            const snap = await getDocs(collection(db, 'epos_events'));
+            return snap.docs.map(d => {
+                const data = d.data();
+                const dateVal = data.order_date || data.received_at || data.created_at || data.event_date || data.timestamp;
+                return { id: d.id, ...data, received_at: toDate(dateVal) };
+            });
+        }
     } catch (err) {
         console.warn('getEpos failed gracefully:', err);
         return [];
